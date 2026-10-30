@@ -9,6 +9,20 @@ export type SensorMode = 'OPTICAL' | 'RADAR';
 
 export type ConfidenceLevel = 'CONFIRMED' | 'PROBABLE' | 'UNVERIFIED';
 
+export type InterpretationCategory =
+  | 'CONFIRMED'
+  | 'PROBABLE'
+  | 'AMBIGUOUS'
+  | 'INSUFFICIENT_EVIDENCE';
+
+export interface StructuredProvenanceStep {
+  readonly stage: 'OBSERVE' | 'INTERPRET' | 'PROCESS' | 'QUEUE' | 'TRANSMIT' | 'DROP';
+  readonly timestampSec: number;
+  readonly step: number;
+  readonly operation: string;
+  readonly details: string;
+}
+
 export type MissionPhase = 'BRIEFING' | 'OPERATIONS' | 'DOWNLINK' | 'DEBRIEF';
 
 export type GroundRequestId = 'REQ_1' | 'REQ_2' | 'REQ_3';
@@ -75,6 +89,18 @@ export interface DataPacket {
   compressionRatio: number;
   ambiguityReason: string;
   provenanceLineage: string;
+  evidenceId?: string;
+  observationId?: string;
+  parentEvidenceId?: string | null;
+  observationTimestampSec?: number;
+  observationCondition?: string;
+  processingState?: 'RAW' | 'PROCESSED' | 'DISCARDED';
+  processingOperation?: string | null;
+  interpretationCategory?: InterpretationCategory;
+  knownUncertainty?: string;
+  associatedRequestId?: GroundRequestId | null;
+  transmissionState?: 'UNQUEUED' | 'QUEUED' | 'TRANSMITTED' | 'DROPPED_WINDOW';
+  provenanceChain?: StructuredProvenanceStep[];
   processed: boolean;
   queued: boolean;
   queueIndex: number | null;
@@ -161,13 +187,19 @@ export interface MissionScenarioConfig {
 
 export interface EvidenceProvenanceRecord {
   packetId: string;
+  evidenceId?: string;
+  observationId?: string;
   sectorCode: string;
   sensorMode: SensorMode;
   confidence: ConfidenceLevel;
   confidenceBadge: string;
+  interpretationCategory?: InterpretationCategory;
+  knownUncertainty?: string;
   processed: boolean;
   transmitted: boolean;
+  transmissionState?: 'UNQUEUED' | 'QUEUED' | 'TRANSMITTED' | 'DROPPED_WINDOW';
   provenance: string;
+  provenanceChain?: StructuredProvenanceStep[];
   ambiguityReason: string;
 }
 

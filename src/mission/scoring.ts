@@ -89,13 +89,19 @@ export function buildDebriefReport(params: {
 
   const evidenceProvenance = allPackets.map((pkt) => ({
     packetId: pkt.id,
+    evidenceId: pkt.evidenceId,
+    observationId: pkt.observationId,
     sectorCode: pkt.sectorCode,
     sensorMode: pkt.sensorMode,
     confidence: pkt.confidence,
     confidenceBadge: pkt.confidenceBadge,
+    interpretationCategory: pkt.interpretationCategory,
+    knownUncertainty: pkt.knownUncertainty,
     processed: pkt.processed,
     transmitted: pkt.transmitted,
+    transmissionState: pkt.transmissionState ?? (pkt.transmitted ? 'TRANSMITTED' : pkt.droppedByWindow ? 'DROPPED_WINDOW' : pkt.queued ? 'QUEUED' : 'UNQUEUED'),
     provenance: pkt.provenanceLineage,
+    provenanceChain: pkt.provenanceChain,
     ambiguityReason: pkt.ambiguityReason,
   }));
 

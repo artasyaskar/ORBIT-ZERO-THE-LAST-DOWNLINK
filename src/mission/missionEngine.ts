@@ -286,6 +286,38 @@ export class MissionEngine {
             ? 'Microwave backscatter ambiguity (multipath corner reflection or terrain layover).'
             : 'Clear sensor line-of-sight with high SNR and consistent terrain backscatter.',
       provenanceLineage: `OBS[SEC-${sector.id}|${sensorMode}|STEP-${this.state.stepCounter}]`,
+      evidenceId: `EVID-${sector.code}-${sensorMode}-${this.nextPacketNumber - 1}`,
+      observationId: `OBS-${this.currentScenarioId.slice(0, 3)}-${this.state.stepCounter}`,
+      parentEvidenceId: null,
+      observationTimestampSec: this.state.downlinkElapsedSec,
+      observationCondition: sector.cloudCover === 'DENSE_STORM' ? 'DENSE_MONSOON_CLOUD_COVER' : 'CLEAR_SKY_DAYLIGHT',
+      processingState: 'RAW',
+      processingOperation: null,
+      interpretationCategory:
+        outcome.confidence === 'CONFIRMED'
+          ? 'CONFIRMED'
+          : outcome.confidence === 'PROBABLE'
+            ? 'PROBABLE'
+            : sector.cloudCover === 'DENSE_STORM' && sensorMode === 'OPTICAL'
+              ? 'INSUFFICIENT_EVIDENCE'
+              : 'AMBIGUOUS',
+      knownUncertainty:
+        outcome.confidence === 'UNVERIFIED'
+          ? 'Optical Mie scattering total cloud attenuation'
+          : outcome.confidence === 'PROBABLE'
+            ? 'Dihedral corner multipath reflection and terrain layover'
+            : 'None - unambiguous clear detection',
+      associatedRequestId: outcome.satisfiesRequestId,
+      transmissionState: 'UNQUEUED',
+      provenanceChain: [
+        {
+          stage: 'OBSERVE',
+          timestampSec: this.state.downlinkElapsedSec,
+          step: this.state.stepCounter,
+          operation: `${sensorMode}_SCAN`,
+          details: outcome.headline,
+        },
+      ],
       processed: false,
       queued: false,
       queueIndex: null,
@@ -359,11 +391,21 @@ export class MissionEngine {
     pkt.transmitSec = procCost.compressedTransmitSec;
     pkt.compressionRatio = 3.0;
     pkt.processed = true;
+    pkt.processingState = 'PROCESSED';
     pkt.compressionAlgorithm =
       pkt.sectorId === 'C'
         ? 'EDGE_TRUSS_VECTORIZATION'
         : 'NDWI_WATER_MASK_EXTRACTION';
+    pkt.processingOperation = pkt.compressionAlgorithm;
     pkt.provenanceLineage = `${pkt.provenanceLineage} -> CRADLE[${pkt.compressionAlgorithm}]`;
+    if (!pkt.provenanceChain) pkt.provenanceChain = [];
+    pkt.provenanceChain.push({
+      stage: 'PROCESS',
+      timestampSec: this.state.downlinkElapsedSec,
+      step: this.state.stepCounter,
+      operation: pkt.compressionAlgorithm,
+      details: `Compressed 3 STR -> 1 STR, ${pkt.rawTransmitSec.toFixed(1)}s -> ${pkt.transmitSec.toFixed(1)}s Tx`,
+    });
     this.state.selectedPacketId = pkt.id;
     this.state.stepCounter += 1;
 
@@ -471,6 +513,15 @@ export class MissionEngine {
     this.state.selectedPacketId = pkt.id;
     this.state.stepCounter += 1;
     this.recalculateQueueTiming();
+    pkt.transmissionState = 'QUEUED';
+    if (!pkt.provenanceChain) pkt.provenanceChain = [];
+    pkt.provenanceChain.push({
+      stage: 'QUEUE',
+      timestampSec: this.state.downlinkElapsedSec,
+      step: this.state.stepCounter,
+      operation: `BAY_SCHEDULE_SLOT_${(pkt.queueIndex ?? 0) + 1}`,
+      details: `Scheduled for S-band Tx (${pkt.transmitSec.toFixed(1)}s duration)`,
+    });
     if (!pkt.provenanceLineage.includes('BAY[')) {
       pkt.provenanceLineage = `${pkt.provenanceLineage} -> BAY[SLOT-${(pkt.queueIndex ?? 0) + 1}]`;
     }
@@ -510,6 +561,7 @@ export class MissionEngine {
     this.state.queuePacketIds = this.state.queuePacketIds.filter((id) => id !== pkt.id);
     pkt.queued = false;
     pkt.queueIndex = null;
+    pkt.transmissionState = 'UNQUEUED';
     this.state.stepCounter += 1;
     this.recalculateQueueTiming();
 
@@ -633,6 +685,7 @@ export class MissionEngine {
         if (this.state.downlinkElapsedSec + 1e-6 >= finishTime) {
           pkt.transmitted = true;
           pkt.droppedByWindow = false;
+          pkt.transmissionState = 'TRANSMITTED';
         } else {
           pkt.transmitted = false;
           allQueuedFinished = false;
@@ -646,6 +699,7 @@ export class MissionEngine {
         pkt.transmitted = false;
         if (this.state.downlinkElapsedSec + 1e-6 >= this.state.downlinkWindowSec) {
           pkt.droppedByWindow = true;
+          pkt.transmissionState = 'DROPPED_WINDOW';
         } else {
           allQueuedFinished = false;
           if (!activeId) {
