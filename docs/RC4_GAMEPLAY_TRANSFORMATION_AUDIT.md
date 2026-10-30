@@ -104,3 +104,4 @@ flowchart TD
 1. **Unit & Engine Tests:** Update Vitest test suites to verify comparison metrics, ambiguity preservation, and knapsack downlink calculations.
 2. **Playwright Headless E2E:** Verify full game loop under both optimal strategy and failure recovery.
 3. **Cross-Platform Verification:** Ensure desktop mouse/keyboard and Quest VR hand interactions remain 100% synchronized.
+

@@ -73,6 +73,7 @@ export class DesktopControlsManager {
   private compareEl?: HTMLDivElement;
   private diagEl?: HTMLDivElement;
   private toastEl?: HTMLDivElement;
+  private hoverTooltipEl?: HTMLDivElement;
   private helpModalEl?: HTMLDivElement;
   private toastTimer = 0;
   private tutorialStep: TutorialStep = 'INTRO';
@@ -141,6 +142,47 @@ export class DesktopControlsManager {
     this.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
   }
 
+  private getHoverDescription(obj: Object3D): string | null {
+    let curr: Object3D | null = obj;
+    const state = this.host.engine.getState();
+    while (curr) {
+      const name = curr.name || '';
+      const sectorMatch = name.match(/sector-([a-f])/i) || name.match(/SectorBeacon.*([A-F])/i);
+      if (sectorMatch) {
+        const secId = sectorMatch[1].toUpperCase() as SectorId;
+        const cfg = SECTORS[secId];
+        return `🎯 Target Sector ${secId}: ${cfg?.name || 'Sector'} [Click to Lock]`;
+      }
+      if (name === 'earth-globe' || name === 'TacticalEarthGlobe') {
+        return `🌍 Tactical Earth Globe [Click to Target Nearest Sector]`;
+      }
+      if (/scanner-tool/i.test(name) || /ScannerTool/i.test(name)) {
+        return `📡 3U CubeSat Swath Sensor [Click to Fire Active Scan]`;
+      }
+      if (/pad-toggle-sensor/i.test(name)) {
+        const mode = state.activeSensorMode;
+        return `🔄 Sensor Mode Switch: Armed with ${mode} [Click to Toggle]`;
+      }
+      if (/pad-process-cradle/i.test(name) || /ProcessingCradle/i.test(name)) {
+        return `⚙️ Processing Cradle: Feature Extraction & Compression (6 Wh) [Click to Process]`;
+      }
+      if (/pad-queue-downlink/i.test(name) || /DownlinkBay/i.test(name)) {
+        return `📥 Downlink Bay Tray: Stage Active Cube for Telemetry [Click to Queue]`;
+      }
+      if (/pad-commit-downlink/i.test(name)) {
+        return `🚀 S-Band Telemetry Transmitter [Click to Downlink to Ground]`;
+      }
+      const cubeMatch = name.match(/evidence-cube-([1-3])/i);
+      if (cubeMatch) {
+        const idx = parseInt(cubeMatch[1], 10) - 1;
+        const pkt = state.packets[idx];
+        return pkt ? `📦 Evidence Cube ${idx + 1}: ${pkt.headline} [Click to Inspect]` : null;
+      }
+      curr = curr.parent;
+    }
+    return null;
+  }
+
   private handlePointerMove(e: MouseEvent): void {
     if (this.host.world.renderer.xr.isPresenting) return;
     this.updateMouseNdc(e);
@@ -148,15 +190,28 @@ export class DesktopControlsManager {
 
     const hits = this.raycaster.intersectObjects([this.host.scene], true);
     let interactiveHit = false;
+    let hoverText: string | null = null;
 
     for (const hit of hits) {
       if (this.isInteractiveObject(hit.object)) {
         interactiveHit = true;
+        hoverText = this.getHoverDescription(hit.object);
         break;
       }
     }
 
     this.host.renderer.domElement.style.cursor = interactiveHit ? 'pointer' : 'default';
+
+    if (this.hoverTooltipEl) {
+      if (hoverText) {
+        this.hoverTooltipEl.innerText = hoverText;
+        this.hoverTooltipEl.style.left = `${e.clientX + 14}px`;
+        this.hoverTooltipEl.style.top = `${e.clientY + 14}px`;
+        this.hoverTooltipEl.style.display = 'block';
+      } else {
+        this.hoverTooltipEl.style.display = 'none';
+      }
+    }
   }
 
   private handlePointerDown(e: MouseEvent): void {
@@ -697,6 +752,28 @@ export class DesktopControlsManager {
     `;
     this.containerEl.appendChild(this.compareEl);
 
+    // 3d. 3D Spatial Cursor Tooltip Pill
+    this.hoverTooltipEl = document.createElement('div');
+    this.hoverTooltipEl.id = 'orbit-zero-hover-tooltip';
+    this.hoverTooltipEl.style.cssText = `
+      position: absolute;
+      pointer-events: none;
+      background: rgba(15, 23, 42, 0.95);
+      border: 1px solid #38bdf8;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.75), 0 0 10px rgba(56, 189, 248, 0.3);
+      color: #f8fafc;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+      display: none;
+      z-index: 10001;
+      transform: translate(14px, 14px);
+      transition: opacity 0.15s ease;
+    `;
+    this.containerEl.appendChild(this.hoverTooltipEl);
+
     // 4. Diagnostic HUD Panel ([F1])
     this.diagEl = document.createElement('div');
     this.diagEl.style.cssText = `
@@ -921,15 +998,19 @@ export class DesktopControlsManager {
         ${sector.terrainSummary}
       </div>
 
-      <div style="background: rgba(15, 23, 42, 0.8); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px;">
-        <div style="font-size: 10px; font-weight: 700; color: #cbd5e1; margin-bottom: 4px;">SENSOR SUITABILITY PREVIEW:</div>
-        <div style="display: flex; justify-content: space-between; margin-bottom: 2px; color: ${opticalOutcome.confidence === 'UNVERIFIED' ? '#ef4444' : '#10b981'}; font-size: 10px;">
-          <span>OPTICAL (8 Wh, 4.0s TX):</span>
-          <b>${opticalOutcome.confidence === 'UNVERIFIED' ? 'BLOCKED BY CLOUDS' : 'HIGH-RES CONFIRMED'}</b>
+      <div style="background: rgba(15, 23, 42, 0.85); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px;">
+        <div style="font-size: 10px; font-weight: 700; color: #cbd5e1; margin-bottom: 4px;">PHYSICAL RECONNAISSANCE CLUES:</div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 2px; font-size: 10px; color: #cbd5e1;">
+          <span>Cloud Top Albedo:</span>
+          <b style="color: ${isStorm ? '#f59e0b' : '#38bdf8'}">${isStorm ? '88% (Convective Nimbus)' : '< 5% (Clear Atmosphere)'}</b>
         </div>
-        <div style="display: flex; justify-content: space-between; color: ${radarOutcome.confidence === 'CONFIRMED' ? '#10b981' : '#f59e0b'}; font-size: 10px;">
-          <span>RADAR SAR (14 Wh, 4.5s TX):</span>
-          <b>${radarOutcome.confidence === 'CONFIRMED' ? 'PENETRATES CLOUDS' : 'METALLIC / SLOPE GLARE'}</b>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 2px; font-size: 10px; color: #cbd5e1;">
+          <span>VIS/NIR Light (0.75m):</span>
+          <b style="color: ${isStorm ? '#ef4444' : '#10b981'}">${isStorm ? 'Liquid Droplet Mie Scattering' : 'Direct Daylight Surface Contrast'}</b>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 10px; color: #cbd5e1;">
+          <span>C-Band Radar (2.2m):</span>
+          <b style="color: ${sector.id === 'C' ? '#f59e0b' : '#10b981'}">${sector.id === 'C' ? 'Dihedral Structural Glare' : sector.id === 'E' ? 'Mountain Slope Layover Distortion' : 'Smooth Water Specular Forward-Scatter'}</b>
         </div>
       </div>
 
@@ -980,6 +1061,38 @@ export class DesktopControlsManager {
         <div style="color: #cbd5e1; margin-bottom: 3px;"><b>Scientific Finding:</b> ${sel.finding}</div>
         <div style="color: #e2e8f0; font-style: italic;"><b>Physical Ambiguity:</b> ${sel.scientificReason}</div>
       </div>
+
+      ${(() => {
+        const otherPkt = packets.find((p) => p.id !== sel.id);
+        if (!otherPkt) return '';
+        return `
+          <div style="background: rgba(15, 23, 42, 0.85); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 10px;">
+            <div style="font-weight: 700; color: #38bdf8; margin-bottom: 3px; font-size: 9px; letter-spacing: 0.5px;">FORENSIC COMPARISON (vs ${otherPkt.sectorId}-${otherPkt.sensorMode[0]}):</div>
+            <table style="width: 100%; border-collapse: collapse; font-size: 9px; color: #cbd5e1;">
+              <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+                <th style="text-align: left; padding: 1px 0;">METRIC</th>
+                <th style="text-align: right; color: #10b981;">CURRENT (${sel.sectorId})</th>
+                <th style="text-align: right; color: #94a3b8;">COMPARE (${otherPkt.sectorId})</th>
+              </tr>
+              <tr>
+                <td style="padding: 1px 0;">Sensor / Res</td>
+                <td style="text-align: right;">${sel.sensorMode} (${sel.resolutionMeters}m)</td>
+                <td style="text-align: right;">${otherPkt.sensorMode} (${otherPkt.resolutionMeters}m)</td>
+              </tr>
+              <tr>
+                <td style="padding: 1px 0;">Confidence</td>
+                <td style="text-align: right; color: ${sel.confidence === 'CONFIRMED' ? '#10b981' : '#f59e0b'};">${sel.confidence}</td>
+                <td style="text-align: right; color: ${otherPkt.confidence === 'CONFIRMED' ? '#10b981' : '#f59e0b'};">${otherPkt.confidence}</td>
+              </tr>
+              <tr>
+                <td style="padding: 1px 0;">TX Time</td>
+                <td style="text-align: right;">${sel.transmitSec.toFixed(1)}s</td>
+                <td style="text-align: right;">${otherPkt.transmitSec.toFixed(1)}s</td>
+              </tr>
+            </table>
+          </div>
+        `;
+      })()}
 
       <div style="background: rgba(15, 23, 42, 0.8); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px;">
         <div style="display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 2px;">
