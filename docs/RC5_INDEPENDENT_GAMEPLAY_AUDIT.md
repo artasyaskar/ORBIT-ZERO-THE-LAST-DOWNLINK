@@ -122,3 +122,4 @@ This Phase 0 Audit confirms that the project's code, ECS architecture, and mathe
    - Run `npm test`, `npm run typecheck`, `npm run build`, and `node tests/e2e-runtime.mjs`.
 
 *End of Phase 0 Audit.*
+

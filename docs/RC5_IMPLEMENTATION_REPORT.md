@@ -96,3 +96,4 @@ node tests/e2e-runtime.mjs
 - **Desktop Headless & Browser Automation:** 100% verified via Vitest and Playwright.
 - **Desktop Interactive Play:** 100% verified in Chrome desktop runtime.
 - **Physical Meta Quest Headset:** Requires user confirmation in Meta Quest Browser on physical Quest 3/3S hardware.
+

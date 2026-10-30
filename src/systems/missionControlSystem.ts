@@ -87,6 +87,7 @@ const GLOBE_CENTER_WORLD = new Vector3(0, 0.98, -0.58);
 const PROCESS_CRADLE_WORLD = new Vector3(0.24, 0.79, -0.55);
 const DISCARD_CHUTE_WORLD = new Vector3(0.49, 0.79, -0.58);
 const DOWNLINK_BAY_CENTER_WORLD = new Vector3(0.39, 0.79, -0.46);
+const RAW_TRAY_CENTER_WORLD = new Vector3(-0.37, 0.79, -0.43);
 
 // Target seated eye position in world space (0.32m back from origin, 1.25m seated eye height)
 const SEATED_TARGET_HEAD_WORLD = new Vector3(0, 1.25, 0.32);
@@ -295,9 +296,33 @@ export class MissionControlSystem extends createSystem({
         this.syncAll();
       },
       cycleCube: () => this.cycleEvidence(),
-      processSelected: () => this.handleProcessSelected(),
-      queueSelected: () => this.handleQueueSelected(),
-      discardSelected: () => this.handleDiscardSelected(),
+      processSelected: (packetId) => {
+        if (packetId && this.engine.getState().selectedPacketId !== packetId) {
+          this.applyAction({ type: 'SELECT_PACKET', packetId });
+        }
+        return this.handleProcessSelected();
+      },
+      queueSelected: (packetId, slotIndex) => {
+        if (packetId && this.engine.getState().selectedPacketId !== packetId) {
+          this.applyAction({ type: 'SELECT_PACKET', packetId });
+        }
+        return this.handleQueueSelected(slotIndex);
+      },
+      unqueueSelected: (packetId) => {
+        const state = this.engine.getState();
+        const id = packetId ?? state.selectedPacketId;
+        if (!id) return;
+        const res = this.applyAction({ type: 'UNQUEUE', packetId: id });
+        this.playCue(res.ok ? 'QUEUE_SLOT' : 'ERROR_REJECT');
+        this.syncAll();
+        return res;
+      },
+      discardSelected: (packetId) => {
+        if (packetId && this.engine.getState().selectedPacketId !== packetId) {
+          this.applyAction({ type: 'SELECT_PACKET', packetId });
+        }
+        return this.handleDiscardSelected();
+      },
       commitDownlink: () => this.handleCommitDownlinkButton(),
       restartMission: () => this.handleRestartMission(),
       nextMission: () => this.nextMission(),
@@ -305,6 +330,8 @@ export class MissionControlSystem extends createSystem({
       reorderQueue: () => this.handleReorderQueue(),
       playCue: (cue) => this.playCue(cue as never),
       getSceneObject: (id) => this.world.getSceneObject(id),
+      highlightDropZones: (active) => this.highlightDropZones(active),
+      syncAll: () => this.syncAll(),
     });
     this.cleanupFuncs.push(() => this.desktopControls?.dispose());
 
@@ -1462,14 +1489,18 @@ export class MissionControlSystem extends createSystem({
     this.syncAll();
   }
 
-  private handleQueueSelected(): void {
+  private handleQueueSelected(preferredSlotIndex?: number): void {
     const state = this.engine.getState();
     const pkt = state.packets.find((p) => p.id === state.selectedPacketId);
-    if (pkt?.queued) {
+    if (pkt?.queued && typeof preferredSlotIndex !== 'number') {
       const res = this.applyAction({ type: 'UNQUEUE', packetId: pkt.id });
       this.playCue(res.ok ? 'QUEUE_SLOT' : 'ERROR_REJECT');
     } else {
-      const res = this.applyAction({ type: 'QUEUE', packetId: this.engine.getState().selectedPacketId });
+      const res = this.applyAction({
+        type: 'QUEUE',
+        packetId: this.engine.getState().selectedPacketId,
+        slotIndex: preferredSlotIndex,
+      });
       this.playCue(res.ok ? 'QUEUE_SLOT' : 'ERROR_REJECT');
     }
     this.syncAll();
@@ -1951,6 +1982,7 @@ export class MissionControlSystem extends createSystem({
     const distProcess = this.tempVec.distanceTo(PROCESS_CRADLE_WORLD);
     const distDiscard = this.tempVec.distanceTo(DISCARD_CHUTE_WORLD);
     const distDownlinkCenter = this.tempVec.distanceTo(DOWNLINK_BAY_CENTER_WORLD);
+    const distRawTray = this.tempVec.distanceTo(RAW_TRAY_CENTER_WORLD);
 
     let closestSlotIdx = -1;
     let bestSlotDist = 0.22;
@@ -1966,7 +1998,7 @@ export class MissionControlSystem extends createSystem({
     const downlinkDist = Math.min(distDownlinkCenter, bestSlotDist);
 
     // Determine the closest magnetic destination station among valid capture envelopes
-    let closestTarget: 'DISCARD' | 'PROCESS' | 'DOWNLINK' | 'NONE' = 'NONE';
+    let closestTarget: 'DISCARD' | 'PROCESS' | 'DOWNLINK' | 'RAW_TRAY' | 'NONE' = 'NONE';
     let minDistance = this.profile.preferences.oneHanded ? 0.24 : 0.20;
     const assistance = this.profile.preferences.oneHanded ? 1.3 : 1;
 
@@ -1981,6 +2013,10 @@ export class MissionControlSystem extends createSystem({
     if (downlinkDist < 0.18 * assistance && downlinkDist < minDistance) {
       closestTarget = 'DOWNLINK';
       minDistance = downlinkDist;
+    }
+    if (distRawTray < 0.22 * assistance && distRawTray < minDistance) {
+      closestTarget = 'RAW_TRAY';
+      minDistance = distRawTray;
     }
 
     if (closestTarget === 'DISCARD') {
@@ -2001,6 +2037,15 @@ export class MissionControlSystem extends createSystem({
       } else if (closestSlotIdx >= 0 && pkt.queueIndex !== closestSlotIdx) {
         // Reorder into specific target slot
         const res = this.applyAction({ type: 'QUEUE', packetId: pkt.id, slotIndex: closestSlotIdx });
+        this.playCue(res.ok ? 'QUEUE_SLOT' : 'ERROR_REJECT');
+      }
+      this.syncAll();
+      return;
+    }
+    if (closestTarget === 'RAW_TRAY') {
+      this.playCue('CUBE_DOCK');
+      if (pkt.queued) {
+        const res = this.applyAction({ type: 'UNQUEUE', packetId: pkt.id });
         this.playCue(res.ok ? 'QUEUE_SLOT' : 'ERROR_REJECT');
       }
       this.syncAll();

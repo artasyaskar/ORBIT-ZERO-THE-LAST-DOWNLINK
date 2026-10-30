@@ -112,12 +112,16 @@ describe('Desktop Controls & First-Time Player Experience', () => {
         const sel = engine.getState().selectedPacketId;
         if (sel) engine.processPacket(sel);
       }),
-      queueSelected: vi.fn(() => {
-        const sel = engine.getState().selectedPacketId;
-        if (sel) engine.queuePacket(sel);
+      queueSelected: vi.fn((id, slot) => {
+        const sel = id ?? engine.getState().selectedPacketId;
+        if (sel) engine.queuePacket(sel, slot);
       }),
-      discardSelected: vi.fn(() => {
-        const sel = engine.getState().selectedPacketId;
+      unqueueSelected: vi.fn((id) => {
+        const sel = id ?? engine.getState().selectedPacketId;
+        if (sel) engine.unqueuePacket(sel);
+      }),
+      discardSelected: vi.fn((id) => {
+        const sel = id ?? engine.getState().selectedPacketId;
         if (sel) engine.discardPacket(sel);
       }),
       commitDownlink: vi.fn(() => {
@@ -251,6 +255,41 @@ describe('Desktop Controls & First-Time Player Experience', () => {
     expect(engine.getState().phase).toBe('DEBRIEF');
     expect(engine.getState().debrief).toBeDefined();
     expect(engine.getState().debrief?.totalScore).toBeGreaterThanOrEqual(60);
+
+    manager.dispose();
+  });
+
+  it('unqueues a queued packet and recovers storage tray slot via [U]', () => {
+    const { host, engine, manager } = createTestHarness();
+    engine.scanSector('B', 'RADAR');
+    const pkt = engine.getState().packets[0];
+    engine.selectPacket(pkt.id);
+    engine.queuePacket(pkt.id);
+    expect(engine.getState().queuePacketIds).toContain(pkt.id);
+
+    // Press [U] to unqueue
+    dispatchKey('u');
+    expect(host.unqueueSelected).toHaveBeenCalledWith(pkt.id);
+    expect(engine.getState().queuePacketIds).not.toContain(pkt.id);
+    expect(engine.getState().packets[0].queued).toBe(false);
+
+    manager.dispose();
+  });
+
+  it('smart-toggles queue/unqueue via [Q] without throwing ALREADY_QUEUED', () => {
+    const { host, engine, manager } = createTestHarness();
+    engine.scanSector('B', 'RADAR');
+    const pkt = engine.getState().packets[0];
+    engine.selectPacket(pkt.id);
+
+    // First [Q] queues it
+    dispatchKey('q');
+    expect(engine.getState().queuePacketIds).toContain(pkt.id);
+
+    // Second [Q] on already-queued packet smartly unqueues it!
+    dispatchKey('q');
+    expect(host.unqueueSelected).toHaveBeenCalledWith(pkt.id);
+    expect(engine.getState().queuePacketIds).not.toContain(pkt.id);
 
     manager.dispose();
   });

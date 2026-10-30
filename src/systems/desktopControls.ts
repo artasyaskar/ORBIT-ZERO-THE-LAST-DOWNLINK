@@ -15,6 +15,7 @@
 import {
   Camera,
   Object3D,
+  Plane,
   Raycaster,
   Vector2,
   Vector3,
@@ -38,9 +39,10 @@ export interface DesktopControllerHost {
   scan: () => void;
   selectPacket: (id: string) => void;
   cycleCube: () => void;
-  processSelected: () => void;
-  queueSelected: () => void;
-  discardSelected: () => void;
+  processSelected: (packetId?: string) => void;
+  queueSelected: (packetId?: string, slotIndex?: number) => void;
+  unqueueSelected: (packetId?: string) => void;
+  discardSelected: (packetId?: string) => void;
   commitDownlink: () => void;
   restartMission: () => void;
   nextMission: () => void;
@@ -48,6 +50,9 @@ export interface DesktopControllerHost {
   reorderQueue: () => void;
   playCue: (cue: string) => void;
   getSceneObject: (id: string) => Object3D | undefined;
+  highlightDropZones?: (active: boolean) => void;
+  setObjectTint?: (root: Object3D, hex: number, intensity: number) => void;
+  syncAll?: () => void;
 }
 
 export type TutorialStep =
@@ -61,6 +66,16 @@ export type TutorialStep =
   | 'MULTI_TARGET'
   | 'DOWNLINK'
   | 'DEBRIEF';
+
+const PROCESS_CRADLE_POS = new Vector3(0.24, 0.79, -0.55);
+const DOWNLINK_BAY_CENTER = new Vector3(0.39, 0.79, -0.46);
+const RAW_TRAY_CENTER = new Vector3(-0.37, 0.79, -0.43);
+const DISCARD_CHUTE_POS = new Vector3(0.49, 0.79, -0.58);
+const DOWNLINK_SLOT_POSITIONS: Vector3[] = [
+  new Vector3(0.29, 0.79, -0.46),
+  new Vector3(0.39, 0.79, -0.46),
+  new Vector3(0.49, 0.79, -0.46),
+];
 
 export class DesktopControlsManager {
   private host: DesktopControllerHost;
@@ -84,6 +99,20 @@ export class DesktopControlsManager {
   private lastActionOk = true;
   private cleanupCallbacks: (() => void)[] = [];
 
+  // 3D Drag-and-Drop & Tactility
+  private isDragging = false;
+  private dragCandidate?: {
+    cubeRoot: Object3D;
+    slotIndex: number;
+    packetId: string;
+    startPos: Vector3;
+    pointerDownPos: Vector2;
+  };
+  private dragPlane = new Plane(new Vector3(0, 1, 0), -0.83); // table surface + 4cm hover
+  private hoveredInteractiveObj: Object3D | null = null;
+  private originalHoverY = 0;
+  private lastActionTime = 0;
+
   constructor(host: DesktopControllerHost) {
     this.host = host;
     this.init();
@@ -97,17 +126,20 @@ export class DesktopControlsManager {
 
     // 2. Attach Pointer / Mouse Raycast Listeners to WebGL Canvas
     const canvas = this.host.renderer.domElement;
-    const onPointerMove = (e: MouseEvent) => this.handlePointerMove(e);
-    const onPointerDown = (e: MouseEvent) => this.handlePointerDown(e);
+    const onPointerMove = (e: PointerEvent) => this.handlePointerMove(e);
+    const onPointerDown = (e: PointerEvent) => this.handlePointerDown(e);
+    const onPointerUp = (e: PointerEvent) => this.handlePointerUp(e);
     const onKeyDown = (e: KeyboardEvent) => this.handleKeyDown(e);
 
-    canvas.addEventListener('mousemove', onPointerMove);
-    canvas.addEventListener('mousedown', onPointerDown);
+    canvas.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('keydown', onKeyDown);
 
     this.cleanupCallbacks.push(() => {
-      canvas.removeEventListener('mousemove', onPointerMove);
-      canvas.removeEventListener('mousedown', onPointerDown);
+      canvas.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('keydown', onKeyDown);
       this.containerEl?.remove();
     });
@@ -183,53 +215,18 @@ export class DesktopControlsManager {
     return null;
   }
 
-  private handlePointerMove(e: MouseEvent): void {
-    if (this.host.world.renderer.xr.isPresenting) return;
-    this.updateMouseNdc(e);
-    this.raycaster.setFromCamera(this.mouse, this.host.camera);
-
-    const hits = this.raycaster.intersectObjects([this.host.scene], true);
-    let interactiveHit = false;
-    let hoverText: string | null = null;
-
-    for (const hit of hits) {
-      if (this.isInteractiveObject(hit.object)) {
-        interactiveHit = true;
-        hoverText = this.getHoverDescription(hit.object);
-        break;
+  private findCubeRoot(obj: Object3D): Object3D | null {
+    let curr: Object3D | null = obj;
+    while (curr) {
+      if (/evidence-cube-([1-3])/i.test(curr.name || '')) {
+        return curr;
       }
+      curr = curr.parent;
     }
-
-    this.host.renderer.domElement.style.cursor = interactiveHit ? 'pointer' : 'default';
-
-    if (this.hoverTooltipEl) {
-      if (hoverText) {
-        this.hoverTooltipEl.innerText = hoverText;
-        this.hoverTooltipEl.style.left = `${e.clientX + 14}px`;
-        this.hoverTooltipEl.style.top = `${e.clientY + 14}px`;
-        this.hoverTooltipEl.style.display = 'block';
-      } else {
-        this.hoverTooltipEl.style.display = 'none';
-      }
-    }
+    return null;
   }
 
-  private handlePointerDown(e: MouseEvent): void {
-    if (this.host.world.renderer.xr.isPresenting) return;
-    if (e.button !== 0) return; // Only primary left-click
-    this.updateMouseNdc(e);
-    this.raycaster.setFromCamera(this.mouse, this.host.camera);
-
-    const hits = this.raycaster.intersectObjects([this.host.scene], true);
-    for (const hit of hits) {
-      if (this.dispatchObjectClick(hit.object, hit.point)) {
-        e.preventDefault();
-        break;
-      }
-    }
-  }
-
-  private isInteractiveObject(obj: Object3D): boolean {
+  private getInteractiveRoot(obj: Object3D): Object3D | null {
     let curr: Object3D | null = obj;
     while (curr) {
       const name = curr.name || '';
@@ -246,11 +243,276 @@ export class DesktopControlsManager {
         name === 'earth-globe' ||
         name === 'TacticalEarthGlobe'
       ) {
-        return true;
+        return curr;
       }
       curr = curr.parent;
     }
-    return false;
+    return null;
+  }
+
+  private handlePointerDown(e: PointerEvent): void {
+    if (this.host.world.renderer.xr.isPresenting) return;
+    if (e.button !== 0) return; // Only primary left-click
+    this.updateMouseNdc(e);
+    this.raycaster.setFromCamera(this.mouse, this.host.camera);
+
+    const hits = this.raycaster.intersectObjects([this.host.scene], true);
+    for (const hit of hits) {
+      // 1. Check if hit an Evidence Cube -> initialize drag candidate
+      const cubeRoot = this.findCubeRoot(hit.object);
+      if (cubeRoot) {
+        const cubeMatch = cubeRoot.name.match(/evidence-cube-([1-3])/i);
+        if (cubeMatch) {
+          const slotIdx = parseInt(cubeMatch[1], 10) - 1;
+          const state = this.host.engine.getState();
+          const pkt = state.packets[slotIdx];
+          if (pkt) {
+            this.dragCandidate = {
+              cubeRoot,
+              slotIndex: slotIdx,
+              packetId: pkt.id,
+              startPos: cubeRoot.position.clone(),
+              pointerDownPos: new Vector2(e.clientX, e.clientY),
+            };
+            this.host.selectPacket(pkt.id);
+            this.advanceTutorial('SELECT_CUBE');
+            this.updateHud();
+            e.preventDefault();
+            return;
+          }
+        }
+      }
+
+      // 2. Dispatch other object clicks
+      if (this.dispatchObjectClick(hit.object, hit.point)) {
+        e.preventDefault();
+        break;
+      }
+    }
+  }
+
+  private handlePointerMove(e: PointerEvent): void {
+    if (this.host.world.renderer.xr.isPresenting) return;
+    this.updateMouseNdc(e);
+    this.raycaster.setFromCamera(this.mouse, this.host.camera);
+
+    // 1. Dragging Mode
+    if (this.dragCandidate) {
+      const moveDist = Math.hypot(
+        e.clientX - this.dragCandidate.pointerDownPos.x,
+        e.clientY - this.dragCandidate.pointerDownPos.y
+      );
+      if (moveDist >= 5 && !this.isDragging) {
+        this.isDragging = true;
+        this.host.playCue('CUBE_GRAB');
+        this.host.highlightDropZones?.(true);
+      }
+
+      if (this.isDragging) {
+        const intersection = new Vector3();
+        if (this.raycaster.ray.intersectPlane(this.dragPlane, intersection)) {
+          intersection.x = Math.max(-0.62, Math.min(0.62, intersection.x));
+          intersection.z = Math.max(-0.68, Math.min(-0.32, intersection.z));
+          intersection.y = 0.83; // Elevated 3D hover height
+          this.dragCandidate.cubeRoot.position.copy(intersection);
+        }
+
+        const state = this.host.engine.getState();
+        const pkt = state.packets.find((p) => p.id === this.dragCandidate!.packetId);
+        let dragZoneTooltip = `📦 Dragging Evidence Cube: ${pkt?.headline || 'Telemetry'}`;
+
+        const distCradle = intersection.distanceTo(PROCESS_CRADLE_POS);
+        const distBay = intersection.distanceTo(DOWNLINK_BAY_CENTER);
+        const distTray = intersection.distanceTo(RAW_TRAY_CENTER);
+        const distDiscard = intersection.distanceTo(DISCARD_CHUTE_POS);
+
+        if (distCradle < 0.16) {
+          dragZoneTooltip = pkt?.processed
+            ? `ℹ️ Already Processed (Compressed to 1.8s Tx)`
+            : `⚙️ Drop into Processing Cradle: Compress to 1.8s Tx (-6 Wh)`;
+        } else if (distBay < 0.18) {
+          dragZoneTooltip = pkt?.queued
+            ? `🔄 Drop to Reposition / Reorder in Downlink Bay`
+            : `📥 Drop into Downlink Bay: Stage for Ground Transmission`;
+        } else if (distTray < 0.20) {
+          dragZoneTooltip = pkt?.queued
+            ? `📦 Drop onto Raw Storage Tray: Unqueue from Downlink Bay`
+            : `📦 Stored in Raw Tray Slot`;
+        } else if (distDiscard < 0.15) {
+          dragZoneTooltip = `🗑️ Drop into Discard Chute: Purge Packet & Free Storage`;
+        }
+
+        this.host.renderer.domElement.style.cursor = 'grabbing';
+        if (this.hoverTooltipEl) {
+          this.hoverTooltipEl.innerText = dragZoneTooltip;
+          this.hoverTooltipEl.style.left = `${e.clientX + 14}px`;
+          this.hoverTooltipEl.style.top = `${e.clientY + 14}px`;
+          this.hoverTooltipEl.style.display = 'block';
+        }
+        return;
+      }
+    }
+
+    // 2. Normal Hover Inspection & 3D Highlighting
+    const hits = this.raycaster.intersectObjects([this.host.scene], true);
+    let interactiveHit = false;
+    let hoverText: string | null = null;
+    let hitInteractiveRoot: Object3D | null = null;
+
+    for (const hit of hits) {
+      if (this.isInteractiveObject(hit.object)) {
+        interactiveHit = true;
+        hoverText = this.getHoverDescription(hit.object);
+        hitInteractiveRoot = this.getInteractiveRoot(hit.object);
+        break;
+      }
+    }
+
+    this.host.renderer.domElement.style.cursor = interactiveHit ? 'pointer' : 'default';
+
+    // 3D Visual Hover Lift / Highlight on Meshes
+    if (this.hoveredInteractiveObj !== hitInteractiveRoot) {
+      if (this.hoveredInteractiveObj) {
+        if (/evidence-cube/i.test(this.hoveredInteractiveObj.name)) {
+          this.hoveredInteractiveObj.position.y = this.originalHoverY;
+        }
+      }
+      this.hoveredInteractiveObj = hitInteractiveRoot;
+      if (hitInteractiveRoot) {
+        if (/evidence-cube/i.test(hitInteractiveRoot.name)) {
+          this.originalHoverY = hitInteractiveRoot.position.y;
+          hitInteractiveRoot.position.y += 0.012; // Float +12mm
+        }
+      }
+    }
+
+    if (this.hoverTooltipEl) {
+      if (hoverText) {
+        this.hoverTooltipEl.innerText = hoverText;
+        this.hoverTooltipEl.style.left = `${e.clientX + 14}px`;
+        this.hoverTooltipEl.style.top = `${e.clientY + 14}px`;
+        this.hoverTooltipEl.style.display = 'block';
+      } else {
+        this.hoverTooltipEl.style.display = 'none';
+      }
+    }
+  }
+
+  private handlePointerUp(e: PointerEvent): void {
+    if (this.host.world.renderer.xr.isPresenting) return;
+
+    if (this.isDragging && this.dragCandidate) {
+      this.isDragging = false;
+      this.host.highlightDropZones?.(false);
+      const cubeRoot = this.dragCandidate.cubeRoot;
+      const targetPos = cubeRoot.position;
+      const pktId = this.dragCandidate.packetId;
+      const state = this.host.engine.getState();
+      const pkt = state.packets.find((p) => p.id === pktId);
+
+      const distCradle = targetPos.distanceTo(PROCESS_CRADLE_POS);
+      const distBay = targetPos.distanceTo(DOWNLINK_BAY_CENTER);
+      const distTray = targetPos.distanceTo(RAW_TRAY_CENTER);
+      const distDiscard = targetPos.distanceTo(DISCARD_CHUTE_POS);
+
+      let handled = false;
+
+      // 1. Drop in Processing Cradle
+      if (distCradle < 0.16) {
+        handled = true;
+        if (pkt && !pkt.processed) {
+          this.host.processSelected(pkt.id);
+          const nextState = this.host.engine.getState();
+          if (nextState.lastActionOk) {
+            this.notifyAction(`✓ CRADLE COMPRESSION: ${pkt.headline} reduced to 1.8s Tx (-6 Wh)`, true);
+            this.advanceTutorial('QUEUE_BAY');
+          } else {
+            this.notifyAction(`⚠️ PROCESS REJECTED: ${nextState.lastStatusMessage}`, false);
+          }
+        } else {
+          this.notifyAction(`ℹ️ Packet is already compressed in cradle.`, true);
+          this.host.syncAll?.();
+        }
+      }
+      // 2. Drop in Downlink Bay
+      else if (distBay < 0.18) {
+        handled = true;
+        let closestSlotIdx = -1;
+        let bestSlotDist = 0.22;
+        for (let s = 0; s < DOWNLINK_SLOT_POSITIONS.length; s++) {
+          const d = targetPos.distanceTo(DOWNLINK_SLOT_POSITIONS[s]);
+          if (d < bestSlotDist) {
+            bestSlotDist = d;
+            closestSlotIdx = s;
+          }
+        }
+        this.host.queueSelected(pktId, closestSlotIdx >= 0 ? closestSlotIdx : undefined);
+        const nextState = this.host.engine.getState();
+        if (nextState.lastActionOk) {
+          const queued = nextState.packets.filter((p) => nextState.queuePacketIds.includes(p.id));
+          const totalTx = queued.reduce((acc, p) => acc + p.transmitSec, 0).toFixed(1);
+          this.notifyAction(`✓ QUEUED TO BAY: Slot occupied (${totalTx}s / ${nextState.downlinkWindowSec}s window)`, true);
+          this.advanceTutorial('MULTI_TARGET');
+        } else {
+          this.notifyAction(`⚠️ QUEUE REJECTED: ${nextState.lastStatusMessage}`, false);
+        }
+      }
+      // 3. Drop on Raw Storage Tray -> UNQUEUE!
+      else if (distTray < 0.20) {
+        handled = true;
+        if (pkt && pkt.queued) {
+          this.host.unqueueSelected(pkt.id);
+          const nextState = this.host.engine.getState();
+          if (nextState.lastActionOk) {
+            this.notifyAction(`✓ UNQUEUED TO TRAY: ${pkt.headline} returned to storage tray. Freed 1 downlink slot.`, true);
+          } else {
+            this.notifyAction(`⚠️ UNQUEUE REJECTED: ${nextState.lastStatusMessage}`, false);
+          }
+        } else {
+          this.notifyAction(`ℹ️ Packet is already in the Storage Tray.`, true);
+          this.host.syncAll?.();
+        }
+      }
+      // 4. Drop in Discard Chute
+      else if (distDiscard < 0.15) {
+        handled = true;
+        this.host.discardSelected(pktId);
+        const nextState = this.host.engine.getState();
+        if (nextState.lastActionOk) {
+          this.notifyAction(`✓ DISCARDED: Freed 1 tray storage slot`, true);
+        } else {
+          this.notifyAction(`⚠️ DISCARD REJECTED: ${nextState.lastStatusMessage}`, false);
+        }
+      }
+
+      // 5. Invalid Drop -> return to canonical position
+      if (!handled) {
+        this.host.playCue('ERROR_REJECT');
+        this.host.syncAll?.();
+        this.notifyAction(`⚠️ Drop cancelled: Returned to slot. Drag onto Cradle, Bay, or Tray.`, false);
+      }
+
+      this.dragCandidate = undefined;
+      this.updateHud();
+      return;
+    }
+
+    if (this.dragCandidate && !this.isDragging) {
+      // Pure click!
+      const pktId = this.dragCandidate.packetId;
+      const state = this.host.engine.getState();
+      const pkt = state.packets.find((p) => p.id === pktId);
+      if (pkt) {
+        this.notifyAction(`Selected Evidence Cube: ${pkt.headline} (${pkt.storageCost} MB)`);
+        this.advanceTutorial('SELECT_CUBE');
+      }
+      this.dragCandidate = undefined;
+      this.updateHud();
+    }
+  }
+
+  private isInteractiveObject(obj: Object3D): boolean {
+    return this.getInteractiveRoot(obj) !== null;
   }
 
   private dispatchObjectClick(obj: Object3D, point?: Vector3): boolean {
@@ -411,6 +673,12 @@ export class DesktopControlsManager {
         this.queuePacket();
         break;
       }
+      case 'u':
+      case 'U': {
+        e.preventDefault();
+        this.unqueuePacket();
+        break;
+      }
       case 'x':
       case 'X':
       case 'Delete': {
@@ -533,18 +801,46 @@ export class DesktopControlsManager {
   }
 
   public queuePacket(): void {
-    this.host.queueSelected();
     const state = this.host.engine.getState();
-    if (state.lastActionOk) {
-      const queuedPackets = state.packets.filter((p) => state.queuePacketIds.includes(p.id));
+    const sel = state.packets.find((p) => p.id === state.selectedPacketId);
+    if (sel?.queued) {
+      // Smart toggle: already queued, unqueue it back to storage tray!
+      this.unqueuePacket();
+      return;
+    }
+    this.host.queueSelected();
+    const nextState = this.host.engine.getState();
+    if (nextState.lastActionOk) {
+      const queuedPackets = nextState.packets.filter((p) => nextState.queuePacketIds.includes(p.id));
       const count = queuedPackets.length;
       const totalTx = queuedPackets.reduce((acc, p) => acc + p.transmitSec, 0).toFixed(1);
-      this.notifyAction(`✓ QUEUED TO BAY: Slot ${count} occupied (${totalTx}s / ${state.downlinkWindowSec}s window)`, true);
+      this.notifyAction(`✓ QUEUED TO BAY: Slot ${count} occupied (${totalTx}s / ${nextState.downlinkWindowSec}s window)`, true);
       if (this.tutorialStep === 'QUEUE_BAY') {
         this.advanceTutorial('MULTI_TARGET');
       }
     } else {
-      this.notifyAction(`⚠️ QUEUE REJECTED: ${state.lastStatusMessage}`, false);
+      this.notifyAction(`⚠️ QUEUE REJECTED: ${nextState.lastStatusMessage}`, false);
+    }
+    this.updateHud();
+  }
+
+  public unqueuePacket(): void {
+    const state = this.host.engine.getState();
+    const sel = state.packets.find((p) => p.id === state.selectedPacketId);
+    if (!sel) {
+      this.notifyAction('⚠️ UNQUEUE REJECTED: No evidence cube selected.', false);
+      return;
+    }
+    if (!sel.queued) {
+      this.notifyAction('ℹ️ Selected cube is already in the Storage Tray.', true);
+      return;
+    }
+    this.host.unqueueSelected(sel.id);
+    const nextState = this.host.engine.getState();
+    if (nextState.lastActionOk) {
+      this.notifyAction(`✓ UNQUEUED TO TRAY: ${sel.headline} returned to storage tray. Freed 1 downlink slot.`, true);
+    } else {
+      this.notifyAction(`⚠️ UNQUEUE REJECTED: ${nextState.lastStatusMessage}`, false);
     }
     this.updateHud();
   }
@@ -1144,7 +1440,7 @@ export class DesktopControlsManager {
 
       <div style="display: flex; gap: 4px; border-left: 1px solid rgba(255,255,255,0.15); border-right: 1px solid rgba(255,255,255,0.15); padding: 0 8px;">
         <button id="tb-process" style="${this.btnStyle('#f59e0b', selectedPkt !== undefined && selectedPkt.processingState !== 'PROCESSED')}">PROCESS [P]</button>
-        <button id="tb-queue" style="${this.btnStyle('#10b981', selectedPkt !== undefined)}">QUEUE [Q]</button>
+        <button id="tb-queue" style="${this.btnStyle(selectedPkt?.queued ? '#0284c7' : '#10b981', selectedPkt !== undefined)}">${selectedPkt?.queued ? 'UNQUEUE [U]' : 'QUEUE [Q]'}</button>
         <button id="tb-discard" style="${this.btnStyle('#ef4444', hasPackets)}">DISCARD [X]</button>
       </div>
 
