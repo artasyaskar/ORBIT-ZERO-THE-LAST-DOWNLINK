@@ -92,6 +92,7 @@
 /.vite/
 /.iwsdk/
 /artifacts/
+!/artifacts/release/
 /playwright-report/
 /test-results/
 *.tsbuildinfo

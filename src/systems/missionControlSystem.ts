@@ -41,6 +41,7 @@ import {
   EvidenceCubeNode,
   OrbitSectorNode,
 } from '../components';
+import { DesktopControlsManager } from './desktopControls';
 import {
   getScenarioSector,
   getRecommendedSensor,
@@ -153,6 +154,9 @@ export class MissionControlSystem extends createSystem({
   private briefingPanel?: UIKitMLAsset;
   private telemetryPanel?: UIKitMLAsset;
   private debriefPanel?: UIKitMLAsset;
+
+  // Desktop Controls & First-Time Player Experience
+  private desktopControls?: DesktopControlsManager;
 
   init(): void {
     const inputSystem = this.world.getSystem(InputSystem);
@@ -275,6 +279,35 @@ export class MissionControlSystem extends createSystem({
     // 9. Clone per-instance materials so whole-body emissive state tints never leak across shared prototypes
     this.prepareEntityMaterials();
 
+    // 9b. Initialize Desktop Controls & Guided First-Time Player Experience
+    this.desktopControls = new DesktopControlsManager({
+      engine: this.engine,
+      world: this.world,
+      scene: this.scene,
+      camera: this.camera,
+      renderer: this.world.renderer,
+      selectSector: (id) => this.handleSelectSector(id),
+      cycleSector: () => this.handleCycleSector(),
+      toggleSensor: () => this.handleToggleSensor(),
+      scan: () => this.handleScan(),
+      selectPacket: (id) => {
+        this.applyAction({ type: 'SELECT_PACKET', packetId: id });
+        this.syncAll();
+      },
+      cycleCube: () => this.cycleEvidence(),
+      processSelected: () => this.handleProcessSelected(),
+      queueSelected: () => this.handleQueueSelected(),
+      discardSelected: () => this.handleDiscardSelected(),
+      commitDownlink: () => this.handleCommitDownlinkButton(),
+      restartMission: () => this.handleRestartMission(),
+      nextMission: () => this.nextMission(),
+      togglePause: () => this.togglePause(),
+      reorderQueue: () => this.handleReorderQueue(),
+      playCue: (cue) => this.playCue(cue as never),
+      getSceneObject: (id) => this.world.getSceneObject(id),
+    });
+    this.cleanupFuncs.push(() => this.desktopControls?.dispose());
+
     // 10. Expose deterministic runtime API on window for automated E2E / XR verification
     if (typeof window !== 'undefined') {
       (window as unknown as Record<string, unknown>).__ORBIT_ZERO__ = {
@@ -382,6 +415,10 @@ export class MissionControlSystem extends createSystem({
             (this.camera as any).updateProjectionMatrix?.();
           }
           this.camera.updateMatrixWorld(true);
+        },
+        desktopControls: this.desktopControls,
+        triggerDesktopKey: (key: string) => {
+          window.dispatchEvent(new KeyboardEvent('keydown', { key }));
         },
       };
     }
@@ -2198,6 +2235,7 @@ export class MissionControlSystem extends createSystem({
     this.syncTelemetryPanel();
     this.syncDebriefPanel();
     this.syncSettings();
+    this.desktopControls?.updateHud();
   }
 
   private animateCubeTransitions(delta: number): void {

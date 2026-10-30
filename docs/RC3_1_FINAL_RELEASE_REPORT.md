@@ -199,3 +199,4 @@ A reproducible clean-clone verification was performed to confirm that the reposi
 - **Git Commit:** `HEAD` on `main` branch
 - **Certification:** **APPROVED FOR FINAL SUBMISSION**
 - **Action Required by User:** Test directly in Meta Quest Browser on physical Meta Quest 3/3S headset to record final gameplay video following [`docs/DEMO_VIDEO_SHOTLIST.md`](DEMO_VIDEO_SHOTLIST.md).
+

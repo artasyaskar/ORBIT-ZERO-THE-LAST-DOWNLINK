@@ -66,3 +66,4 @@ All visual, geometric, sonic, and textural assets used in *ORBIT ZERO: THE LAST 
 ## 6. Scientific Data Disclaimer
 
 All crisis scenarios (Standard Indus Pass, Monsoon Supercell Pass, Solar Brownout Pass) are **fictional procedural training simulations** designed to evaluate operator spatial triage skills under physical telemetry constraints. They do **not** represent live military intelligence, real-time civil defence rescue commands, or active classified satellite constellations. All satellite orbit parameters and downlink windows are simulated abstractions for competitive gameplay.
+

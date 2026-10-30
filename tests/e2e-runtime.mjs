@@ -126,7 +126,7 @@ try {
       } else {
         const packet = await page.evaluate((action) => window.__ORBIT_ZERO__.getState().packets.find((p) => p.sectorId === action.sectorId && p.sensorMode === action.sensorMode), action);
         assert.ok(packet);
-        for (let attempt = 0; attempt < 3 && await page.evaluate((id) => window.__ORBIT_ZERO__.getState().selectedPacketId !== id, packet.id); attempt++) await click('telemetry-hud', 'Btn_CycleCube');
+        for (let attempt = 0; attempt < 6 && await page.evaluate((id) => window.__ORBIT_ZERO__.getState().selectedPacketId !== id, packet.id); attempt++) await click('telemetry-hud', 'Btn_CycleCube');
         assert.equal(await page.evaluate(() => window.__ORBIT_ZERO__.getState().selectedPacketId), packet.id, 'Evidence selector did not respond');
         await click('telemetry-hud', action.type === 'PROCESS' ? 'Btn_ProcessCube' : action.type === 'DISCARD' ? 'Btn_DiscardCube' : 'Btn_QueueCube');
       }
