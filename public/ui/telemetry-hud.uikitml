@@ -1,0 +1,181 @@
+<!--
+  ORBIT ZERO: THE LAST DOWNLINK — Compact Overhead Telemetry Visor & Evidence Cube Inspector
+  Positioned high above the 3U CubeSat so the spacecraft and Earth globe remain 100% unobstructed.
+-->
+<style>
+  .panel-root {
+    flex-direction: column;
+    width: 520px;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    padding-left: 16px;
+    padding-right: 16px;
+    background-color: #060e1de6;
+    border-radius: 14px;
+    border-width: 1.5px;
+    border-color: #0284c7;
+  }
+
+  .telemetry-header {
+    flex-direction: column;
+    width: 100%;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    padding-left: 12px;
+    padding-right: 12px;
+    background-color: #0b1a2edd;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: #0369a1;
+    margin-bottom: 6px;
+  }
+
+  .resource-row {
+    font-size: 18px;
+    font-weight: 700;
+    color: #38bdf8;
+  }
+
+  .window-row {
+    font-size: 14px;
+    font-weight: 700;
+    color: #f59e0b;
+    margin-top: 2px;
+  }
+
+  .status-banner {
+    flex-direction: column;
+    width: 100%;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    padding-left: 10px;
+    padding-right: 10px;
+    background-color: #17243cf0;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: #334155;
+    margin-bottom: 6px;
+  }
+
+  .status-text {
+    font-size: 13px;
+    font-weight: 600;
+    color: #f8fafc;
+  }
+
+  .inspector-card {
+    flex-direction: column;
+    width: 100%;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    padding-left: 12px;
+    padding-right: 12px;
+    background-color: #0a172bdd;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: #1e3a5f;
+    margin-bottom: 6px;
+  }
+
+  .inspector-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #f8fafc;
+  }
+
+  .inspector-meta {
+    font-size: 13px;
+    font-weight: 700;
+    color: #10b981;
+    margin-top: 2px;
+  }
+
+  .inspector-science {
+    font-size: 12px;
+    font-weight: 500;
+    color: #cbd5e1;
+    margin-top: 2px;
+  }
+
+  .action-btn {
+    width: 100%;
+    margin-top: 5px;
+    justify-content: center;
+    background-color: #0b1f3bee;
+    border-radius: 8px;
+    border-width: 1.5px;
+    border-color: #38bdf8;
+    padding-top: 7px;
+    padding-bottom: 7px;
+  }
+</style>
+<Panel class="panel-root">
+  <div id="TelemetryHeaderCard" class="telemetry-header">
+    <div id="ResourceReadout" class="resource-row">
+      POWER: 55 / 55 PWR  |  STORAGE: 0 / 9 STR
+    </div>
+    <div id="WindowReadout" class="window-row">
+      DOWNLINK QUEUE: 0.0s / 10.0s WINDOW  |  PHASE: OPERATIONS
+    </div>
+  </div>
+
+  <div id="StatusBannerCard" class="status-banner">
+    <div id="StatusMessageText" class="status-text" style="height: 58px; overflow: hidden;">
+      PASS ACTIVE: Scan SEC-B (RADAR), SEC-C (OPTICAL), SEC-E (RADAR), compress 2 cubes, then transmit!
+    </div>
+  </div>
+
+  <div id="CubeInspectorCard" class="inspector-card">
+    <div id="InspectorTitle" class="inspector-title">
+      ACTIVE EVIDENCE CUBE: NONE SELECTED
+    </div>
+    <div id="InspectorConfidence" class="inspector-meta">
+      Scan a sector or grab/poke an Evidence Cube on the tray to inspect.
+    </div>
+    <div id="InspectorScience" class="inspector-science" style="height: 40px; overflow: hidden;">
+      Onboard Processing (6 PWR) compresses CONFIRMED/PROBABLE cubes: 3 STR -&gt; 1 STR, 4.5s -&gt; 1.8s Tx.
+    </div>
+  </div>
+
+  <Button id="Btn_ProcessCube" class="action-btn">
+    <ButtonLabel id="Lbl_ProcessCube" style="color: #f59e0b; font-size: 13px; font-weight: 700;">PROCESS SELECTED CUBE (-6 PWR -&gt; 1 STR / 1.8s Tx)</ButtonLabel>
+  </Button>
+
+  <Button id="Btn_QueueCube" class="action-btn">
+    <ButtonLabel id="Lbl_QueueCube" style="color: #38bdf8; font-size: 13px; font-weight: 700;">ADD SELECTED CUBE TO DOWNLINK BAY</ButtonLabel>
+  </Button>
+
+  <Button id="Btn_DiscardCube" class="action-btn">
+    <ButtonLabel id="Lbl_DiscardCube" style="color: #f87171; font-size: 13px; font-weight: 700;">DISCARD SELECTED CUBE (FREE STORAGE)</ButtonLabel>
+  </Button>
+  <Button id="Btn_CycleCube" class="action-btn">
+    <ButtonLabel style="color: #e2e8f0; font-size: 13px; font-weight: 700;">SELECT NEXT EVIDENCE CUBE</ButtonLabel>
+  </Button>
+  <div id="AudioCaption" class="inspector-science">GROUND CONTROL: one pass, three requests, one final downlink.</div>
+  <div style="flex-direction: row; gap: 6px; width: 100%;">
+    <Button id="Btn_Pause" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_Pause" style="color: #e2e8f0; font-size: 13px;">PAUSE PASS</ButtonLabel></Button>
+    <Button id="Btn_Settings" class="action-btn" style="width: 48%;"><ButtonLabel style="color: #e2e8f0; font-size: 13px;">ACCESSIBILITY</ButtonLabel></Button>
+  </div>
+  <div id="AccessibilitySettings" style="display: none; flex-direction: column; width: 100%;">
+    <div style="flex-direction: row; gap: 6px; width: 100%;">
+      <Button id="Btn_Guidance" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_Guidance" style="color: #e2e8f0; font-size: 12px;">GUIDANCE: GUIDED</ButtonLabel></Button>
+      <Button id="Btn_DominantHand" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_DominantHand" style="color: #e2e8f0; font-size: 12px;">SCANNER HAND: RIGHT</ButtonLabel></Button>
+    </div>
+    <div style="flex-direction: row; gap: 6px; width: 100%;">
+      <Button id="Btn_OneHanded" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_OneHanded" style="color: #e2e8f0; font-size: 12px;">ONE-HAND ASSIST: OFF</ButtonLabel></Button>
+      <Button id="Btn_LargeText" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_LargeText" style="color: #e2e8f0; font-size: 12px;">LARGE TEXT: OFF</ButtonLabel></Button>
+    </div>
+    <div style="flex-direction: row; gap: 6px; width: 100%;">
+      <Button id="Btn_HighContrast" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_HighContrast" style="color: #e2e8f0; font-size: 12px;">HIGH CONTRAST: OFF</ButtonLabel></Button>
+      <Button id="Btn_ReducedMotion" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_ReducedMotion" style="color: #e2e8f0; font-size: 12px;">REDUCED MOTION: OFF</ButtonLabel></Button>
+    </div>
+    <div style="flex-direction: row; gap: 6px; width: 100%;">
+      <Button id="Btn_Captions" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_Captions" style="color: #e2e8f0; font-size: 12px;">CAPTIONS: ON</ButtonLabel></Button>
+      <Button id="Btn_AudioLevel" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_AudioLevel" style="color: #e2e8f0; font-size: 12px;">AUDIO: 65%</ButtonLabel></Button>
+    </div>
+    <div style="flex-direction: row; gap: 6px; width: 100%;">
+      <Button id="Btn_GazeAssist" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_GazeAssist" style="color: #38bdf8; font-size: 12px;">GAZE FOCUS: ON</ButtonLabel></Button>
+      <Button id="Btn_TabletopMode" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_TabletopMode" style="color: #34d399; font-size: 12px;">MR TABLETOP: OFF</ButtonLabel></Button>
+    </div>
+  </div>
+</Panel>

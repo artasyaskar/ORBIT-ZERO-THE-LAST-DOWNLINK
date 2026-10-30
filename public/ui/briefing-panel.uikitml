@@ -1,0 +1,174 @@
+<!--
+  ORBIT ZERO: THE LAST DOWNLINK — Left Briefing & Sensor Control Spatial Panel
+  High-contrast aerospace cockpit typography & concise scannable hierarchy.
+-->
+<style>
+  .panel-root {
+    flex-direction: column;
+    width: 430px;
+    padding-top: 14px;
+    padding-bottom: 14px;
+    padding-left: 16px;
+    padding-right: 16px;
+    background-color: #060e1de6;
+    border-radius: 14px;
+    border-width: 1.5px;
+    border-color: #0284c7;
+  }
+
+  .header-banner {
+    flex-direction: column;
+    width: 100%;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    padding-left: 12px;
+    padding-right: 12px;
+    background-color: #0b1a2edd;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: #0369a1;
+    margin-bottom: 8px;
+  }
+
+  .title-text {
+    font-size: 19px;
+    font-weight: 700;
+    color: #38bdf8;
+  }
+
+  .subtitle-text {
+    font-size: 12px;
+    font-weight: 600;
+    color: #cbd5e1;
+    margin-top: 3px;
+  }
+
+  .req-card {
+    flex-direction: column;
+    width: 100%;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    padding-left: 12px;
+    padding-right: 12px;
+    background-color: #0a172bdd;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: #1e3a5f;
+    margin-bottom: 6px;
+  }
+
+  .req-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #f8fafc;
+  }
+
+  .req-detail {
+    font-size: 12px;
+    font-weight: 600;
+    color: #94a3b8;
+    margin-top: 2px;
+  }
+
+  .sector-box {
+    flex-direction: column;
+    width: 100%;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    padding-left: 12px;
+    padding-right: 12px;
+    background-color: #17243cf0;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: #d97706;
+    margin-top: 3px;
+    margin-bottom: 6px;
+  }
+
+  .sector-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #f59e0b;
+  }
+
+  .sector-desc {
+    font-size: 12px;
+    font-weight: 600;
+    color: #e2e8f0;
+    margin-top: 2px;
+  }
+
+  .action-btn {
+    width: 100%;
+    margin-top: 5px;
+    justify-content: center;
+    background-color: #0b1f3bee;
+    border-radius: 8px;
+    border-width: 1.5px;
+    border-color: #38bdf8;
+    padding-top: 7px;
+    padding-bottom: 7px;
+  }
+</style>
+<Panel class="panel-root">
+  <div id="BriefingHeader" class="header-banner">
+    <div id="BriefingTitle" class="title-text">ORBIT ZERO: THE LAST DOWNLINK</div>
+    <div id="BriefingSubtitle" class="subtitle-text">
+      INDUS FLOOD TRIAGE | 3 GROUND REQUESTS | 10.0s WINDOW
+    </div>
+  </div>
+
+  <div id="Req1Card" class="req-card">
+    <div id="Req1Title" class="req-title">REQ 1: SEC-B EAST LEVEE ROAD [CONFIRMED]</div>
+    <div id="Req1Status" class="req-detail" style="height: 50px; overflow: hidden;">
+      Storm Clouds over Levee -> Scan SEC-B with RADAR
+    </div>
+  </div>
+
+  <div id="Req2Card" class="req-card">
+    <div id="Req2Title" class="req-title">REQ 2: SEC-C STEEL BRIDGE [CONFIRMED]</div>
+    <div id="Req2Status" class="req-detail" style="height: 50px; overflow: hidden;">
+      Clear Sky over Bridge -> Scan SEC-C with OPTICAL
+    </div>
+  </div>
+
+  <div id="Req3Card" class="req-card">
+    <div id="Req3Title" class="req-title">REQ 3: SEC-E SHELTER RIDGE [PROBABLE]</div>
+    <div id="Req3Status" class="req-detail" style="height: 50px; overflow: hidden;">
+      Storm Clouds over Ridge -> Scan SEC-E with RADAR
+    </div>
+  </div>
+
+  <div id="SelectedSectorCard" class="sector-box">
+    <div id="SelectedSectorTitle" class="sector-title">
+      TARGET: SEC-B East Levee Highway (STORM CLOUDS)
+    </div>
+    <div id="SelectedSectorDesc" class="sector-desc" style="height: 50px; overflow: hidden;">
+      Sensor: RADAR (14 PWR, 3 STR, 4.5s Tx) | Penetrates storm clouds
+    </div>
+  </div>
+
+  <Button id="Btn_CycleSector" class="action-btn">
+    <ButtonLabel style="color: #e0f2fe; font-size: 13px; font-weight: 700;">Cycle Target Sector (A - F)</ButtonLabel>
+  </Button>
+
+  <Button id="Btn_ToggleSensor" class="action-btn">
+    <ButtonLabel id="Lbl_ToggleSensor" style="color: #e0f2fe; font-size: 13px; font-weight: 700;">Active Sensor: RADAR (Switch OPTICAL / RADAR)</ButtonLabel>
+  </Button>
+
+  <Button id="Btn_ScanSector" class="action-btn">
+    <ButtonLabel id="Lbl_ScanSector" style="color: #38bdf8; font-size: 13px; font-weight: 700;">SCAN SEC-B WITH RADAR (-14 PWR)</ButtonLabel>
+  </Button>
+
+  <Button id="Btn_CalibrateSeat" class="action-btn" style="display: flex">
+    <ButtonLabel style="color: #cbd5e1; font-size: 13px; font-weight: 700;">Recenter Seated VR Viewpoint</ButtonLabel>
+  </Button>
+
+  <Button id="xr-button" class="action-btn">
+    <ButtonLabel style="color: #34d399; font-size: 13px; font-weight: 700;">Enter VR Headset / XR Mode</ButtonLabel>
+  </Button>
+
+  <Button id="exit-button" class="action-btn" style="display: none">
+    <ButtonLabel style="color: #f87171; font-size: 13px; font-weight: 700;">Exit XR to Browser</ButtonLabel>
+  </Button>
+</Panel>

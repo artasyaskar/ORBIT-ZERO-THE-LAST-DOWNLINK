@@ -1,0 +1,172 @@
+<!--
+  ORBIT ZERO: THE LAST DOWNLINK — Right Downlink Queue & Consequence Debrief Spatial Panel
+-->
+<style>
+  .panel-root {
+    flex-direction: column;
+    width: 430px;
+    padding-top: 14px;
+    padding-bottom: 14px;
+    padding-left: 16px;
+    padding-right: 16px;
+    background-color: #060e1de6;
+    border-radius: 14px;
+    border-width: 1.5px;
+    border-color: #0284c7;
+  }
+
+  .debrief-banner {
+    flex-direction: column;
+    width: 100%;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    padding-left: 12px;
+    padding-right: 12px;
+    background-color: #0b1a2edd;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: #0369a1;
+    margin-bottom: 8px;
+  }
+
+  .banner-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #38bdf8;
+  }
+
+  .banner-sub {
+    font-size: 12px;
+    font-weight: 600;
+    color: #f8fafc;
+    margin-top: 3px;
+  }
+
+  .slot-card {
+    flex-direction: column;
+    width: 100%;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    padding-left: 12px;
+    padding-right: 12px;
+    background-color: #0a172bdd;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: #1e3a5f;
+    margin-bottom: 6px;
+  }
+
+  .slot-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #f59e0b;
+  }
+
+  .slot-desc {
+    font-size: 12px;
+    font-weight: 600;
+    color: #cbd5e1;
+    margin-top: 2px;
+  }
+
+  .outcome-card {
+    flex-direction: column;
+    width: 100%;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    padding-left: 12px;
+    padding-right: 12px;
+    background-color: #17243cf0;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: #334155;
+    margin-top: 3px;
+    margin-bottom: 6px;
+  }
+
+  .outcome-line {
+    font-size: 12px;
+    font-weight: 600;
+    color: #e2e8f0;
+    margin-top: 2px;
+  }
+
+  .advice-text {
+    font-size: 12px;
+    font-weight: 600;
+    color: #f59e0b;
+    margin-top: 4px;
+  }
+
+  .action-btn {
+    width: 100%;
+    margin-top: 5px;
+    justify-content: center;
+    background-color: #0b1f3bee;
+    border-radius: 8px;
+    border-width: 1.5px;
+    border-color: #38bdf8;
+    padding-top: 7px;
+    padding-bottom: 7px;
+  }
+</style>
+<Panel class="panel-root">
+  <div id="DebriefBannerCard" class="debrief-banner">
+    <div id="DebriefRankTitle" class="banner-title">
+      DOWNLINK BAY (0/3 SLOTS | 0.0s / 10.0s)
+    </div>
+    <div id="DebriefScoreSubtitle" class="banner-sub">
+      Compress &amp; queue verified cubes so total Tx &lt;= 10.0s cutoff.
+    </div>
+  </div>
+
+  <div id="Slot1Card" class="slot-card">
+    <div id="Slot1Title" class="slot-title">DOWNLINK SLOT #1: [EMPTY]</div>
+    <div id="Slot1Desc" class="slot-desc">Drop or queue highest-priority evidence cube here.</div>
+  </div>
+
+  <div id="Slot2Card" class="slot-card">
+    <div id="Slot2Title" class="slot-title">DOWNLINK SLOT #2: [EMPTY]</div>
+    <div id="Slot2Desc" class="slot-desc">Drop or queue second evidence cube here.</div>
+  </div>
+
+  <div id="Slot3Card" class="slot-card">
+    <div id="Slot3Title" class="slot-title">DOWNLINK SLOT #3: [EMPTY]</div>
+    <div id="Slot3Desc" class="slot-desc">Drop or queue third evidence cube here.</div>
+  </div>
+
+  <div id="DebriefOutcomeCard" class="outcome-card">
+    <div id="OutcomeReq1" class="outcome-line">
+      REQ 1 (SEC-B Road Inundation): AWAITING DOWNLINK
+    </div>
+    <div id="OutcomeReq2" class="outcome-line">
+      REQ 2 (SEC-C Crossing Approach): AWAITING DOWNLINK
+    </div>
+    <div id="OutcomeReq3" class="outcome-line">
+      REQ 3 (SEC-E Shelter Spur): AWAITING DOWNLINK
+    </div>
+    <div id="DebriefAdviceText" class="advice-text">
+      OPTIMAL: B(RADAR) + C(OPTICAL) + E(RADAR), compress 2 cubes (7.6s &lt;= 10.0s).
+    </div>
+  </div>
+
+  <Button id="Btn_ReorderQueue" class="action-btn">
+    <ButtonLabel id="Lbl_ReorderQueue" style="color: #38bdf8; font-size: 13px; font-weight: 700;">PROMOTE SELECTED / ROTATE QUEUE PRIORITY</ButtonLabel>
+  </Button>
+
+  <Button id="Btn_CommitDownlink" class="action-btn">
+    <ButtonLabel id="Lbl_CommitDownlink" style="color: #34d399; font-size: 13px; font-weight: 700;">TRANSMIT DOWNLINK QUEUE (10.0s WINDOW)</ButtonLabel>
+  </Button>
+
+  <Button id="Btn_RestartMission" class="action-btn">
+    <ButtonLabel id="Lbl_RestartMission" style="color: #cbd5e1; font-size: 13px; font-weight: 700;">RESTART MISSION PASS (RESET)</ButtonLabel>
+  </Button>
+  <div id="MasteryReadout" class="outcome-line">PROVEN OBJECTIVE: COMPLETE THIS PASS TO EARN MASTERY</div>
+  <div id="MedalsReadout" class="inspector-science" style="color: #e2e8f0; font-size: 11px; margin-top: 4px;">GROUND TRUTH / POWER DISCIPLINE / LINK PRECISION</div>
+  <div id="ReplayTimeline" class="outcome-line">DECISION REPLAY AVAILABLE AFTER DOWNLINK</div>
+  <div style="flex-direction: row; gap: 6px; width: 100%;">
+    <Button id="Btn_NextMission" class="action-btn" style="width: 48%;"><ButtonLabel style="color: #e2e8f0; font-size: 13px;">NEXT ORBITAL PASS</ButtonLabel></Button>
+    <Button id="Btn_DailyPass" class="action-btn" style="width: 48%;"><ButtonLabel style="color: #e2e8f0; font-size: 13px;">DAILY PASS</ButtonLabel></Button>
+  </div>
+  <Button id="Btn_ReplayDecision" class="action-btn"><ButtonLabel style="color: #e2e8f0; font-size: 13px;">REVIEW NEXT DECISION</ButtonLabel></Button>
+</Panel>

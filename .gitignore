@@ -1,0 +1,103 @@
+# ============================================================================
+# 1. Personal Planning & Source Notes (Local-Only, Do Not Commit)
+# ============================================================================
+/devpost.txt
+/core_concept
+/claude_enhance.txt
+/enhance_project.txt
+/Google_FLow_reference/
+/public/assets/models/incoming/
+/.claude/
+
+# ============================================================================
+# 2. Local Skill Installer & Agent Framework Artifacts (Narrow Explicit Rules)
+# Note: Do NOT blanket-ignore /.agents/ so future repository-tracked agent
+# configs remain visible if added outside these specific installed packages.
+# ============================================================================
+/skills-lock.json
+
+# External skills installed via `npx skills add`
+/.agents/skills/banner-design/
+/.agents/skills/brand/
+/.agents/skills/design/
+/.agents/skills/design-system/
+/.agents/skills/gravitas/
+/.agents/skills/hz-iwsdk-webxr/
+/.agents/skills/slides/
+/.agents/skills/ui-styling/
+/.agents/skills/ui-ux-pro-max/
+
+# Official IWSDK 1.0.1 starter skills (`@iwsdk/create@1.0.1`)
+/.agents/skills/iwsdk-build-model/
+/.agents/skills/iwsdk-compose-scene/
+/.agents/skills/iwsdk-debug/
+/.agents/skills/iwsdk-depth-occlusion/
+/.agents/skills/iwsdk-dev/
+/.agents/skills/iwsdk-grab/
+/.agents/skills/iwsdk-hosting/
+/.agents/skills/iwsdk-native-xr-test/
+/.agents/skills/iwsdk-physics/
+/.agents/skills/iwsdk-pwa-packaging/
+/.agents/skills/iwsdk-ray/
+/.agents/skills/iwsdk-ui/
+
+# GSD (Get Shit Done) local skill & workflow installation artifacts
+/.agents/skills/codebase-mapper/
+/.agents/skills/context-compressor/
+/.agents/skills/context-fetch/
+/.agents/skills/context-health-monitor/
+/.agents/skills/debugger/
+/.agents/skills/empirical-validation/
+/.agents/skills/executor/
+/.agents/skills/plan-checker/
+/.agents/skills/planner/
+/.agents/skills/subagent-delegation/
+/.agents/skills/token-budget/
+/.agents/skills/verifier/
+/.agents/agents/
+/.agent/workflows/
+/.gemini/
+/.gsd/
+/adapters/
+/GSD-STYLE.md
+/PROJECT_RULES.md
+/VERSION
+/model_capabilities.yaml
+/scripts/search_repo.ps1
+/scripts/search_repo.sh
+/scripts/setup_search.ps1
+/scripts/setup_search.sh
+/scripts/validate-agents.ps1
+/scripts/validate-agents.sh
+/scripts/validate-all.ps1
+/scripts/validate-all.sh
+/scripts/validate-encoding.ps1
+/scripts/validate-encoding.sh
+/scripts/validate-skills.ps1
+/scripts/validate-skills.sh
+/scripts/validate-templates.ps1
+/scripts/validate-templates.sh
+/scripts/validate-workflows.ps1
+/scripts/validate-workflows.sh
+
+# Generated skill runtime outputs (if invoked locally)
+/.gravitas/
+/design-system/
+
+# ============================================================================
+# 3. Standard Node.js, Vite, TypeScript, Playwright & OS Build Artifacts
+# ============================================================================
+/node_modules/
+/dist/
+/.vite/
+/.iwsdk/
+/artifacts/
+/playwright-report/
+/test-results/
+*.tsbuildinfo
+*.log
+npm-debug.log*
+.env.local
+.env.*.local
+.DS_Store
+Thumbs.db

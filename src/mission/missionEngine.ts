@@ -1,0 +1,846 @@
+/**
+ * ORBIT ZERO: THE LAST DOWNLINK
+ * Pure, deterministic state machine for the orbital emergency-intelligence triage loop:
+ * SCAN -> INTERPRET -> PROCESS -> PRIORITIZE -> TRANSMIT -> REVIEW
+ */
+
+import {
+  getScenarioSector,
+  MAX_EVIDENCE_CUBES,
+  MISSION_SCENARIOS,
+  SECTOR_ORDER,
+} from './missionConfig';
+import { buildDebriefReport } from './scoring';
+import type {
+  ActionResult,
+  ActionResultCode,
+  DataPacket,
+  DebriefReport,
+  MissionAction,
+  MissionJournalEntry,
+  MissionScenarioId,
+  MissionState,
+  SectorId,
+  SensorMode,
+} from './types';
+
+function isValidSectorId(value: unknown): value is SectorId {
+  return typeof value === 'string' && (SECTOR_ORDER as readonly string[]).includes(value);
+}
+
+function isValidSensorMode(value: unknown): value is SensorMode {
+  return value === 'OPTICAL' || value === 'RADAR';
+}
+
+export class MissionEngine {
+  private state: MissionState;
+  private nextPacketNumber = 1;
+  private currentScenarioId: MissionScenarioId = 'STANDARD_INDUS_PASS';
+  private journal: MissionJournalEntry[] = [];
+
+  constructor(initialScenarioId: MissionScenarioId = 'STANDARD_INDUS_PASS') {
+    this.currentScenarioId = initialScenarioId;
+    this.state = this.createInitialState();
+  }
+
+  private createInitialState(): MissionState {
+    this.nextPacketNumber = 1;
+    this.journal = [];
+    const scenario =
+      MISSION_SCENARIOS[this.currentScenarioId] ??
+      MISSION_SCENARIOS.STANDARD_INDUS_PASS;
+    const budget = scenario.budget;
+    return {
+      scenarioId: this.currentScenarioId,
+      phase: 'OPERATIONS',
+      paused: false,
+      selectedSectorId: 'B',
+      activeSensorMode: 'RADAR',
+      selectedPacketId: null,
+      power: budget.initialPower,
+      maxPower: budget.initialPower,
+      storageUsed: 0,
+      maxStorage: budget.maxStorage,
+      downlinkWindowSec: budget.downlinkDurationSec,
+      downlinkRemainingSec: budget.downlinkDurationSec,
+      downlinkElapsedSec: 0,
+      downlinkCommittedSec: 0,
+      activeDownlinkPacketId: null,
+      packets: [],
+      queuePacketIds: [],
+      lastStatusMessage:
+        `PASS ACTIVE (${scenario.name}): 1) Select Sector | 2) Choose Sensor & Scan | 3) Process & Queue before ${budget.downlinkDurationSec.toFixed(1)}s Downlink.`,
+      lastActionOk: true,
+      stepCounter: 0,
+      debrief: null,
+    };
+  }
+
+  public setScenario(scenarioId: MissionScenarioId): MissionState {
+    if (!MISSION_SCENARIOS[scenarioId]) {
+      this.state.lastStatusMessage = `Invalid scenario ID "${String(scenarioId)}".`;
+      this.state.lastActionOk = false;
+      return this.getState();
+    }
+    this.currentScenarioId = scenarioId;
+    this.state = this.createInitialState();
+    return this.getState();
+  }
+
+  public cycleScenario(): MissionState {
+    const scenarioKeys: MissionScenarioId[] = [
+      'STANDARD_INDUS_PASS',
+      'MONSOON_SUPERCELL_PASS',
+      'SOLAR_BROWNOUT_PASS',
+    ];
+    const curIdx = scenarioKeys.indexOf(this.currentScenarioId);
+    const nextScenario = scenarioKeys[(curIdx + 1) % scenarioKeys.length];
+    return this.setScenario(nextScenario);
+  }
+
+  public getState(): MissionState {
+    return {
+      ...this.state,
+      scenarioId: this.currentScenarioId,
+      packets: this.state.packets.map((p) => ({ ...p })),
+      queuePacketIds: [...this.state.queuePacketIds],
+      debrief: this.state.debrief
+        ? {
+            ...this.state.debrief,
+            transmittedPacketIds: [...this.state.debrief.transmittedPacketIds],
+            droppedPacketIds: [...this.state.debrief.droppedPacketIds],
+            evaluations: this.state.debrief.evaluations.map((e) => ({ ...e })),
+          }
+        : null,
+    };
+  }
+
+  public reset(): MissionState {
+    this.state = this.createInitialState();
+    return this.getState();
+  }
+
+  public selectSector(sectorId: SectorId): MissionState {
+    if (this.state.phase !== 'OPERATIONS' || this.state.paused) {
+      this.fail('INVALID_PHASE', 'Sector selection is locked during downlink or pause.');
+      return this.getState();
+    }
+    if (!isValidSectorId(sectorId)) {
+      this.state.lastStatusMessage = `Invalid sector ID "${String(sectorId)}". Valid sectors are A through F.`;
+      this.state.lastActionOk = false;
+      return this.getState();
+    }
+    const sector = getScenarioSector(this.currentScenarioId, sectorId);
+    this.state.selectedSectorId = sectorId;
+    this.state.stepCounter += 1;
+    const cloudTag =
+      sector.cloudCover === 'DENSE_STORM'
+        ? 'DENSE STORM CLOUDS (RADAR rec.)'
+        : 'CLEAR SKY (OPTICAL rec.)';
+    this.state.lastStatusMessage = `Selected ${sector.code} ${sector.name} - ${cloudTag}.`;
+    this.state.lastActionOk = true;
+    return this.getState();
+  }
+
+  public setSensorMode(mode: SensorMode): MissionState {
+    if (this.state.phase !== 'OPERATIONS' || this.state.paused) {
+      this.fail('INVALID_PHASE', 'Sensor selection is locked during downlink or pause.');
+      return this.getState();
+    }
+    if (!isValidSensorMode(mode)) {
+      this.state.lastStatusMessage = `Invalid sensor mode "${String(mode)}". Choose OPTICAL or RADAR.`;
+      this.state.lastActionOk = false;
+      return this.getState();
+    }
+    this.state.activeSensorMode = mode;
+    this.state.stepCounter += 1;
+    const budget = MISSION_SCENARIOS[this.currentScenarioId].budget;
+    const cost = mode === 'OPTICAL' ? budget.opticalScan : budget.radarScan;
+    this.state.lastStatusMessage =
+      mode === 'OPTICAL'
+        ? `Sensor switched to OPTICAL (${cost.powerCost} PWR, ${cost.storageCost} STR, ${cost.transmitSec.toFixed(1)}s Tx) - High detail in clear skies; blocked by dense clouds.`
+        : `Sensor switched to RADAR / SAR (${cost.powerCost} PWR, ${cost.storageCost} STR, ${cost.transmitSec.toFixed(1)}s Tx) - Images through storm clouds; subject to metal/slope glare.`;
+    this.state.lastActionOk = true;
+    return this.getState();
+  }
+
+  public toggleSensorMode(): MissionState {
+    const nextMode: SensorMode =
+      this.state.activeSensorMode === 'OPTICAL' ? 'RADAR' : 'OPTICAL';
+    return this.setSensorMode(nextMode);
+  }
+
+  public selectPacket(packetId: string | null): MissionState {
+    if (this.state.phase === 'DOWNLINK' || this.state.paused) {
+      this.fail('INVALID_PHASE', 'Evidence is locked during downlink or pause.');
+      return this.getState();
+    }
+    if (packetId === null) {
+      this.state.selectedPacketId = null;
+      this.state.lastActionOk = true;
+      return this.getState();
+    }
+    const pkt = this.state.packets.find((p) => p.id === packetId);
+    if (pkt) {
+      this.state.selectedPacketId = pkt.id;
+      this.state.lastStatusMessage = `Inspecting ${pkt.id} (${pkt.sectorCode} ${pkt.sensorMode} | ${pkt.confidenceBadge} | ${pkt.storageCost} STR | ${pkt.transmitSec.toFixed(1)}s Tx).`;
+      this.state.lastActionOk = true;
+    } else {
+      this.state.lastStatusMessage = `Packet "${packetId}" not found in onboard storage.`;
+      this.state.lastActionOk = false;
+    }
+    return this.getState();
+  }
+
+  public scanSector(
+    sectorId: SectorId = this.state.selectedSectorId,
+    sensorMode: SensorMode = this.state.activeSensorMode,
+  ): ActionResult {
+    if (this.state.phase !== 'OPERATIONS' || this.state.paused) {
+      return this.fail(
+        'INVALID_PHASE',
+        'Cannot initiate new sensor scan after downlink window has committed.',
+      );
+    }
+
+    if (!isValidSectorId(sectorId)) {
+      return this.fail(
+        'INVALID_SECTOR',
+        `Invalid target sector "${String(sectorId)}". Choose a valid sector A-F.`,
+      );
+    }
+
+    if (!isValidSensorMode(sensorMode)) {
+      return this.fail(
+        'INVALID_SENSOR',
+        `Invalid sensor mode "${String(sensorMode)}". Choose OPTICAL or RADAR.`,
+      );
+    }
+
+    this.state.selectedSectorId = sectorId;
+    this.state.activeSensorMode = sensorMode;
+
+    const scenario =
+      MISSION_SCENARIOS[this.currentScenarioId] ??
+      MISSION_SCENARIOS.STANDARD_INDUS_PASS;
+    const budget = scenario.budget;
+
+    const scanCost =
+      sensorMode === 'OPTICAL' ? budget.opticalScan : budget.radarScan;
+
+    if (this.state.power < scanCost.powerCost) {
+      return this.fail(
+        'INSUFFICIENT_POWER',
+        `Insufficient Power for ${sensorMode} scan: requires ${scanCost.powerCost} PWR, only ${this.state.power} PWR remaining.`,
+      );
+    }
+
+    if (this.state.storageUsed + scanCost.storageCost > this.state.maxStorage) {
+      return this.fail(
+        'INSUFFICIENT_STORAGE',
+        `Onboard Storage full (${this.state.storageUsed}/${this.state.maxStorage} STR). Process a valid cube (3->1 STR) or discard an unverified cube first.`,
+      );
+    }
+
+    if (this.state.packets.length >= MAX_EVIDENCE_CUBES) {
+      return this.fail(
+        'TRAY_FULL',
+        'TRAY FULL - all three evidence cubes are occupied. Discard an unnecessary cube before scanning again; compression frees memory, not a physical cube.',
+      );
+    }
+
+
+    const sector = getScenarioSector(this.currentScenarioId, sectorId);
+    const outcome = sector.outcomes[sensorMode];
+    const packetId = `PKT-${this.nextPacketNumber++}`;
+
+    this.state.power -= scanCost.powerCost;
+    this.state.storageUsed += scanCost.storageCost;
+    this.state.stepCounter += 1;
+
+    const packet: DataPacket = {
+      id: packetId,
+      sectorId: sector.id,
+      sectorCode: sector.code,
+      sectorName: sector.name,
+      sensorMode,
+      confidence: outcome.confidence,
+      confidenceBadge: outcome.confidenceBadge,
+      headline: outcome.headline,
+      finding: outcome.finding,
+      scientificReason: outcome.scientificReason,
+      satisfiesRequestId: outcome.satisfiesRequestId,
+      snrDb: outcome.snrDb,
+      swathWidthKm: outcome.swathWidthKm,
+      resolutionMeters: outcome.resolutionMeters,
+      phenomenologyTag: outcome.phenomenologyTag,
+      storageCost: scanCost.storageCost,
+      transmitSec: scanCost.transmitSec,
+      rawStorageCost: scanCost.storageCost,
+      rawTransmitSec: scanCost.transmitSec,
+      compressionRatio: 1.0,
+      ambiguityReason:
+        outcome.confidence === 'UNVERIFIED'
+          ? 'Dense cloud cover blocks visible-band optical reflection.'
+          : outcome.confidence === 'PROBABLE'
+            ? 'Microwave backscatter ambiguity (multipath corner reflection or terrain layover).'
+            : 'Clear sensor line-of-sight with high SNR and consistent terrain backscatter.',
+      provenanceLineage: `OBS[SEC-${sector.id}|${sensorMode}|STEP-${this.state.stepCounter}]`,
+      processed: false,
+      queued: false,
+      queueIndex: null,
+      transmitted: false,
+      droppedByWindow: false,
+      createdAtStep: this.state.stepCounter,
+    };
+
+    this.state.packets.push(packet);
+    this.state.selectedPacketId = packet.id;
+
+    const msg = `Scanned ${sector.code} (${sensorMode}): ${outcome.confidenceBadge} - ${outcome.headline} (-${scanCost.powerCost} PWR, +${scanCost.storageCost} STR).`;
+    this.state.lastStatusMessage = msg;
+    this.state.lastActionOk = true;
+
+    return {
+      ok: true,
+      code: 'OK',
+      message: msg,
+      packet: { ...packet },
+    };
+  }
+
+  public processPacket(
+    packetId: string | null = this.state.selectedPacketId,
+  ): ActionResult {
+    if (this.state.phase !== 'OPERATIONS' || this.state.paused) {
+      return this.fail(
+        'INVALID_PHASE',
+        'Cannot run onboard processing while downlink is transmitting or completed.',
+      );
+    }
+
+    const pkt = this.state.packets.find((p) => p.id === packetId);
+    if (!pkt) {
+      return this.fail(
+        'PACKET_NOT_FOUND',
+        'Select a data cube before activating the Processing Cradle.',
+      );
+    }
+
+    if (pkt.processed) {
+      return this.fail(
+        'ALREADY_PROCESSED',
+        `${pkt.id} (${pkt.sectorCode}) is already compressed to ${pkt.storageCost} STR / ${pkt.transmitSec.toFixed(1)}s Tx.`,
+      );
+    }
+
+    if (pkt.confidence === 'UNVERIFIED') {
+      return this.fail(
+        'CANNOT_PROCESS_UNVERIFIED',
+        `Processing rejected for ${pkt.id}: Onboard feature extraction cannot fabricate missing ground data from an [X] UNVERIFIED cloud-blocked frame. Discard this cube to free 3 STR.`,
+      );
+    }
+
+    const scenario =
+      MISSION_SCENARIOS[this.currentScenarioId] ??
+      MISSION_SCENARIOS.STANDARD_INDUS_PASS;
+    const procCost = scenario.budget.onboardProcess;
+    if (this.state.power < procCost.powerCost) {
+      return this.fail(
+        'INSUFFICIENT_POWER',
+        `Insufficient Power for onboard processing: requires ${procCost.powerCost} PWR, only ${this.state.power} PWR remaining.`,
+      );
+    }
+
+    const storageDelta = pkt.storageCost - procCost.compressedStorageCost;
+    this.state.power -= procCost.powerCost;
+    this.state.storageUsed = Math.max(0, this.state.storageUsed - storageDelta);
+    pkt.storageCost = procCost.compressedStorageCost;
+    pkt.transmitSec = procCost.compressedTransmitSec;
+    pkt.compressionRatio = 3.0;
+    pkt.processed = true;
+    pkt.compressionAlgorithm =
+      pkt.sectorId === 'C'
+        ? 'EDGE_TRUSS_VECTORIZATION'
+        : 'NDWI_WATER_MASK_EXTRACTION';
+    pkt.provenanceLineage = `${pkt.provenanceLineage} -> CRADLE[${pkt.compressionAlgorithm}]`;
+    this.state.selectedPacketId = pkt.id;
+    this.state.stepCounter += 1;
+
+    this.recalculateQueueTiming();
+
+    const msg = `Processed ${pkt.id} (${pkt.sectorCode} ${pkt.sensorMode} [${pkt.compressionAlgorithm}]): compressed to 1 STR and 1.8s Tx (-${procCost.powerCost} PWR, freed ${storageDelta} STR).`;
+    this.state.lastStatusMessage = msg;
+    this.state.lastActionOk = true;
+
+    return {
+      ok: true,
+      code: 'OK',
+      message: msg,
+      packet: { ...pkt },
+    };
+  }
+
+  public discardPacket(
+    packetId: string | null = this.state.selectedPacketId,
+  ): ActionResult {
+    if (this.state.phase !== 'OPERATIONS' || this.state.paused) {
+      return this.fail('INVALID_PHASE', 'Cannot discard packets after downlink has started.');
+    }
+
+    const index = this.state.packets.findIndex((p) => p.id === packetId);
+    if (index === -1) {
+      return this.fail('PACKET_NOT_FOUND', 'Select a data cube to discard.');
+    }
+
+    const [removed] = this.state.packets.splice(index, 1);
+    this.state.storageUsed = Math.max(0, this.state.storageUsed - removed.storageCost);
+    this.state.queuePacketIds = this.state.queuePacketIds.filter((id) => id !== removed.id);
+    this.recalculateQueueTiming();
+
+    if (this.state.selectedPacketId === removed.id) {
+      this.state.selectedPacketId =
+        this.state.packets[this.state.packets.length - 1]?.id ?? null;
+    }
+
+    this.state.stepCounter += 1;
+    const msg = `Discarded ${removed.id} (${removed.sectorCode} ${removed.sensorMode}) - freed ${removed.storageCost} STR.`;
+    this.state.lastStatusMessage = msg;
+    this.state.lastActionOk = true;
+
+    return {
+      ok: true,
+      code: 'OK',
+      message: msg,
+      packet: { ...removed },
+    };
+  }
+
+  public queuePacket(
+    packetId: string | null = this.state.selectedPacketId,
+    preferredSlotIndex?: number,
+  ): ActionResult {
+    if (this.state.phase !== 'OPERATIONS' || this.state.paused) {
+      return this.fail('INVALID_PHASE', 'Downlink queue is locked during transmission.');
+    }
+
+    const pkt = this.state.packets.find((p) => p.id === packetId);
+    if (!pkt) {
+      return this.fail('PACKET_NOT_FOUND', 'Select a data cube to place in the Downlink Bay.');
+    }
+
+    // If already queued and a slot index is provided, move it to that slot without duplicating
+    if (pkt.queued) {
+      if (
+        typeof preferredSlotIndex === 'number' &&
+        preferredSlotIndex >= 0
+      ) {
+        this.state.queuePacketIds = this.state.queuePacketIds.filter((id) => id !== pkt.id);
+        const clampedIdx = Math.min(preferredSlotIndex, this.state.queuePacketIds.length);
+        this.state.queuePacketIds.splice(clampedIdx, 0, pkt.id);
+        this.recalculateQueueTiming();
+      }
+      this.state.selectedPacketId = pkt.id;
+      this.state.stepCounter += 1;
+      const msg = `${pkt.id} (${pkt.sectorCode}) prioritized in Downlink Slot #${(pkt.queueIndex ?? 0) + 1} (Queue: ${this.state.downlinkCommittedSec.toFixed(1)}s / ${this.state.downlinkWindowSec.toFixed(1)}s).`;
+      this.state.lastStatusMessage = msg;
+      this.state.lastActionOk = true;
+      return {
+        ok: true,
+        code: 'OK',
+        message: msg,
+        packet: { ...pkt },
+      };
+    }
+
+    const maxSlots = Math.min(MAX_EVIDENCE_CUBES, MISSION_SCENARIOS[this.currentScenarioId].budget.maxQueueSlots);
+    if (this.state.queuePacketIds.length >= maxSlots) {
+      return this.fail('QUEUE_FULL', `Downlink Bay full (${maxSlots} slots max). Unqueue or discard a slot cube first.`);
+    }
+
+    if (
+      typeof preferredSlotIndex === 'number' &&
+      preferredSlotIndex >= 0 &&
+      preferredSlotIndex <= this.state.queuePacketIds.length
+    ) {
+      this.state.queuePacketIds.splice(preferredSlotIndex, 0, pkt.id);
+    } else {
+      this.state.queuePacketIds.push(pkt.id);
+    }
+
+    this.state.selectedPacketId = pkt.id;
+    this.state.stepCounter += 1;
+    this.recalculateQueueTiming();
+    if (!pkt.provenanceLineage.includes('BAY[')) {
+      pkt.provenanceLineage = `${pkt.provenanceLineage} -> BAY[SLOT-${(pkt.queueIndex ?? 0) + 1}]`;
+    }
+
+    const overflowWarn =
+      this.state.downlinkCommittedSec > this.state.downlinkWindowSec
+        ? ` WARNING: Queue takes ${this.state.downlinkCommittedSec.toFixed(1)}s (> ${this.state.downlinkWindowSec.toFixed(1)}s window); process cubes to compress!`
+        : '';
+    const msg = `Queued ${pkt.id} (${pkt.sectorCode} ${pkt.confidenceBadge}) in Slot #${(pkt.queueIndex ?? 0) + 1}. Total queue: ${this.state.downlinkCommittedSec.toFixed(1)}s / ${this.state.downlinkWindowSec.toFixed(1)}s.${overflowWarn}`;
+    this.state.lastStatusMessage = msg;
+    this.state.lastActionOk = true;
+
+    return {
+      ok: true,
+      code: 'OK',
+      message: msg,
+      packet: { ...pkt },
+    };
+  }
+
+  public unqueuePacket(
+    packetId: string | null = this.state.selectedPacketId,
+  ): ActionResult {
+    if (this.state.phase !== 'OPERATIONS' || this.state.paused) {
+      return this.fail('INVALID_PHASE', 'Cannot modify queue after downlink starts.');
+    }
+
+    const pkt = this.state.packets.find((p) => p.id === packetId);
+    if (!pkt) {
+      return this.fail('PACKET_NOT_FOUND', 'Packet not found.');
+    }
+
+    if (!pkt.queued) {
+      return this.fail('NOT_QUEUED', `${pkt.id} is not currently in the Downlink Bay.`);
+    }
+
+    this.state.queuePacketIds = this.state.queuePacketIds.filter((id) => id !== pkt.id);
+    pkt.queued = false;
+    pkt.queueIndex = null;
+    this.state.stepCounter += 1;
+    this.recalculateQueueTiming();
+
+    const msg = `Removed ${pkt.id} (${pkt.sectorCode}) from Downlink Bay. Queue now ${this.state.downlinkCommittedSec.toFixed(1)}s / ${this.state.downlinkWindowSec.toFixed(1)}s.`;
+    this.state.lastStatusMessage = msg;
+    this.state.lastActionOk = true;
+
+    return {
+      ok: true,
+      code: 'OK',
+      message: msg,
+      packet: { ...pkt },
+    };
+  }
+
+  public moveQueuedPacketUp(packetId: string): ActionResult {
+    if (this.state.phase !== 'OPERATIONS' || this.state.paused) {
+      return this.fail('INVALID_PHASE', 'Queue is locked during downlink or pause.');
+    }
+    const idx = this.state.queuePacketIds.indexOf(packetId);
+    if (idx === -1) {
+      return this.fail('NOT_QUEUED', `Packet ${packetId} is not in the Downlink Bay.`);
+    }
+    if (idx === 0) {
+      return this.queuePacket(packetId, 0);
+    }
+    return this.queuePacket(packetId, idx - 1);
+  }
+
+  public reorderQueue(orderedPacketIds: string[]): ActionResult {
+    if (this.state.phase !== 'OPERATIONS' || this.state.paused) {
+      return this.fail('INVALID_PHASE', 'Cannot reorder queue after downlink starts.');
+    }
+    const validIds: string[] = [];
+    for (const id of orderedPacketIds) {
+      if (this.state.queuePacketIds.includes(id) && !validIds.includes(id)) {
+        validIds.push(id);
+      }
+    }
+    for (const existingId of this.state.queuePacketIds) {
+      if (!validIds.includes(existingId)) {
+        validIds.push(existingId);
+      }
+    }
+    this.state.queuePacketIds = validIds;
+    this.state.stepCounter += 1;
+    this.recalculateQueueTiming();
+    const msg = `Reordered Downlink Bay queue: ${this.state.queuePacketIds.join(' -> ')}.`;
+    this.state.lastStatusMessage = msg;
+    this.state.lastActionOk = true;
+    return {
+      ok: true,
+      code: 'OK',
+      message: msg,
+    };
+  }
+
+  /**
+   * Starts the live 10.0-second downlink transmission window.
+   * Rejects empty queues or invalid phases so the player cannot accidentally end the pass with 0 queued packets.
+   */
+  public startDownlink(): ActionResult {
+    if (this.state.phase !== 'OPERATIONS' || this.state.paused) {
+      return this.fail(
+        'INVALID_PHASE',
+        'Downlink transmission has already been committed for this orbital pass.',
+      );
+    }
+
+    if (this.state.queuePacketIds.length === 0) {
+      return this.fail(
+        'EMPTY_QUEUE',
+        'Downlink Bay is empty! Queue at least 1 evidence cube before transmitting.',
+      );
+    }
+
+    this.state.phase = 'DOWNLINK';
+    this.state.downlinkElapsedSec = 0;
+    this.state.downlinkRemainingSec = this.state.downlinkWindowSec;
+    this.state.activeDownlinkPacketId = this.state.queuePacketIds[0] ?? null;
+    this.state.stepCounter += 1;
+
+    for (const pkt of this.state.packets) {
+      pkt.transmitted = false;
+      pkt.droppedByWindow = false;
+    }
+
+    const msg = `DOWNLINK STARTED: Transmitting ${this.state.queuePacketIds.length} queued packet(s) across ${this.state.downlinkWindowSec.toFixed(1)}s horizon window...`;
+    this.state.lastStatusMessage = msg;
+    this.state.lastActionOk = true;
+
+    return {
+      ok: true,
+      code: 'OK',
+      message: msg,
+    };
+  }
+
+  /**
+   * Advances an active DOWNLINK transmission by deltaSec seconds.
+   * Marks queued packets as transmitted as their cumulative transmit time completes within the 10.0s window,
+   * and finalizes the DEBRIEF report once all queued packets complete or the 10.0s window closes.
+   */
+  public tickDownlink(deltaSec: number): MissionState {
+    if (this.state.phase !== 'DOWNLINK' || this.state.paused || !Number.isFinite(deltaSec) || deltaSec <= 0) {
+      return this.getState();
+    }
+
+    this.state.downlinkElapsedSec = Math.min(this.state.downlinkWindowSec, this.state.downlinkElapsedSec + deltaSec);
+
+    let cumulativeSec = 0;
+    let allQueuedFinished = true;
+    let activeId: string | null = null;
+
+    for (const pktId of this.state.queuePacketIds) {
+      const pkt = this.state.packets.find((p) => p.id === pktId);
+      if (!pkt) continue;
+
+      const finishTime = Number((cumulativeSec + pkt.transmitSec).toFixed(3));
+      if (finishTime <= this.state.downlinkWindowSec + 1e-6) {
+        if (this.state.downlinkElapsedSec + 1e-6 >= finishTime) {
+          pkt.transmitted = true;
+          pkt.droppedByWindow = false;
+        } else {
+          pkt.transmitted = false;
+          allQueuedFinished = false;
+          if (!activeId) {
+            activeId = pkt.id;
+          }
+        }
+        cumulativeSec = finishTime;
+      } else {
+        // This packet cannot fit within the 10.0s window
+        pkt.transmitted = false;
+        if (this.state.downlinkElapsedSec + 1e-6 >= this.state.downlinkWindowSec) {
+          pkt.droppedByWindow = true;
+        } else {
+          allQueuedFinished = false;
+          if (!activeId) {
+            activeId = pkt.id;
+          }
+        }
+      }
+      cumulativeSec = finishTime;
+    }
+
+    const usedSec = Math.min(this.state.downlinkElapsedSec, cumulativeSec, this.state.downlinkWindowSec);
+    this.state.downlinkRemainingSec = Number(
+      Math.max(0, this.state.downlinkWindowSec - this.state.downlinkElapsedSec).toFixed(1),
+    );
+    this.state.activeDownlinkPacketId = activeId;
+
+    const windowExpired = this.state.downlinkElapsedSec + 1e-6 >= this.state.downlinkWindowSec;
+
+    if (allQueuedFinished || windowExpired) {
+      this.finalizeDownlink();
+    } else if (activeId) {
+      const activePkt = this.state.packets.find((p) => p.id === activeId);
+      this.state.lastStatusMessage = `TRANSMITTING ${activeId} (${activePkt?.sectorCode ?? ''} ${activePkt?.sensorMode ?? ''}) - ${this.state.downlinkRemainingSec.toFixed(1)}s window remaining (${usedSec.toFixed(1)}s elapsed)...`;
+    }
+
+    return this.getState();
+  }
+
+  /**
+   * Deterministic instant-completion helper: starts downlink (if in OPERATIONS) and resolves the full pass window.
+   * Returns the DebriefReport if valid, or null if the queue is empty or phase is invalid.
+   */
+  public commitDownlink(): DebriefReport | null {
+    if (this.state.phase === 'OPERATIONS') {
+      const startRes = this.startDownlink();
+      if (!startRes.ok) {
+        return null;
+      }
+    } else if (this.state.phase === 'DEBRIEF') {
+      this.fail(
+        'INVALID_PHASE',
+        'Downlink pass has already completed. Reset mission to run a new pass.',
+      );
+      return null;
+    }
+
+    this.tickDownlink(this.state.downlinkWindowSec);
+    return this.state.debrief ? { ...this.state.debrief } : null;
+  }
+
+  private finalizeDownlink(): void {
+    let cumulativeSec = 0;
+    const transmittedPackets: DataPacket[] = [];
+    const droppedPackets: DataPacket[] = [];
+
+    for (const pktId of this.state.queuePacketIds) {
+      const pkt = this.state.packets.find((p) => p.id === pktId);
+      if (!pkt) continue;
+      cumulativeSec = Number((cumulativeSec + pkt.transmitSec).toFixed(6));
+      pkt.transmitted = cumulativeSec <= this.state.downlinkWindowSec + 1e-6;
+      pkt.droppedByWindow = !pkt.transmitted;
+      if (pkt.transmitted) {
+        if (!pkt.provenanceLineage.includes('S-BAND-TX')) {
+          pkt.provenanceLineage = `${pkt.provenanceLineage} -> S-BAND-TX[OK]`;
+        }
+        transmittedPackets.push(pkt);
+      } else {
+        if (!pkt.provenanceLineage.includes('DROPPED')) {
+          pkt.provenanceLineage = `${pkt.provenanceLineage} -> DROPPED[WINDOW-EXPIRED]`;
+        }
+        droppedPackets.push(pkt);
+      }
+    }
+
+    const usedSec = Math.min(cumulativeSec, this.state.downlinkWindowSec);
+    this.state.downlinkRemainingSec = Number((this.state.downlinkWindowSec - usedSec).toFixed(6));
+    this.state.downlinkElapsedSec = usedSec;
+    this.state.activeDownlinkPacketId = null;
+
+    const scenario =
+      MISSION_SCENARIOS[this.currentScenarioId] ??
+      MISSION_SCENARIOS.STANDARD_INDUS_PASS;
+
+    const debrief = buildDebriefReport({
+      allPackets: this.state.packets,
+      transmittedPackets,
+      droppedPackets,
+      powerRemaining: this.state.power,
+      storageUsed: this.state.storageUsed,
+      downlinkUsedSec: usedSec,
+      initialPower: scenario.budget.initialPower,
+      downlinkWindowSec: scenario.budget.downlinkDurationSec,
+      scenarioId: this.currentScenarioId,
+    });
+
+    this.state.phase = 'DEBRIEF';
+    this.state.debrief = debrief;
+    this.state.lastStatusMessage = `DOWNLINK COMPLETE (${usedSec.toFixed(1)}s / ${this.state.downlinkWindowSec.toFixed(1)}s): ${debrief.missionRank} - ${debrief.requestsVerifiedCount}/3 Requests Verified (${debrief.totalScore}/100 pts).`;
+    this.state.lastActionOk = true;
+  }
+
+  private recalculateQueueTiming(): void {
+    let totalSec = 0;
+    for (let i = 0; i < this.state.packets.length; i++) {
+      const p = this.state.packets[i];
+      const qIdx = this.state.queuePacketIds.indexOf(p.id);
+      if (qIdx !== -1) {
+        p.queued = true;
+        p.queueIndex = qIdx;
+        totalSec += p.transmitSec;
+      } else {
+        p.queued = false;
+        p.queueIndex = null;
+      }
+    }
+    this.state.downlinkCommittedSec = Number(totalSec.toFixed(1));
+  }
+
+  public getJournal(): MissionJournalEntry[] {
+    return this.journal.map((entry) => ({ ...entry, action: structuredClone(entry.action) }));
+  }
+
+  public getStateHash(): string {
+    const state = this.getState();
+    const serialized = JSON.stringify({
+      scenarioId: state.scenarioId, phase: state.phase, paused: state.paused,
+      power: state.power, storage: state.storageUsed, selectedSector: state.selectedSectorId,
+      sensor: state.activeSensorMode, selectedPacket: state.selectedPacketId,
+      elapsed: Number(state.downlinkElapsedSec.toFixed(3)), packets: state.packets,
+      queue: state.queuePacketIds, score: state.debrief?.totalScore ?? null,
+    });
+    let hash = 2166136261;
+    for (let i = 0; i < serialized.length; i++) hash = Math.imul(hash ^ serialized.charCodeAt(i), 16777619);
+    return (hash >>> 0).toString(16).padStart(8, '0');
+  }
+
+  public dispatch(action: MissionAction, elapsedSec?: number): ActionResult | MissionState {
+    const phaseBeforeAction = this.state.phase;
+    let result: ActionResult | MissionState;
+    switch (action.type) {
+      case 'SELECT_SECTOR': result = this.selectSector(action.sectorId); break;
+      case 'SET_SENSOR': result = this.setSensorMode(action.sensorMode); break;
+      case 'SELECT_PACKET': result = this.selectPacket(action.packetId); break;
+      case 'SCAN': result = this.scanSector(action.sectorId, action.sensorMode); break;
+      case 'PROCESS': result = this.processPacket(action.packetId); break;
+      case 'DISCARD': result = this.discardPacket(action.packetId); break;
+      case 'UNQUEUE': result = this.unqueuePacket(action.packetId); break;
+      case 'QUEUE': result = this.queuePacket(action.packetId, action.slotIndex); break;
+      case 'REORDER': result = this.reorderQueue(action.packetIds); break;
+      case 'COMMIT': result = this.startDownlink(); break;
+      case 'PAUSE':
+      case 'RESUME':
+        if (this.state.phase === 'DEBRIEF') result = this.fail('INVALID_PHASE', 'This pass is complete.');
+        else {
+          this.state.paused = action.type === 'PAUSE';
+          this.state.lastStatusMessage = this.state.paused ? 'PAUSED - the pass clock is held. Resume when ready.' : 'PASS RESUMED - your evidence and window are preserved.';
+          this.state.lastActionOk = true;
+          result = this.getState();
+        }
+        break;
+      case 'TICK': result = this.tickDownlink(action.seconds); break;
+    }
+    if (action.type === 'TICK' && (phaseBeforeAction !== 'DOWNLINK' || !Number.isFinite(action.seconds) || action.seconds <= 0 || this.state.paused)) return result;
+    const previous = this.journal[this.journal.length - 1];
+    const entry: MissionJournalEntry = {
+      sequence: this.journal.length, elapsedSec: elapsedSec ?? this.state.downlinkElapsedSec,
+      action: structuredClone(action), ok: 'ok' in result ? result.ok : result.lastActionOk,
+      stateHash: this.getStateHash(),
+    };
+    if (action.type === 'TICK' && previous?.action.type === 'TICK') {
+      previous.action.seconds += action.seconds;
+      previous.elapsedSec = entry.elapsedSec;
+      previous.stateHash = entry.stateHash;
+    } else this.journal.push(entry);
+    return result;
+  }
+
+  private fail(code: ActionResultCode, message: string): ActionResult {
+    this.state.lastStatusMessage = message;
+    this.state.lastActionOk = false;
+    return {
+      ok: false,
+      code,
+      message,
+    };
+  }
+}
+
+export function replayMission(scenarioId: MissionScenarioId, journal: MissionJournalEntry[]): MissionEngine {
+  const engine = new MissionEngine(scenarioId);
+  for (const entry of journal) {
+    engine.dispatch(entry.action, entry.elapsedSec);
+    if (engine.getStateHash() !== entry.stateHash) {
+      throw new Error(`Replay diverged at action ${entry.sequence}: ${entry.action.type}`);
+    }
+  }
+  return engine;
+}

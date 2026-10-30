@@ -1,0 +1,626 @@
+{
+  "version": "iwsdk.scene.v1",
+  "units": "meters",
+  "components": {
+    "com.iwsdk.components.DomeGradient": {
+      "sky": [
+        0.015,
+        0.028,
+        0.06,
+        1
+      ],
+      "equator": [
+        0.045,
+        0.095,
+        0.18,
+        1
+      ],
+      "ground": [
+        0.01,
+        0.018,
+        0.035,
+        1
+      ],
+      "intensity": 1.05
+    },
+    "com.iwsdk.components.IBLGradient": {
+      "sky": [
+        0.42,
+        0.65,
+        0.88,
+        1
+      ],
+      "equator": [
+        0.26,
+        0.38,
+        0.54,
+        1
+      ],
+      "ground": [
+        0.1,
+        0.14,
+        0.2,
+        1
+      ],
+      "intensity": 1.35
+    }
+  },
+  "resources": {},
+  "authoring": {
+    "views": [
+      {
+        "id": "hero",
+        "role": "hero",
+        "projection": "perspective",
+        "position": [
+          0,
+          1.25,
+          0.34
+        ],
+        "target": [
+          0,
+          1.04,
+          -0.82
+        ],
+        "fov": 64
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "key-light",
+      "name": "Orbital Solar Key Light",
+      "transform": {
+        "position": [
+          2.6,
+          2.8,
+          -3.2
+        ],
+        "rotationDeg": [
+          -25,
+          145,
+          0
+        ]
+      },
+      "components": {
+        "com.iwsdk.components.DirectionalLight": {
+          "color": [
+            1.0,
+            0.96,
+            0.88,
+            1
+          ],
+          "intensity": 3.4,
+          "castShadow": false
+        }
+      }
+    },
+    {
+      "id": "fill-light",
+      "name": "Cupola Instrument Fill Light",
+      "components": {
+        "com.iwsdk.components.HemisphereLight": {
+          "skyColor": [
+            0.18,
+            0.24,
+            0.38,
+            1
+          ],
+          "groundColor": [
+            0.06,
+            0.08,
+            0.14,
+            1
+          ],
+          "intensity": 1.15
+        }
+      }
+    },
+    {
+      "id": "orbital-console",
+      "name": "Orbital Console",
+      "content": {
+        "type": "asset",
+        "asset": "orbital-console",
+        "castShadow": false,
+        "receiveShadow": false
+      },
+      "transform": {
+        "position": [
+          0,
+          0,
+          -0.56
+        ]
+      },
+      "components": {}
+    },
+    {
+      "id": "cubesat-spacecraft",
+      "name": "NASA 3U Earth-Observation CubeSat",
+      "content": {
+        "type": "asset",
+        "asset": "nasa-cubesat",
+        "castShadow": false,
+        "receiveShadow": false
+      },
+      "transform": {
+        "position": [
+          0,
+          1.255,
+          -0.55
+        ],
+        "rotationDeg": [
+          18,
+          -36,
+          -8
+        ],
+        "scale": 0.92
+      },
+      "components": {}
+    },
+    {
+      "id": "earth-globe",
+      "name": "Tactical Earth Globe",
+      "content": {
+        "type": "asset",
+        "asset": "earth-globe",
+        "castShadow": false,
+        "receiveShadow": false
+      },
+      "transform": {
+        "position": [
+          0,
+          0.99,
+          -0.58
+        ]
+      },
+      "components": {}
+    },
+    {
+      "id": "sector-a",
+      "name": "Sector A Beacon",
+      "content": {
+        "type": "asset",
+        "asset": "sector-beacon-clear"
+      },
+      "transform": {
+        "position": [
+          -0.051,
+          1.0743,
+          -0.4094
+        ],
+        "rotationDeg": [
+          63.7,
+          0,
+          15
+        ]
+      },
+      "components": {
+        "RayInteractable": {},
+        "PokeInteractable": {},
+        "OrbitSectorNode": {
+          "sectorId": "A"
+        }
+      }
+    },
+    {
+      "id": "sector-b",
+      "name": "Sector B Beacon",
+      "content": {
+        "type": "asset",
+        "asset": "sector-beacon-cloudy"
+      },
+      "transform": {
+        "position": [
+          0.0407,
+          1.0692,
+          -0.4043
+        ],
+        "rotationDeg": [
+          65.7,
+          0,
+          -11.9
+        ]
+      },
+      "components": {
+        "RayInteractable": {},
+        "PokeInteractable": {},
+        "OrbitSectorNode": {
+          "sectorId": "B"
+        }
+      }
+    },
+    {
+      "id": "sector-c",
+      "name": "Sector C Beacon",
+      "content": {
+        "type": "asset",
+        "asset": "sector-beacon-clear"
+      },
+      "transform": {
+        "position": [
+          -0.0832,
+          1.0183,
+          -0.4037
+        ],
+        "rotationDeg": [
+          80.9,
+          0,
+          25
+        ]
+      },
+      "components": {
+        "RayInteractable": {},
+        "PokeInteractable": {},
+        "OrbitSectorNode": {
+          "sectorId": "C"
+        }
+      }
+    },
+    {
+      "id": "sector-d",
+      "name": "Sector D Beacon",
+      "content": {
+        "type": "asset",
+        "asset": "sector-beacon-clear"
+      },
+      "transform": {
+        "position": [
+          0.0001,
+          1.0139,
+          -0.3845
+        ],
+        "rotationDeg": [
+          83,
+          0,
+          0
+        ]
+      },
+      "components": {
+        "RayInteractable": {},
+        "PokeInteractable": {},
+        "OrbitSectorNode": {
+          "sectorId": "D"
+        }
+      }
+    },
+    {
+      "id": "sector-e",
+      "name": "Sector E Beacon",
+      "content": {
+        "type": "asset",
+        "asset": "sector-beacon-cloudy"
+      },
+      "transform": {
+        "position": [
+          -0.0539,
+          0.9433,
+          -0.3964
+        ],
+        "rotationDeg": [
+          104.3,
+          0,
+          15.9
+        ]
+      },
+      "components": {
+        "RayInteractable": {},
+        "PokeInteractable": {},
+        "OrbitSectorNode": {
+          "sectorId": "E"
+        }
+      }
+    },
+    {
+      "id": "sector-f",
+      "name": "Sector F Beacon",
+      "content": {
+        "type": "asset",
+        "asset": "sector-beacon-clear"
+      },
+      "transform": {
+        "position": [
+          0.0542,
+          0.9484,
+          -0.3952
+        ],
+        "rotationDeg": [
+          102.7,
+          0,
+          -16
+        ]
+      },
+      "components": {
+        "RayInteractable": {},
+        "PokeInteractable": {},
+        "OrbitSectorNode": {
+          "sectorId": "F"
+        }
+      }
+    },
+    {
+      "id": "scanner-tool",
+      "name": "Orbital Scanner Tool",
+      "content": {
+        "type": "asset",
+        "asset": "scanner-tool",
+        "castShadow": false
+      },
+      "transform": {
+        "position": [
+          -0.48,
+          0.79,
+          -0.54
+        ]
+      },
+      "components": {
+        "RayInteractable": {},
+        "PokeInteractable": {},
+        "OneHandGrabbable": {},
+        "ConsoleControlNode": {
+          "action": "SCAN"
+        }
+      }
+    },
+    {
+      "id": "evidence-cube-1",
+      "name": "Evidence Cube 1",
+      "content": {
+        "type": "asset",
+        "asset": "evidence-cube-cyan",
+        "castShadow": false
+      },
+      "transform": {
+        "position": [
+          -0.46,
+          0.79,
+          -0.43
+        ]
+      },
+      "components": {
+        "RayInteractable": {},
+        "PokeInteractable": {},
+        "OneHandGrabbable": {},
+        "EvidenceCubeNode": {
+          "slotIndex": 0,
+          "packetId": ""
+        }
+      }
+    },
+    {
+      "id": "evidence-cube-2",
+      "name": "Evidence Cube 2",
+      "content": {
+        "type": "asset",
+        "asset": "evidence-cube-amber",
+        "castShadow": false
+      },
+      "transform": {
+        "position": [
+          -0.37,
+          0.79,
+          -0.43
+        ]
+      },
+      "components": {
+        "RayInteractable": {},
+        "PokeInteractable": {},
+        "OneHandGrabbable": {},
+        "EvidenceCubeNode": {
+          "slotIndex": 1,
+          "packetId": ""
+        }
+      }
+    },
+    {
+      "id": "evidence-cube-3",
+      "name": "Evidence Cube 3",
+      "content": {
+        "type": "asset",
+        "asset": "evidence-cube-emerald",
+        "castShadow": false
+      },
+      "transform": {
+        "position": [
+          -0.28,
+          0.79,
+          -0.43
+        ]
+      },
+      "components": {
+        "RayInteractable": {},
+        "PokeInteractable": {},
+        "OneHandGrabbable": {},
+        "EvidenceCubeNode": {
+          "slotIndex": 2,
+          "packetId": ""
+        }
+      }
+    },
+    {
+      "id": "pad-toggle-sensor",
+      "name": "Toggle Sensor Pad",
+      "content": {
+        "type": "asset",
+        "asset": "console-pad-cyan"
+      },
+      "transform": {
+        "position": [
+          -0.35,
+          0.788,
+          -0.54
+        ]
+      },
+      "components": {
+        "RayInteractable": {},
+        "PokeInteractable": {},
+        "ConsoleControlNode": {
+          "action": "TOGGLE_SENSOR"
+        }
+      }
+    },
+    {
+      "id": "pad-process-cradle",
+      "name": "Processing Cradle Pad",
+      "content": {
+        "type": "asset",
+        "asset": "console-pad-amber"
+      },
+      "transform": {
+        "position": [
+          0.24,
+          0.786,
+          -0.51
+        ]
+      },
+      "components": {
+        "RayInteractable": {},
+        "PokeInteractable": {},
+        "ConsoleControlNode": {
+          "action": "PROCESS"
+        }
+      }
+    },
+    {
+      "id": "pad-queue-downlink",
+      "name": "Queue Downlink Pad",
+      "content": {
+        "type": "asset",
+        "asset": "console-pad-cyan"
+      },
+      "transform": {
+        "position": [
+          0.32,
+          0.786,
+          -0.37
+        ]
+      },
+      "components": {
+        "RayInteractable": {},
+        "PokeInteractable": {},
+        "ConsoleControlNode": {
+          "action": "QUEUE"
+        }
+      }
+    },
+    {
+      "id": "pad-commit-downlink",
+      "name": "Commit Downlink Pad",
+      "content": {
+        "type": "asset",
+        "asset": "console-pad-emerald"
+      },
+      "transform": {
+        "position": [
+          0.46,
+          0.786,
+          -0.37
+        ]
+      },
+      "components": {
+        "RayInteractable": {},
+        "PokeInteractable": {},
+        "ConsoleControlNode": {
+          "action": "COMMIT_DOWNLINK"
+        }
+      }
+    },
+    {
+      "id": "pad-discard-chute",
+      "name": "Discard Chute Pad",
+      "content": {
+        "type": "asset",
+        "asset": "console-pad-coral"
+      },
+      "transform": {
+        "position": [
+          0.49,
+          0.785,
+          -0.58
+        ]
+      },
+      "components": {
+        "RayInteractable": {},
+        "PokeInteractable": {},
+        "ConsoleControlNode": {
+          "action": "DISCARD"
+        }
+      }
+    },
+    {
+      "id": "briefing-panel",
+      "name": "Briefing Panel",
+      "content": {
+        "type": "asset",
+        "asset": "briefing-panel"
+      },
+      "transform": {
+        "position": [
+          -0.74,
+           1.16,
+           -1.04
+        ],
+        "rotationDeg": [
+          0,
+          26,
+          0
+        ],
+        "scale": 0.098
+      },
+      "components": {
+        "RayInteractable": {},
+        "PokeInteractable": {}
+      }
+    },
+    {
+      "id": "telemetry-hud",
+      "name": "Telemetry HUD",
+      "content": {
+        "type": "asset",
+        "asset": "telemetry-hud"
+      },
+      "transform": {
+        "position": [
+          0,
+          1.67,
+          -1.16
+        ],
+        "rotationDeg": [
+          16,
+          0,
+          0
+        ],
+        "scale": 0.100
+      },
+      "components": {
+        "RayInteractable": {},
+        "PokeInteractable": {}
+      }
+    },
+    {
+      "id": "debrief-panel",
+      "name": "Debrief Panel",
+      "content": {
+        "type": "asset",
+        "asset": "debrief-panel"
+      },
+      "transform": {
+        "position": [
+          0.74,
+           1.16,
+           -1.04
+        ],
+        "rotationDeg": [
+          0,
+          -26,
+          0
+        ],
+        "scale": 0.098
+      },
+      "components": {
+        "RayInteractable": {},
+        "PokeInteractable": {}
+      }
+    }
+  ]
+}
