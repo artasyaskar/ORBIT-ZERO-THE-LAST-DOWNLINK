@@ -133,3 +133,4 @@ Exit code: 0
 
 ## 6. Conclusion
 The desktop experience is now fully self-explanatory, responsive, and robustly playable using any standard laptop keyboard and mouse. Evaluators without a Quest headset can evaluate the full depth of the game mechanics, scientific credibility, and triage puzzle immediately, while Quest VR users continue to enjoy hands-first spatial physics.
+

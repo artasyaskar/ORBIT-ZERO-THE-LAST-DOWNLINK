@@ -2076,17 +2076,34 @@ export class MissionControlSystem extends createSystem({
       const obj = sectorEntity.object3D;
       if (!obj) continue;
 
-      const scale = isSelected ? 1.32 : isGazed ? 1.18 : 1.0;
+      const scannedPkt = state.packets.find((p) => p.sectorId === sectorId);
+      const isScanned = scannedPkt !== undefined;
+      const scale = isSelected ? 1.35 : isGazed ? 1.18 : isScanned ? 1.12 : 1.0;
       obj.scale.set(scale, scale, scale);
 
-      const hex = isSelected
-        ? 0x10b981
-        : isGazed
-          ? 0x67e8f9
-          : sectorCfg.cloudCover === 'DENSE_STORM'
-            ? 0xf59e0b
-            : 0x38bdf8;
-      this.setObjectTint(obj, hex, isSelected ? 1.45 : isGazed ? 1.25 : 0.85);
+      let hex = 0x38bdf8;
+      if (isScanned) {
+        if (scannedPkt.confidence === 'CONFIRMED') {
+          hex = scannedPkt.headline.toLowerCase().includes('inundation') ||
+                scannedPkt.headline.toLowerCase().includes('breach') ||
+                scannedPkt.headline.toLowerCase().includes('washed')
+            ? 0x0284c7 // Deep sapphire for confirmed floodwater
+            : 0x10b981; // Emerald for confirmed intact/clear crossing
+        } else if (scannedPkt.confidence === 'PROBABLE') {
+          hex = 0xf59e0b; // Amber for structural glare / mountain layover ambiguity
+        } else {
+          hex = 0xef4444; // Crimson for cloud-obscured / unverified failure
+        }
+      } else {
+        hex = isSelected
+          ? 0x10b981
+          : isGazed
+            ? 0x67e8f9
+            : sectorCfg.cloudCover === 'DENSE_STORM'
+              ? 0xf59e0b
+              : 0x38bdf8;
+      }
+      this.setObjectTint(obj, hex, isSelected ? 1.45 : isGazed ? 1.25 : isScanned ? 1.15 : 0.85);
 
       if (globe) {
         const polyRibbon = globe.getObjectByName(`SectorPoly_${sectorId}`);
@@ -2094,29 +2111,24 @@ export class MissionControlSystem extends createSystem({
           polyRibbon instanceof Mesh &&
           polyRibbon.material instanceof MeshStandardMaterial
         ) {
-          const polyHex = isSelected
-            ? 0x10b981
-            : sectorCfg.cloudCover === 'DENSE_STORM'
-              ? 0xf59e0b
-              : 0x38bdf8;
-          polyRibbon.material.color.setHex(polyHex);
-          polyRibbon.material.emissive.setHex(polyHex);
-          polyRibbon.material.emissiveIntensity = isSelected ? 1.65 : 0.92;
-          polyRibbon.material.opacity = isSelected ? 1.0 : 0.82;
+          polyRibbon.material.color.setHex(hex);
+          polyRibbon.material.emissive.setHex(hex);
+          polyRibbon.material.emissiveIntensity = isSelected ? 1.75 : isScanned ? 1.35 : 0.92;
+          polyRibbon.material.opacity = isSelected ? 1.0 : isScanned ? 0.95 : 0.82;
         }
         const polyFill = globe.getObjectByName(`SectorFill_${sectorId}`);
         if (
           polyFill instanceof Mesh &&
           polyFill.material instanceof MeshBasicMaterial
         ) {
-          polyFill.material.color.setHex(
-            isSelected
-              ? 0x10b981
+          polyFill.material.color.setHex(hex);
+          polyFill.material.opacity = isSelected
+            ? 0.28
+            : isScanned
+              ? 0.22
               : sectorCfg.cloudCover === 'DENSE_STORM'
-                ? 0xf59e0b
-                : 0x38bdf8,
-          );
-          polyFill.material.opacity = isSelected ? 0.16 : 0.035;
+                ? 0.08
+                : 0.035;
         }
         const stormCap = globe.getObjectByName(`SectorStormCap_${sectorId}`);
         if (
@@ -2124,7 +2136,24 @@ export class MissionControlSystem extends createSystem({
           stormCap.material instanceof MeshStandardMaterial
         ) {
           stormCap.visible = sectorCfg.cloudCover === 'DENSE_STORM';
-          stormCap.material.opacity = isSelected ? 0.82 : 0.68;
+          if (isScanned) {
+            if (scannedPkt.sensorMode === 'RADAR') {
+              // Microwave radar penetrated the storm wall: cloud becomes semi-transparent
+              stormCap.material.opacity = 0.24;
+              stormCap.material.emissive.setHex(0x38bdf8);
+              stormCap.material.emissiveIntensity = 0.55;
+            } else {
+              // Optical failed against cloud deck: high-albedo cloud reflection glare
+              stormCap.material.opacity = 0.92;
+              stormCap.material.color.setHex(0xe2e8f0);
+              stormCap.material.emissive.setHex(0xef4444);
+              stormCap.material.emissiveIntensity = 0.45;
+            }
+          } else {
+            stormCap.material.opacity = isSelected ? 0.82 : 0.68;
+            stormCap.material.emissive.setHex(0x000000);
+            stormCap.material.emissiveIntensity = 0.0;
+          }
         }
       }
     }

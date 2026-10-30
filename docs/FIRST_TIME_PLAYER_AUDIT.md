@@ -125,3 +125,4 @@ flowchart TD
 ## 5. Conclusion
 
 The First-Time Player Experience now provides an immediate, cinematic, and educational onboarding loop. Evaluators and players transition from initial disorientation to confident orbital intelligence specialists in under 60 seconds, experiencing the core dramatic tension of Earth-observation triage.
+

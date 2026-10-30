@@ -69,6 +69,8 @@ export class DesktopControlsManager {
   private containerEl?: HTMLDivElement;
   private bannerEl?: HTMLDivElement;
   private toolbarEl?: HTMLDivElement;
+  private reconEl?: HTMLDivElement;
+  private compareEl?: HTMLDivElement;
   private diagEl?: HTMLDivElement;
   private toastEl?: HTMLDivElement;
   private helpModalEl?: HTMLDivElement;
@@ -657,6 +659,44 @@ export class DesktopControlsManager {
     `;
     this.containerEl.appendChild(this.toolbarEl);
 
+    // 3b. Left Tactical Reconnaissance HUD (Live Sector Sensor Feasibility)
+    this.reconEl = document.createElement('div');
+    this.reconEl.id = 'orbit-zero-recon-card';
+    this.reconEl.style.cssText = `
+      position: absolute;
+      top: 92px; left: 16px;
+      width: 320px;
+      background: rgba(11, 18, 32, 0.94);
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: #cbd5e1;
+      font-size: 11px;
+      line-height: 1.45;
+      pointer-events: none;
+    `;
+    this.containerEl.appendChild(this.reconEl);
+
+    // 3c. Right Evidence Comparison & Knapsack Downlink HUD
+    this.compareEl = document.createElement('div');
+    this.compareEl.id = 'orbit-zero-compare-card';
+    this.compareEl.style.cssText = `
+      position: absolute;
+      top: 92px; right: 16px;
+      width: 330px;
+      background: rgba(11, 18, 32, 0.94);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: #cbd5e1;
+      font-size: 11px;
+      line-height: 1.45;
+      pointer-events: none;
+    `;
+    this.containerEl.appendChild(this.compareEl);
+
     // 4. Diagnostic HUD Panel ([F1])
     this.diagEl = document.createElement('div');
     this.diagEl.style.cssText = `
@@ -711,6 +751,12 @@ export class DesktopControlsManager {
     // 1. Render Top Banner (Tutorial or Mission Status)
     this.renderTopBanner(state);
 
+    // 1b. Render Tactical Reconnaissance Card (Live Sector Feasibility)
+    this.renderReconCard(state);
+
+    // 1c. Render Evidence Telemetry & Downlink Knapsack Card
+    this.renderCompareCard(state);
+
     // 2. Render Bottom Toolbar Controls
     this.renderBottomToolbar(state);
 
@@ -728,7 +774,7 @@ export class DesktopControlsManager {
       const debrief = state.debrief!;
       this.bannerEl.innerHTML = `
         <div style="font-size: 11px; color: #38bdf8; font-weight: 700; letter-spacing: 1px; margin-bottom: 2px;">
-          MISSION AFTER-ACTION REVIEW (AAR)
+          MISSION AFTER-ACTION REVIEW (AAR) — GROUND OUTCOMES
         </div>
         <div style="font-size: 17px; font-weight: 700; color: #34d399; margin-bottom: 4px;">
           GRADE ${debrief.efficiencyGrade} — ${debrief.totalScore}/${debrief.maxScore} POINTS EARNED
@@ -769,61 +815,61 @@ export class DesktopControlsManager {
 
     const scenarioTitle = MISSION_SCENARIOS[state.scenarioId]?.name ?? state.scenarioId;
 
-    // OPERATIONS Phase: Guided Tutorial vs Operator Mode
+    // OPERATIONS Phase: Guided Tactical Onboarding vs Operator Mode
     if (this.tutorialActive) {
-      let stepBadge = 'STEP 1 / 6';
-      let title = 'SELECT TARGET SECTOR B';
-      let prompt = 'Road inundation reported in Sector B. Click the Sector B beacon on the globe or press <b>[2]</b>.';
-      let tip = 'Ground rescue teams require evidence of road passability.';
+      let stepBadge = 'INVESTIGATE';
+      let title = 'EVALUATE SECTOR B (INDUS BASIN)';
+      let prompt = 'Convoys approaching Sector B. Notice the 95% storm clouds. Optical cannot see through clouds; Active Radar (SAR) pierces storm cover.';
+      let tip = 'Click Sector B on the globe or press [2].';
 
       switch (this.tutorialStep) {
         case 'INTRO':
-          stepBadge = 'BRIEFING';
-          title = 'MONSOON CRISIS: INDUS BASIN';
-          prompt = 'Severe flooding has cut off communications. Three ground requests require satellite evidence before the downlink window closes.';
-          tip = 'Click Sector B on the globe or press <b>[2]</b> to begin.';
+          stepBadge = 'CRISIS BRIEFING';
+          title = 'INDUS RIVER BASIN: LEVEE BREACH';
+          prompt = 'A Category 4 Monsoon supercell has breached river levees in Sindh. 120,000 residents are trapped by rising waters. Ground rescue teams require verified orbital evidence before the 10.0s contact window closes.';
+          tip = 'Select Sector B on the tactical globe to begin investigation.';
           break;
         case 'SELECT_SECTOR':
-          stepBadge = 'STEP 1';
-          title = 'SELECT TARGET SECTOR B';
-          prompt = 'Target road inundation in Sector B. Click the glowing marker on the globe or press <b>[2]</b>.';
-          tip = 'Notice Sector B is covered by thick storm clouds.';
+          stepBadge = 'STEP 1: INVESTIGATE';
+          title = 'INVESTIGATE SECTOR B (EAST LEVEE HIGHWAY)';
+          prompt = 'Primary evacuation convoys are moving along Sector B. Examine the Tactical Reconnaissance Card: notice the 95% convective storm cloud wall occluding passive optical visibility.';
+          tip = 'Click Sector B on the globe or press [2].';
           break;
         case 'SELECT_SENSOR':
-          stepBadge = 'STEP 2';
-          title = 'SWITCH TO MICROWAVE RADAR (SAR)';
-          prompt = 'Sector B has dense clouds! Optical cameras cannot penetrate storm clouds. Press <b>[M]</b> or click the RADAR switch.';
-          tip = 'Microwave radar penetrates cloud cover day or night.';
+          stepBadge = 'STEP 2: SENSOR TRADE-OFF';
+          title = 'SOLVE SENSOR DILEMMA: STORM PENETRATION';
+          prompt = 'Optical sensors cannot penetrate thick clouds (0% SNR). Armed with Active Microwave Radar (SAR), your C-band pulses will pierce the storm wall to detect specular water boundary on the road.';
+          tip = 'Switch sensor mode to RADAR [M].';
           break;
         case 'SCAN_SECTOR':
-          stepBadge = 'STEP 3';
-          title = 'PERFORM ACTIVE RADAR SCAN';
-          prompt = 'Fire the satellite microwave swath! Press <b>[SPACE]</b> or click the <b>SCAN</b> button. (Costs 14 Power).';
-          tip = 'Watch the satellite beam scan Sector B and spawn an evidence cube.';
+          stepBadge = 'STEP 3: ACQUIRE';
+          title = 'EXECUTE ACTIVE RADAR RECONNAISSANCE';
+          prompt = 'Target Sector B and fire satellite radar swath (costs 14 Wh). Observe the microwave beam penetrate clouds and materialize a physical evidence telemetry cube on the tray.';
+          tip = 'Press [Space] to fire swath.';
           break;
         case 'SELECT_CUBE':
-          stepBadge = 'STEP 4';
-          title = 'SELECT THE EVIDENCE CUBE';
-          prompt = 'Evidence acquired! Click the blue data cube on the tray or press <b>[1]</b>.';
-          tip = 'Raw packet requires 4.5s transmission! Uncompressed packets will overflow the 10.0s window!';
+          stepBadge = 'STEP 4: INTERPRET';
+          title = 'FORENSIC TELEMETRY & KNAPSACK DILEMMA';
+          prompt = 'Evidence acquired: Dark specular water boundary detected across 2.4 km of highway. Raw telemetry takes 4.5s transmission (45% of your total 10.0s contact pass!).';
+          tip = 'Examine the data cube on the console tray or press [1].';
           break;
         case 'PROCESS_CRADLE':
-          stepBadge = 'STEP 5';
-          title = 'COMPRESS IN PROCESSING CRADLE';
-          prompt = 'Extract features and compress the packet. Press <b>[P]</b> or click <b>PROCESS</b>. (Costs 6 Power).';
-          tip = 'Compression reduces transmit duration from 4.5s to 1.8s (saves 2.7s downlink!).';
+          stepBadge = 'STEP 5: STRATEGIC COMPRESSION';
+          title = 'ONBOARD FEATURE EXTRACTION';
+          prompt = 'Place cube in Processing Cradle (costs 6 Wh). Onboard AI extracts the road flood boundary, compressing packet from 3.0 MB to 1.0 MB (4.5s -> 1.8s TX). Notice: Processing shrinks size but preserves original evidence uncertainty!';
+          tip = 'Press [P] or click Cradle to compress.';
           break;
         case 'QUEUE_BAY':
-          stepBadge = 'STEP 6';
-          title = 'QUEUE TO DOWNLINK BAY';
-          prompt = 'Data is compressed! Press <b>[Q]</b> or click <b>QUEUE</b> to stage it into Downlink Bay Slot 1.';
-          tip = 'Slot 1 now scheduled for horizon transmission.';
+          stepBadge = 'STEP 6: DOWNLINK STAGING';
+          title = 'STAGE INTO DOWNLINK BAY';
+          prompt = 'Stage compressed telemetry into Downlink Bay. Slot 1 is now locked for transmission, consuming only 1.8s of the 10.0s pass.';
+          tip = 'Press [Q] to queue into bay.';
           break;
         case 'MULTI_TARGET':
-          stepBadge = 'MISSION READY';
-          title = 'CONTINUE TRIAGE OR TRANSMIT';
-          prompt = 'Great job! Now scan Sector C (clear sky -> Optical [M]) and Sector E (storm -> Radar), or press <b>[T]</b> to transmit now!';
-          tip = 'Ensure total transmission duration does not exceed the 10.0s window.';
+          stepBadge = 'TACTICAL TRIAGE';
+          title = 'MULTI-TARGET CAPACITY REMAINING';
+          prompt = 'You have 8.2s of downlink capacity remaining! Investigate Sector C (Steel Truss Bridge) under clear skies. Compare whether high-res Optical or Radar delivers clearer clearance evidence to rescue engineers.';
+          tip = 'Select Sector C [3], evaluate weather, and triage.';
           break;
       }
 
@@ -831,11 +877,11 @@ export class DesktopControlsManager {
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
           <span style="font-size: 10px; color: #38bdf8; font-weight: 700; letter-spacing: 1px; background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px;">${stepBadge}</span>
           <span style="font-size: 11px; color: #94a3b8;">${scenarioTitle}</span>
-          <button id="btn-skip-tut" style="background: none; border: none; color: #94a3b8; font-size: 11px; cursor: pointer; text-decoration: underline;">Skip Guide [Esc]</button>
+          <button id="btn-skip-tut" style="background: none; border: none; color: #94a3b8; font-size: 11px; cursor: pointer; text-decoration: underline; pointer-events: auto;">Skip Guide [Esc]</button>
         </div>
         <div style="font-size: 15px; font-weight: 700; color: #f8fafc; margin-bottom: 3px;">${title}</div>
         <div style="font-size: 12px; color: #cbd5e1; margin-bottom: 4px;">${prompt}</div>
-        <div style="font-size: 11px; color: #f59e0b; font-style: italic;">Tip: ${tip}</div>
+        <div style="font-size: 11px; color: #f59e0b; font-style: italic;">Tactical Note: ${tip}</div>
       `;
       this.bannerEl.querySelector('#btn-skip-tut')?.addEventListener('click', () => this.skipTutorial());
     } else {
@@ -844,11 +890,123 @@ export class DesktopControlsManager {
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <span style="font-size: 11px; color: #38bdf8; font-weight: 700;">${scenarioTitle}</span>
           <span style="font-size: 11px; color: #cbd5e1;">PWR: <b style="color: #38bdf8">${state.power}</b>/${state.maxPower} | STORAGE: <b style="color: #f59e0b">${state.storageUsed}</b>/${state.maxStorage} MB | WINDOW: <b style="color: #34d399">${state.downlinkWindowSec}s</b></span>
-          <button id="btn-replay-tut" style="background: none; border: none; color: #94a3b8; font-size: 11px; cursor: pointer; text-decoration: underline;">Replay Guide</button>
+          <button id="btn-replay-tut" style="background: none; border: none; color: #94a3b8; font-size: 11px; cursor: pointer; text-decoration: underline; pointer-events: auto;">Replay Guide</button>
         </div>
       `;
       this.bannerEl.querySelector('#btn-replay-tut')?.addEventListener('click', () => this.replayTutorial());
     }
+  }
+
+  private renderReconCard(state: MissionState): void {
+    if (!this.reconEl) return;
+    const sector = SECTORS[state.selectedSectorId];
+    if (!sector) return;
+    const isStorm = sector.cloudCover === 'DENSE_STORM';
+    const activeSensor = state.activeSensorMode;
+    const opticalOutcome = sector.outcomes.OPTICAL;
+    const radarOutcome = sector.outcomes.RADAR;
+    const cost = activeSensor === 'OPTICAL' ? 8 : 14;
+
+    this.reconEl.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(56, 189, 248, 0.25); padding-bottom: 4px; margin-bottom: 6px;">
+        <span style="font-weight: 700; color: #38bdf8; letter-spacing: 0.5px;">TACTICAL RECONNAISSANCE</span>
+        <span style="font-size: 10px; background: ${isStorm ? 'rgba(245, 158, 11, 0.2)' : 'rgba(56, 189, 248, 0.2)'}; color: ${isStorm ? '#f59e0b' : '#38bdf8'}; padding: 1px 6px; border-radius: 4px; font-weight: 700;">
+          ${isStorm ? '95% CONVECTIVE STORM' : 'CLEAR SKY SLOT'}
+        </span>
+      </div>
+      <div style="font-size: 13px; font-weight: 700; color: #f8fafc; margin-bottom: 2px;">
+        SECTOR ${sector.id}: ${sector.name}
+      </div>
+      <div style="font-size: 11px; color: #94a3b8; margin-bottom: 8px;">
+        ${sector.terrainSummary}
+      </div>
+
+      <div style="background: rgba(15, 23, 42, 0.8); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px;">
+        <div style="font-size: 10px; font-weight: 700; color: #cbd5e1; margin-bottom: 4px;">SENSOR SUITABILITY PREVIEW:</div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 2px; color: ${opticalOutcome.confidence === 'UNVERIFIED' ? '#ef4444' : '#10b981'}; font-size: 10px;">
+          <span>OPTICAL (8 Wh, 4.0s TX):</span>
+          <b>${opticalOutcome.confidence === 'UNVERIFIED' ? 'BLOCKED BY CLOUDS' : 'HIGH-RES CONFIRMED'}</b>
+        </div>
+        <div style="display: flex; justify-content: space-between; color: ${radarOutcome.confidence === 'CONFIRMED' ? '#10b981' : '#f59e0b'}; font-size: 10px;">
+          <span>RADAR SAR (14 Wh, 4.5s TX):</span>
+          <b>${radarOutcome.confidence === 'CONFIRMED' ? 'PENETRATES CLOUDS' : 'METALLIC / SLOPE GLARE'}</b>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #cbd5e1; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 4px;">
+        <span>Armed: <b style="color: ${activeSensor === 'RADAR' ? '#f59e0b' : '#38bdf8'}">${activeSensor}</b> (${cost} Wh)</span>
+        <span>Batt After: <b style="color: ${state.power >= cost ? '#34d399' : '#ef4444'}">${Math.max(0, state.power - cost)} Wh</b></span>
+      </div>
+    `;
+  }
+
+  private renderCompareCard(state: MissionState): void {
+    if (!this.compareEl) return;
+    const packets = state.packets;
+    if (packets.length === 0) {
+      this.compareEl.innerHTML = `
+        <div style="font-weight: 700; color: #10b981; letter-spacing: 0.5px; border-bottom: 1px solid rgba(16, 185, 129, 0.25); padding-bottom: 4px; margin-bottom: 6px;">
+          FORENSIC EVIDENCE & DOWNLINK
+        </div>
+        <div style="color: #64748b; font-size: 11px; text-align: center; padding: 16px 0;">
+          No evidence cubes acquired yet.<br/>Scan a sector with [Space] to acquire telemetry.
+        </div>
+      `;
+      return;
+    }
+
+    const sel = packets.find((p) => p.id === state.selectedPacketId) || packets[0];
+    const queuedPackets = packets.filter((p) => state.queuePacketIds.includes(p.id));
+    const totalQueuedTx = queuedPackets.reduce((acc, p) => acc + p.transmitSec, 0);
+    const windowSec = state.downlinkWindowSec;
+    const isOverflow = totalQueuedTx > windowSec;
+
+    this.compareEl.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(16, 185, 129, 0.25); padding-bottom: 4px; margin-bottom: 6px;">
+        <span style="font-weight: 700; color: #10b981; letter-spacing: 0.5px;">EVIDENCE TELEMETRY</span>
+        <span style="font-size: 10px; background: ${sel.confidence === 'CONFIRMED' ? 'rgba(16, 185, 129, 0.2)' : sel.confidence === 'PROBABLE' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(239, 68, 68, 0.2)'}; color: ${sel.confidence === 'CONFIRMED' ? '#10b981' : sel.confidence === 'PROBABLE' ? '#f59e0b' : '#ef4444'}; padding: 1px 6px; border-radius: 4px; font-weight: 700;">
+          ${sel.confidenceBadge}
+        </span>
+      </div>
+
+      <div style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-bottom: 2px;">
+        ${sel.headline}
+      </div>
+      <div style="font-size: 10px; color: #94a3b8; margin-bottom: 6px;">
+        ${sel.sectorName} | ${sel.sensorMode} | Res: ${sel.resolutionMeters}m | SNR: ${sel.snrDb} dB
+      </div>
+
+      <div style="background: rgba(15, 23, 42, 0.8); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 10px;">
+        <div style="color: #cbd5e1; margin-bottom: 3px;"><b>Scientific Finding:</b> ${sel.finding}</div>
+        <div style="color: #e2e8f0; font-style: italic;"><b>Physical Ambiguity:</b> ${sel.scientificReason}</div>
+      </div>
+
+      <div style="background: rgba(15, 23, 42, 0.8); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px;">
+        <div style="display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 2px;">
+          <span>Data Volume:</span>
+          <b>${sel.storageCost} MB (${sel.transmitSec.toFixed(1)}s TX) ${sel.processingState === 'PROCESSED' ? '<span style="color:#10b981">[COMPRESSED]</span>' : '<span style="color:#f59e0b">[RAW]</span>'}</b>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 10px;">
+          <span>Downlink Window:</span>
+          <b style="color: ${isOverflow ? '#ef4444' : '#34d399'}">${totalQueuedTx.toFixed(1)}s / ${windowSec.toFixed(1)}s ${isOverflow ? '⚠️ OVERFLOW' : '✓ FITS'}</b>
+        </div>
+      </div>
+
+      ${isOverflow ? `<div style="font-size: 10px; color: #ef4444; font-weight: 700; margin-bottom: 4px;">⚠️ HORIZON CUTOFF: Packets beyond 10.0s will be lost! Compress in cradle [P] or discard [X].</div>` : ''}
+
+      <div style="display: flex; gap: 4px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 6px;">
+        ${packets.map((p, idx) => `
+          <button id="btn-sel-cube-${idx}" style="${this.btnStyle(p.id === sel.id ? '#10b981' : '#475569')}">${p.sectorId}: ${p.sensorMode[0]}</button>
+        `).join('')}
+      </div>
+    `;
+
+    packets.forEach((p, idx) => {
+      this.compareEl?.querySelector(`#btn-sel-cube-${idx}`)?.addEventListener('click', () => {
+        this.host.selectPacket(p.id);
+        this.updateHud();
+      });
+    });
   }
 
   private renderBottomToolbar(state: MissionState): void {
