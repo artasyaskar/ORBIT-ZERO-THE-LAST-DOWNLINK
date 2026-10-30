@@ -293,4 +293,82 @@ describe('Desktop Controls & First-Time Player Experience', () => {
 
     manager.dispose();
   });
+
+  it('separates optical atmospheric profile from SAR microwave backscatter in recon HUD', () => {
+    const { engine, manager } = createTestHarness();
+    engine.selectSector('B');
+    manager.updateHud();
+
+    const reconHtml = (manager as any).reconEl?.innerHTML || '';
+    // Must contain Optical domain
+    expect(reconHtml).toContain('ATMOSPHERIC PROFILE (VIS/NIR OPTICAL');
+    expect(reconHtml).toContain('Cloud Top Albedo');
+    expect(reconHtml).toContain('Optical Depth (τ)');
+    // Must contain Radar domain
+    expect(reconHtml).toContain('MICROWAVE BACKSCATTER (ACTIVE SAR');
+    expect(reconHtml).toContain('Atmospheric Transmission');
+    expect(reconHtml).toContain('Specular water forward-scatter');
+
+    manager.dispose();
+  });
+
+  it('intelligently pairs observations of the same sector across sensor modes with forensic matrix', () => {
+    const { engine, manager } = createTestHarness();
+    // Scan Sector C Optical and Sector C Radar
+    engine.scanSector('C', 'OPTICAL');
+    engine.scanSector('C', 'RADAR');
+    expect(engine.getState().packets.length).toBe(2);
+
+    // Select Sector C Optical
+    engine.selectPacket('PKT-1');
+    manager.updateHud();
+
+    const compareHtml = (manager as any).compareEl?.innerHTML || '';
+    expect(compareHtml).toContain('FORENSIC MATRIX (PKT-1 vs PKT-2)');
+    expect(compareHtml).toContain('★ Same Sector Match');
+    expect(compareHtml).toContain('✓ Physical Agreement:');
+    expect(compareHtml).toContain('⚡ Sensor Delta:');
+    expect(compareHtml).toContain('Optical achieves 0.75m daylight surface contrast');
+    expect(compareHtml).toContain('metallic dihedral glare');
+
+    manager.dispose();
+  });
+
+  it('displays cross-sector triage comparison when different sectors are scanned', () => {
+    const { engine, manager } = createTestHarness();
+    // Scan Sector B Radar and Sector C Optical
+    engine.scanSector('B', 'RADAR');
+    engine.scanSector('C', 'OPTICAL');
+    expect(engine.getState().packets.length).toBe(2);
+
+    engine.selectPacket('PKT-1');
+    manager.updateHud();
+
+    const compareHtml = (manager as any).compareEl?.innerHTML || '';
+    expect(compareHtml).toContain('FORENSIC MATRIX (PKT-1 vs PKT-2)');
+    expect(compareHtml).toContain('Cross-Sector Triage');
+    expect(compareHtml).toContain('REQ 1 | ROAD INUNDATION');
+
+    manager.dispose();
+  });
+
+  it('warns about horizon window overflow when queued packets exceed downlink duration', () => {
+    const { engine, manager } = createTestHarness();
+    // Scan 3 raw packets: B (4.5s) + C (4.0s) + E (4.5s) = 13.0s > 10.0s window
+    engine.scanSector('B', 'RADAR');
+    engine.scanSector('C', 'OPTICAL');
+    engine.scanSector('E', 'RADAR');
+    engine.queuePacket('PKT-1', 0);
+    engine.queuePacket('PKT-2', 1);
+    engine.queuePacket('PKT-3', 2);
+    expect(engine.getState().queuePacketIds.length).toBe(3);
+
+    manager.updateHud();
+
+    const compareHtml = (manager as any).compareEl?.innerHTML || '';
+    expect(compareHtml).toContain('⚠️ OVERFLOW');
+    expect(compareHtml).toContain('HORIZON CUTOFF: Packets beyond 10.0s will be lost');
+
+    manager.dispose();
+  });
 });

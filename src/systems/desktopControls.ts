@@ -25,7 +25,7 @@ import {
 } from '@iwsdk/core';
 import type { MissionEngine } from '../mission/missionEngine';
 import type { MissionState, SectorId, SensorMode } from '../mission/types';
-import { MISSION_SCENARIOS, SECTORS } from '../mission/missionConfig';
+import { GROUND_REQUESTS, MISSION_SCENARIOS, SECTORS } from '../mission/missionConfig';
 
 export interface DesktopControllerHost {
   engine: MissionEngine;
@@ -1016,7 +1016,8 @@ export class DesktopControlsManager {
     this.reconEl.style.cssText = `
       position: absolute;
       top: 92px; left: 16px;
-      width: 320px;
+      width: 330px;
+      max-width: 35vw;
       background: rgba(11, 18, 32, 0.94);
       border: 1px solid rgba(56, 189, 248, 0.4);
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65);
@@ -1026,6 +1027,8 @@ export class DesktopControlsManager {
       font-size: 11px;
       line-height: 1.45;
       pointer-events: none;
+      max-height: calc(100vh - 180px);
+      overflow-y: auto;
     `;
     this.containerEl.appendChild(this.reconEl);
 
@@ -1035,7 +1038,8 @@ export class DesktopControlsManager {
     this.compareEl.style.cssText = `
       position: absolute;
       top: 92px; right: 16px;
-      width: 330px;
+      width: 360px;
+      max-width: 38vw;
       background: rgba(11, 18, 32, 0.94);
       border: 1px solid rgba(16, 185, 129, 0.4);
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65);
@@ -1045,6 +1049,8 @@ export class DesktopControlsManager {
       font-size: 11px;
       line-height: 1.45;
       pointer-events: none;
+      max-height: calc(100vh - 180px);
+      overflow-y: auto;
     `;
     this.containerEl.appendChild(this.compareEl);
 
@@ -1260,10 +1266,13 @@ export class DesktopControlsManager {
     } else {
       // Free Operator Mode Banner
       this.bannerEl.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
           <span style="font-size: 11px; color: #38bdf8; font-weight: 700;">${scenarioTitle}</span>
           <span style="font-size: 11px; color: #cbd5e1;">PWR: <b style="color: #38bdf8">${state.power}</b>/${state.maxPower} | STORAGE: <b style="color: #f59e0b">${state.storageUsed}</b>/${state.maxStorage} MB | WINDOW: <b style="color: #34d399">${state.downlinkWindowSec}s</b></span>
           <button id="btn-replay-tut" style="background: none; border: none; color: #94a3b8; font-size: 11px; cursor: pointer; text-decoration: underline; pointer-events: auto;">Replay Guide</button>
+        </div>
+        <div style="font-size: 11px; color: #94a3b8;">
+          CONSOLE TRIAGE: Drag cube to <b style="color: #38bdf8;">Cradle</b> to compress [P] | Drag to <b style="color: #34d399;">Bay</b> to stage [Q] | Drag to <b style="color: #f59e0b;">Tray</b> or press [U] to unqueue!
         </div>
       `;
       this.bannerEl.querySelector('#btn-replay-tut')?.addEventListener('click', () => this.replayTutorial());
@@ -1276,9 +1285,28 @@ export class DesktopControlsManager {
     if (!sector) return;
     const isStorm = sector.cloudCover === 'DENSE_STORM';
     const activeSensor = state.activeSensorMode;
-    const opticalOutcome = sector.outcomes.OPTICAL;
-    const radarOutcome = sector.outcomes.RADAR;
     const cost = activeSensor === 'OPTICAL' ? 8 : 14;
+
+    // Optical atmospheric profile
+    const opticalAlbedo = isStorm ? '88% (Convective Nimbus)' : '< 5% (Clear Atmosphere)';
+    const opticalTau = isStorm ? 'τ > 15 (Droplet Mie Scattering Washout)' : 'τ ≈ 0.02 (Direct Solar Illumination)';
+    const opticalTrans = isStorm ? 'T < 0.1% — Passive VIS/NIR Completely Occluded' : 'T ≈ 92% — High-Contrast Surface Reflectance';
+
+    // Active microwave SAR profile
+    let radarPhenomenology = '';
+    if (sector.id === 'B') {
+      radarPhenomenology = 'Specular water forward-scatter (σ⁰ < -22 dB) — dark tone reveals 2.4 km inundated highway through clouds!';
+    } else if (sector.id === 'C') {
+      radarPhenomenology = 'Dihedral corner multipath glare on steel truss (σ⁰ > +18 dB flare masks deck water state)';
+    } else if (sector.id === 'E') {
+      radarPhenomenology = 'Elevated corridor above floodline; steep orographic slope causes geometric layover and foreshortening near Km 4';
+    } else if (sector.id === 'A') {
+      radarPhenomenology = 'Low-backscatter specular reflection from calm reservoir impoundment';
+    } else if (sector.id === 'D') {
+      radarPhenomenology = 'Turbulent wave Bragg scattering over submerged broken masonry piers';
+    } else {
+      radarPhenomenology = 'Inundated vegetation corner backscatter across southern agricultural polders';
+    }
 
     this.reconEl.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(56, 189, 248, 0.25); padding-bottom: 4px; margin-bottom: 6px;">
@@ -1294,19 +1322,35 @@ export class DesktopControlsManager {
         ${sector.terrainSummary}
       </div>
 
-      <div style="background: rgba(15, 23, 42, 0.85); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px;">
-        <div style="font-size: 10px; font-weight: 700; color: #cbd5e1; margin-bottom: 4px;">PHYSICAL RECONNAISSANCE CLUES:</div>
-        <div style="display: flex; justify-content: space-between; margin-bottom: 2px; font-size: 10px; color: #cbd5e1;">
-          <span>Cloud Top Albedo:</span>
-          <b style="color: ${isStorm ? '#f59e0b' : '#38bdf8'}">${isStorm ? '88% (Convective Nimbus)' : '< 5% (Clear Atmosphere)'}</b>
+      <!-- Domain 1: Atmospheric Profile (Optical) -->
+      <div style="background: rgba(15, 23, 42, 0.85); border-left: 3px solid #38bdf8; border-radius: 0 6px 6px 0; padding: 6px 8px; margin-bottom: 6px;">
+        <div style="font-size: 9px; font-weight: 700; color: #38bdf8; letter-spacing: 0.5px; margin-bottom: 3px;">
+          ATMOSPHERIC PROFILE (VIS/NIR OPTICAL: 450–850 nm):
         </div>
-        <div style="display: flex; justify-content: space-between; margin-bottom: 2px; font-size: 10px; color: #cbd5e1;">
-          <span>VIS/NIR Light (0.75m):</span>
-          <b style="color: ${isStorm ? '#ef4444' : '#10b981'}">${isStorm ? 'Liquid Droplet Mie Scattering' : 'Direct Daylight Surface Contrast'}</b>
+        <div style="display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 2px;">
+          <span style="color: #94a3b8;">Cloud Top Albedo:</span>
+          <b style="color: ${isStorm ? '#f59e0b' : '#38bdf8'};">${opticalAlbedo}</b>
         </div>
-        <div style="display: flex; justify-content: space-between; font-size: 10px; color: #cbd5e1;">
-          <span>C-Band Radar (2.2m):</span>
-          <b style="color: ${sector.id === 'C' ? '#f59e0b' : '#10b981'}">${sector.id === 'C' ? 'Dihedral Structural Glare' : sector.id === 'E' ? 'Mountain Slope Layover Distortion' : 'Smooth Water Specular Forward-Scatter'}</b>
+        <div style="display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 2px;">
+          <span style="color: #94a3b8;">Optical Depth (τ):</span>
+          <b style="color: ${isStorm ? '#ef4444' : '#10b981'};">${opticalTau}</b>
+        </div>
+        <div style="font-size: 10px; color: ${isStorm ? '#ef4444' : '#cbd5e1'}; font-style: italic;">
+          ${opticalTrans}
+        </div>
+      </div>
+
+      <!-- Domain 2: Surface Microwave Profile (Radar) -->
+      <div style="background: rgba(15, 23, 42, 0.85); border-left: 3px solid #f59e0b; border-radius: 0 6px 6px 0; padding: 6px 8px; margin-bottom: 6px;">
+        <div style="font-size: 9px; font-weight: 700; color: #f59e0b; letter-spacing: 0.5px; margin-bottom: 3px;">
+          MICROWAVE BACKSCATTER (ACTIVE SAR: 5.4 GHz / 5.5 cm):
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 2px;">
+          <span style="color: #94a3b8;">Atmospheric Transmission:</span>
+          <b style="color: #10b981;">100% (Unhindered Cloud/Rain Penetration)</b>
+        </div>
+        <div style="font-size: 10px; color: #cbd5e1; margin-top: 2px;">
+          <span style="color: #94a3b8;">Surface Response:</span> ${radarPhenomenology}
         </div>
       </div>
 
@@ -1338,6 +1382,60 @@ export class DesktopControlsManager {
     const windowSec = state.downlinkWindowSec;
     const isOverflow = totalQueuedTx > windowSec;
 
+    // Intelligent Evidence Pairing Strategy:
+    // Priority 1: Same sector, cross-sensor comparison (highest forensic value)
+    let otherPkt = packets.find((p) => p.sectorId === sel.sectorId && p.id !== sel.id);
+    // Priority 2: Alternative target answering another ground request
+    if (!otherPkt) {
+      otherPkt = packets.find(
+        (p) => p.satisfiesRequestId !== null && p.satisfiesRequestId !== sel.satisfiesRequestId && p.id !== sel.id
+      );
+    }
+    // Priority 3: Any other acquired packet
+    if (!otherPkt) {
+      otherPkt = packets.find((p) => p.id !== sel.id);
+    }
+
+    // Compute Agreement, Discrepancy & Uncertainty
+    let agreeText = '';
+    let deltaText = '';
+    let uncertText = '';
+    let reqText = '';
+
+    if (otherPkt) {
+      if (sel.sectorId === otherPkt.sectorId) {
+        agreeText = `Both observations confirm geographic coordinates and transit alignment of Sector ${sel.sectorId} (${sel.sectorName}).`;
+        if (sel.sensorMode !== otherPkt.sensorMode) {
+          if (sel.sectorId === 'B') {
+            deltaText = `Optical is completely blocked by convective cloud deck (τ > 15, SNR 4.1 dB); active C-band SAR pierces clouds to identify 2.4 km smooth water specular forward-scatter across the highway.`;
+          } else if (sel.sectorId === 'C') {
+            deltaText = `Optical achieves 0.75m daylight surface contrast verifying dry deck asphalt; active SAR encounters +18.5 dB metallic dihedral glare leaving road deck flood status ambiguous.`;
+          } else {
+            deltaText = `${sel.sensorMode} (${sel.confidence}) delivers surface-specific phenomenology contrasting with ${otherPkt.sensorMode} (${otherPkt.confidence}).`;
+          }
+        } else {
+          deltaText = `Repeated ${sel.sensorMode} pass confirms observation stability across consecutive swath captures.`;
+        }
+      } else {
+        agreeText = `Both observations represent valid disaster-zone reconnaissance passes acquired during this sun-synchronous horizon pass.`;
+        deltaText = `Sector ${sel.sectorId} (${sel.headline}) targets different emergency infrastructure than Sector ${otherPkt.sectorId} (${otherPkt.headline}).`;
+      }
+
+      if (sel.sensorMode === 'OPTICAL') {
+        uncertText = `Spaceborne optical frames confirm visible surface state; cannot evaluate sub-surface structural load capacity or penetrate cloud decks.`;
+      } else {
+        uncertText = `Active SAR amplitude identifies smooth water sheets and dihedral corner reflectors; cannot measure floodwater depth from single-pass intensity.`;
+      }
+    }
+
+    if (sel.satisfiesRequestId) {
+      const req = GROUND_REQUESTS[sel.satisfiesRequestId];
+      const matchOk = sel.confidence === req.minimumConfidence || (req.minimumConfidence === 'PROBABLE' && sel.confidence === 'CONFIRMED');
+      reqText = `<b style="color: ${matchOk ? '#10b981' : '#f59e0b'};">${req.shortLabel}</b> — ${matchOk ? '✓ Meets Ground Standard' : '⚠️ Sub-optimal Evidence'}`;
+    } else {
+      reqText = `<span style="color: #94a3b8;">No matching ground request for Sector ${sel.sectorId}</span>`;
+    }
+
     this.compareEl.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(16, 185, 129, 0.25); padding-bottom: 4px; margin-bottom: 6px;">
         <span style="font-weight: 700; color: #10b981; letter-spacing: 0.5px;">EVIDENCE TELEMETRY</span>
@@ -1353,44 +1451,65 @@ export class DesktopControlsManager {
         ${sel.sectorName} | ${sel.sensorMode} | Res: ${sel.resolutionMeters}m | SNR: ${sel.snrDb} dB
       </div>
 
-      <div style="background: rgba(15, 23, 42, 0.8); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 10px;">
+      <div style="background: rgba(15, 23, 42, 0.85); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 10px;">
         <div style="color: #cbd5e1; margin-bottom: 3px;"><b>Scientific Finding:</b> ${sel.finding}</div>
+        <div style="color: #94a3b8; font-size: 9px; margin-bottom: 3px;"><b>Ground Request:</b> ${reqText}</div>
         <div style="color: #e2e8f0; font-style: italic;"><b>Physical Ambiguity:</b> ${sel.scientificReason}</div>
       </div>
 
-      ${(() => {
-        const otherPkt = packets.find((p) => p.id !== sel.id);
-        if (!otherPkt) return '';
-        return `
-          <div style="background: rgba(15, 23, 42, 0.85); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 10px;">
-            <div style="font-weight: 700; color: #38bdf8; margin-bottom: 3px; font-size: 9px; letter-spacing: 0.5px;">FORENSIC COMPARISON (vs ${otherPkt.sectorId}-${otherPkt.sensorMode[0]}):</div>
-            <table style="width: 100%; border-collapse: collapse; font-size: 9px; color: #cbd5e1;">
-              <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
-                <th style="text-align: left; padding: 1px 0;">METRIC</th>
-                <th style="text-align: right; color: #10b981;">CURRENT (${sel.sectorId})</th>
-                <th style="text-align: right; color: #94a3b8;">COMPARE (${otherPkt.sectorId})</th>
-              </tr>
-              <tr>
-                <td style="padding: 1px 0;">Sensor / Res</td>
-                <td style="text-align: right;">${sel.sensorMode} (${sel.resolutionMeters}m)</td>
-                <td style="text-align: right;">${otherPkt.sensorMode} (${otherPkt.resolutionMeters}m)</td>
-              </tr>
-              <tr>
-                <td style="padding: 1px 0;">Confidence</td>
-                <td style="text-align: right; color: ${sel.confidence === 'CONFIRMED' ? '#10b981' : '#f59e0b'};">${sel.confidence}</td>
-                <td style="text-align: right; color: ${otherPkt.confidence === 'CONFIRMED' ? '#10b981' : '#f59e0b'};">${otherPkt.confidence}</td>
-              </tr>
-              <tr>
-                <td style="padding: 1px 0;">TX Time</td>
-                <td style="text-align: right;">${sel.transmitSec.toFixed(1)}s</td>
-                <td style="text-align: right;">${otherPkt.transmitSec.toFixed(1)}s</td>
-              </tr>
-            </table>
+      ${otherPkt ? `
+        <div style="background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <span style="font-weight: 700; color: #38bdf8; font-size: 9px; letter-spacing: 0.5px;">
+              FORENSIC MATRIX (${sel.id} vs ${otherPkt.id})
+            </span>
+            <span style="font-size: 9px; color: ${sel.sectorId === otherPkt.sectorId ? '#34d399' : '#94a3b8'};">
+              ${sel.sectorId === otherPkt.sectorId ? '★ Same Sector Match' : 'Cross-Sector Triage'}
+            </span>
           </div>
-        `;
-      })()}
 
-      <div style="background: rgba(15, 23, 42, 0.8); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 9px; color: #cbd5e1; margin-bottom: 6px;">
+            <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+              <th style="text-align: left; padding: 2px 0;">PARAMETER</th>
+              <th style="text-align: right; color: #10b981;">CURRENT (${sel.sectorId}-${sel.sensorMode[0]})</th>
+              <th style="text-align: right; color: #38bdf8;">COMPARE (${otherPkt.sectorId}-${otherPkt.sensorMode[0]})</th>
+            </tr>
+            <tr>
+              <td style="padding: 1px 0;">Modality / Band</td>
+              <td style="text-align: right;">${sel.sensorMode === 'OPTICAL' ? 'VIS/NIR (0.75μm)' : 'C-Band (5.4GHz)'}</td>
+              <td style="text-align: right;">${otherPkt.sensorMode === 'OPTICAL' ? 'VIS/NIR (0.75μm)' : 'C-Band (5.4GHz)'}</td>
+            </tr>
+            <tr>
+              <td style="padding: 1px 0;">Resolution / GSD</td>
+              <td style="text-align: right;">${sel.resolutionMeters}m</td>
+              <td style="text-align: right;">${otherPkt.resolutionMeters}m</td>
+            </tr>
+            <tr>
+              <td style="padding: 1px 0;">Signal-to-Noise</td>
+              <td style="text-align: right;">${sel.snrDb} dB</td>
+              <td style="text-align: right;">${otherPkt.snrDb} dB</td>
+            </tr>
+            <tr>
+              <td style="padding: 1px 0;">Confidence</td>
+              <td style="text-align: right; color: ${sel.confidence === 'CONFIRMED' ? '#10b981' : '#f59e0b'};">${sel.confidence}</td>
+              <td style="text-align: right; color: ${otherPkt.confidence === 'CONFIRMED' ? '#10b981' : '#f59e0b'};">${otherPkt.confidence}</td>
+            </tr>
+            <tr>
+              <td style="padding: 1px 0;">Downlink TX Time</td>
+              <td style="text-align: right;">${sel.transmitSec.toFixed(1)}s</td>
+              <td style="text-align: right;">${otherPkt.transmitSec.toFixed(1)}s</td>
+            </tr>
+          </table>
+
+          <div style="font-size: 9px; line-height: 1.4; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 4px;">
+            <div style="margin-bottom: 2px;"><b style="color: #34d399;">✓ Physical Agreement:</b> ${agreeText}</div>
+            <div style="margin-bottom: 2px;"><b style="color: #f59e0b;">⚡ Sensor Delta:</b> ${deltaText}</div>
+            <div><b style="color: #94a3b8;">ℹ️ Remaining Uncertainty:</b> ${uncertText}</div>
+          </div>
+        </div>
+      ` : ''}
+
+      <div style="background: rgba(15, 23, 42, 0.85); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px;">
         <div style="display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 2px;">
           <span>Data Volume:</span>
           <b>${sel.storageCost} MB (${sel.transmitSec.toFixed(1)}s TX) ${sel.processingState === 'PROCESSED' ? '<span style="color:#10b981">[COMPRESSED]</span>' : '<span style="color:#f59e0b">[RAW]</span>'}</b>
@@ -1401,7 +1520,12 @@ export class DesktopControlsManager {
         </div>
       </div>
 
-      ${isOverflow ? `<div style="font-size: 10px; color: #ef4444; font-weight: 700; margin-bottom: 4px;">⚠️ HORIZON CUTOFF: Packets beyond 10.0s will be lost! Compress in cradle [P] or discard [X].</div>` : ''}
+      ${isOverflow ? `<div style="font-size: 10px; color: #ef4444; font-weight: 700; margin-bottom: 4px;">⚠️ HORIZON CUTOFF: Packets beyond 10.0s will be lost! Compress in cradle [P] or unqueue to tray [U].</div>` : ''}
+
+      <div style="display: flex; justify-content: space-between; align-items: center; font-size: 9px; color: #94a3b8; margin-bottom: 4px;">
+        <span>Select Telemetry Cube:</span>
+        <span>Drag to Bay [Q] | Unqueue [U]</span>
+      </div>
 
       <div style="display: flex; gap: 4px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 6px;">
         ${packets.map((p, idx) => `
