@@ -113,10 +113,12 @@ export function buildDebriefReport(params: {
     droppedPacketIds: droppedPackets.map((p) => p.id), evaluations,
     evidenceProvenance,
     summaryHeadline: achievedBest
-      ? benchmark.score === 100 ? 'ALL THREE REQUESTS VERIFIED BEFORE LOSS OF SIGNAL.' : 'BEST POSSIBLE TRIAGE - THE STORM LIMITS CERTAINTY, NOT YOUR PERFORMANCE.'
+      ? benchmark.score === 100
+        ? 'ALL THREE REQUESTS VERIFIED BEFORE LOSS OF SIGNAL (GRADE S).'
+        : `SCENARIO MASTERY: ${totalScore}/${benchmark.score} POSSIBLE POINTS EARNED (GRADE S). THE CONVECTIVE STORM LIMITS CERTAINTY, NOT YOUR TRIAGE SKILL.`
       : `${requestsVerifiedCount}/3 VERIFIED - REVIEW THE EVIDENCE THAT DID NOT REACH EARTH.`,
     deterministicRecommendation: advice.join(' '),
-    counterfactualComparison: `PROVEN PLAN (${benchmark.score}/100): ${describeMissionPlan(benchmark)}. ${benchmark.powerUsed} power units, ${benchmark.transmitSec.toFixed(1)}s transmission.`,
+    counterfactualComparison: `SCENARIO CEILING (${benchmark.score}/100 RAW): ${describeMissionPlan(benchmark)}. ${benchmark.powerUsed} power units, ${benchmark.transmitSec.toFixed(1)}s transmission.`,
     achievableScore: benchmark.score,
     windowMarginSec: Math.max(0, Number((downlinkWindowSec - downlinkUsedSec).toFixed(6))),
     benchmarkPowerUsed: benchmark.powerUsed, benchmarkDownlinkSec: benchmark.transmitSec,
