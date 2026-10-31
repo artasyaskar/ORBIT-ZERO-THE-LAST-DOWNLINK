@@ -667,10 +667,19 @@ export class DesktopControlsManager {
         break;
       }
       case 'q':
-      case 'Q':
-      case 'Enter': {
+      case 'Q': {
         e.preventDefault();
         this.queuePacket();
+        break;
+      }
+      case 'Enter': {
+        e.preventDefault();
+        if (this.tutorialActive && this.tutorialStep === 'INTRO') {
+          this.advanceTutorial('SELECT_SECTOR');
+          this.notifyAction('🚀 CRISIS PASS COMMENCED: Evaluate Target Sectors', true);
+        } else {
+          this.queuePacket();
+        }
         break;
       }
       case 'u':
@@ -755,7 +764,7 @@ export class DesktopControlsManager {
     this.host.selectSector(id);
     const sector = SECTORS[id];
     this.notifyAction(`Selected Target: Sector ${id} (${sector?.name ?? id})`);
-    if (this.tutorialStep === 'SELECT_SECTOR' && id === 'B') {
+    if (this.tutorialStep === 'SELECT_SECTOR' || this.tutorialStep === 'INTRO') {
       this.advanceTutorial('SELECT_SENSOR');
     }
     this.updateHud();
@@ -766,7 +775,7 @@ export class DesktopControlsManager {
     const mode = this.host.engine.getState().activeSensorMode;
     const desc = mode === 'RADAR' ? 'MICROWAVE RADAR (SAR - Cloud Penetrating)' : 'OPTICAL CAMERA (High-Res Daylight)';
     this.notifyAction(`Sensor Mode: ${desc}`);
-    if (this.tutorialStep === 'SELECT_SENSOR' && mode === 'RADAR') {
+    if (this.tutorialStep === 'SELECT_SENSOR') {
       this.advanceTutorial('SCAN_SECTOR');
     }
     this.updateHud();
@@ -1177,16 +1186,18 @@ export class DesktopControlsManager {
     if (state.phase === 'DOWNLINK') {
       const elapsed = state.downlinkElapsedSec.toFixed(1);
       const total = state.downlinkWindowSec.toFixed(1);
+      const remaining = Math.max(0, state.downlinkWindowSec - state.downlinkElapsedSec).toFixed(1);
       const progress = Math.min(100, (state.downlinkElapsedSec / state.downlinkWindowSec) * 100).toFixed(0);
+      const activePkt = state.packets.find((p) => p.id === state.activeDownlinkPacketId);
       this.bannerEl.innerHTML = `
         <div style="font-size: 11px; color: #34d399; font-weight: 700; letter-spacing: 1px;">
-          S-BAND DOWNLINK ACTIVE — TRANSMITTING TO GROUND STATION
+          S-BAND DOWNLINK ACTIVE — KARACHI GROUND STATION CONTACT
         </div>
         <div style="font-size: 16px; font-weight: 700; margin: 4px 0;">
-          HORIZON WINDOW: ${elapsed}s / ${total}s (${progress}%)
+          HORIZON CONTACT: ${elapsed}s / ${total}s (${progress}%) | LOS IN: ${remaining}s
         </div>
-        <div style="font-size: 12px; color: #94a3b8;">
-          Carrier frequency locked. Data packets streaming over telemetry downlink.
+        <div style="font-size: 12px; color: #cbd5e1;">
+          ${activePkt ? `📡 Streaming: <b style="color: #38bdf8;">${activePkt.sectorCode}: ${activePkt.headline}</b> (${activePkt.storageCost} MB, ${activePkt.transmitSec.toFixed(1)}s)` : 'Acquiring next queued packet...'}
         </div>
       `;
       return;
@@ -1197,7 +1208,7 @@ export class DesktopControlsManager {
     // OPERATIONS Phase: Guided Tactical Onboarding vs Operator Mode
     if (this.tutorialActive) {
       let stepBadge = 'INVESTIGATE';
-      let title = 'EVALUATE SECTOR B (INDUS BASIN)';
+      let title = 'EVALUATE SECTORS (INDUS BASIN & LEVEE NETWORK)';
       let prompt = 'Convoys approaching Sector B. Notice the 95% storm clouds. Optical cannot see through clouds; Active Radar (SAR) pierces storm cover.';
       let tip = 'Click Sector B on the globe or press [2].';
 
@@ -1206,48 +1217,48 @@ export class DesktopControlsManager {
           stepBadge = 'CRISIS BRIEFING';
           title = 'INDUS RIVER BASIN: LEVEE BREACH';
           prompt = 'A Category 4 Monsoon supercell has breached river levees in Sindh. 120,000 residents are trapped by rising waters. Ground rescue teams require verified orbital evidence before the 10.0s contact window closes.';
-          tip = 'Select Sector B on the tactical globe to begin investigation.';
+          tip = 'Press [Enter] or click COMMENCE CRISIS PASS to begin.';
           break;
         case 'SELECT_SECTOR':
-          stepBadge = 'STEP 1: INVESTIGATE';
-          title = 'INVESTIGATE SECTOR B (EAST LEVEE HIGHWAY)';
-          prompt = 'Primary evacuation convoys are moving along Sector B. Examine the Tactical Reconnaissance Card: notice the 95% convective storm cloud wall occluding passive optical visibility.';
-          tip = 'Click Sector B on the globe or press [2].';
+          stepBadge = 'STEP 1: TRIAGE EVALUATION';
+          title = 'EVALUATE SECTORS (INDUS BASIN & LEVEE NETWORK)';
+          prompt = 'Evacuation convoys need route clearance at Sector B (East Levee) and Sector C (Bridge Crossing). Examine the Tactical Reconnaissance Card: notice 95% storm clouds over Sector B versus clear skies over Sector C. Which priority will you evaluate first?';
+          tip = 'Click Sector B [2] or Sector C [3] on the globe.';
           break;
         case 'SELECT_SENSOR':
           stepBadge = 'STEP 2: SENSOR TRADE-OFF';
-          title = 'SOLVE SENSOR DILEMMA: STORM PENETRATION';
-          prompt = 'Optical sensors cannot penetrate thick clouds (0% SNR). Armed with Active Microwave Radar (SAR), your C-band pulses will pierce the storm wall to detect specular water boundary on the road.';
-          tip = 'Switch sensor mode to RADAR [M].';
+          title = 'SOLVE SENSOR DILEMMA: CLOUD PENETRATION';
+          prompt = 'Dense convective nimbus clouds (τ > 15) extinguish optical photons (0% SNR, 8 Wh). Active Microwave Radar (SAR, 14 Wh) pierces clouds to identify specular floodwaters. Balance your 40 Wh battery reserve against cloud penetration.';
+          tip = 'Switch sensor mode to RADAR [M] or click the sensor button.';
           break;
         case 'SCAN_SECTOR':
-          stepBadge = 'STEP 3: ACQUIRE';
-          title = 'EXECUTE ACTIVE RADAR RECONNAISSANCE';
-          prompt = 'Target Sector B and fire satellite radar swath (costs 14 Wh). Observe the microwave beam penetrate clouds and materialize a physical evidence telemetry cube on the tray.';
-          tip = 'Press [Space] to fire swath.';
+          stepBadge = 'STEP 3: ACQUIRE RECONNAISSANCE';
+          title = 'FIRE SATELLITE SWATH';
+          prompt = 'Target armed. Fire active sensor swath (costs 14 Wh). Radar beam pierces storm cover, returning backscatter data and materializing a physical telemetry cube on your tray.';
+          tip = 'Press [Space] or click SCAN to fire.';
           break;
         case 'SELECT_CUBE':
-          stepBadge = 'STEP 4: INTERPRET';
-          title = 'FORENSIC TELEMETRY & KNAPSACK DILEMMA';
-          prompt = 'Evidence acquired: Dark specular water boundary detected across 2.4 km of highway. Raw telemetry takes 4.5s transmission (45% of your total 10.0s contact pass!).';
-          tip = 'Examine the data cube on the console tray or press [1].';
+          stepBadge = 'STEP 4: FORENSIC INTERPRETATION';
+          title = 'EVALUATE TELEMETRY & KNAPSACK COST';
+          prompt = 'Specular water boundary detected across 2.4 km of road! Raw packet is 3.0 MB (4.5s transmission — consuming 45% of your 10.0s downlink window). Compress onboard to save contact time for other sectors, or downlink raw?';
+          tip = 'Click the data cube on console tray or press [1].';
           break;
         case 'PROCESS_CRADLE':
-          stepBadge = 'STEP 5: STRATEGIC COMPRESSION';
-          title = 'ONBOARD FEATURE EXTRACTION';
-          prompt = 'Place cube in Processing Cradle (costs 6 Wh). Onboard AI extracts the road flood boundary, compressing packet from 3.0 MB to 1.0 MB (4.5s -> 1.8s TX). Notice: Processing shrinks size but preserves original evidence uncertainty!';
+          stepBadge = 'STEP 5: ONBOARD FEATURE EXTRACTION';
+          title = 'STRATEGIC CRADLE COMPRESSION';
+          prompt = 'Place cube in Processing Cradle (costs 6 Wh). Onboard AI extracts flood boundaries, reducing packet from 3.0 MB to 1.0 MB (4.5s -> 1.8s TX). Notice: compression shrinks packet size while preserving original observation uncertainty.';
           tip = 'Press [P] or click Cradle to compress.';
           break;
         case 'QUEUE_BAY':
           stepBadge = 'STEP 6: DOWNLINK STAGING';
           title = 'STAGE INTO DOWNLINK BAY';
           prompt = 'Stage compressed telemetry into Downlink Bay. Slot 1 is now locked for transmission, consuming only 1.8s of the 10.0s pass.';
-          tip = 'Press [Q] to queue into bay.';
+          tip = 'Press [Q] or click Bay to stage.';
           break;
         case 'MULTI_TARGET':
-          stepBadge = 'TACTICAL TRIAGE';
-          title = 'MULTI-TARGET CAPACITY REMAINING';
-          prompt = 'You have 8.2s of downlink capacity remaining! Investigate Sector C (Steel Truss Bridge) under clear skies. Compare whether high-res Optical or Radar delivers clearer clearance evidence to rescue engineers.';
+          stepBadge = 'STEP 7: MULTI-TARGET TRIAGE';
+          title = 'TRIAGE REMAINING HORIZON CAPACITY';
+          prompt = 'You have 8.2s of downlink capacity remaining! Investigate Sector C (Steel Truss Bridge) under clear skies. Compare whether high-res Optical (8 Wh) or Radar (14 Wh) delivers clearer structural clearance evidence to ground engineers.';
           tip = 'Select Sector C [3], evaluate weather, and triage.';
           break;
       }
@@ -1261,8 +1272,18 @@ export class DesktopControlsManager {
         <div style="font-size: 15px; font-weight: 700; color: #f8fafc; margin-bottom: 3px;">${title}</div>
         <div style="font-size: 12px; color: #cbd5e1; margin-bottom: 4px;">${prompt}</div>
         <div style="font-size: 11px; color: #f59e0b; font-style: italic;">Tactical Note: ${tip}</div>
+        ${this.tutorialStep === 'INTRO' ? `
+          <div style="margin-top: 6px;">
+            <button id="btn-commence-pass" style="${this.btnStyle('#38bdf8', true)}">COMMENCE CRISIS PASS [Enter / Click]</button>
+          </div>
+        ` : ''}
       `;
       this.bannerEl.querySelector('#btn-skip-tut')?.addEventListener('click', () => this.skipTutorial());
+      this.bannerEl.querySelector('#btn-commence-pass')?.addEventListener('click', () => {
+        this.advanceTutorial('SELECT_SECTOR');
+        this.notifyAction('🚀 CRISIS PASS COMMENCED: Evaluate Target Sectors', true);
+        this.updateHud();
+      });
     } else {
       // Free Operator Mode Banner
       this.bannerEl.innerHTML = `
@@ -1281,6 +1302,81 @@ export class DesktopControlsManager {
 
   private renderReconCard(state: MissionState): void {
     if (!this.reconEl) return;
+
+    if (state.phase === 'DEBRIEF') {
+      const debrief = state.debrief;
+      const evs = debrief?.evaluations || [];
+      this.reconEl.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(56, 189, 248, 0.25); padding-bottom: 4px; margin-bottom: 6px;">
+          <span style="font-weight: 700; color: #38bdf8; letter-spacing: 0.5px;">GROUND RESCUE IMPACT</span>
+          <span style="font-size: 10px; background: rgba(56, 189, 248, 0.2); color: #38bdf8; padding: 1px 6px; border-radius: 4px; font-weight: 700;">
+            DISASTER ZONE OUTCOMES
+          </span>
+        </div>
+        <div style="font-size: 11px; color: #94a3b8; margin-bottom: 8px;">
+          Downlinked telemetry directly determined emergency response operations on the ground:
+        </div>
+        ${evs.map((ev) => {
+          const color = ev.status === 'VERIFIED' ? '#10b981' : ev.status === 'PARTIAL' ? '#f59e0b' : '#ef4444';
+          return `
+            <div style="background: rgba(15, 23, 42, 0.85); border-left: 3px solid ${color}; border-radius: 0 6px 6px 0; padding: 6px 8px; margin-bottom: 6px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                <b style="color: ${color}; font-size: 10px;">${ev.shortLabel}: ${ev.title}</b>
+                <span style="font-size: 9px; background: rgba(255,255,255,0.08); padding: 1px 4px; border-radius: 3px; color: ${color}; font-weight: 700;">${ev.statusBadge} (${ev.scorePoints}/${ev.maxPoints} pts)</span>
+              </div>
+              <div style="font-size: 10px; color: #f8fafc; margin-bottom: 2px;">
+                <b>Rescue Impact:</b> ${ev.groundConsequence}
+              </div>
+              <div style="font-size: 9px; color: #94a3b8; font-style: italic;">
+                <b>Telemetry Evidence:</b> ${ev.explanation}
+              </div>
+            </div>
+          `;
+        }).join('')}
+        <div style="display: flex; justify-content: space-between; font-size: 10px; color: #cbd5e1; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 4px; margin-top: 6px;">
+          <span>Verified: <b style="color: #10b981;">${debrief?.requestsVerifiedCount ?? 0}/3</b></span>
+          <span>Partial: <b style="color: #f59e0b;">${debrief?.requestsPartialCount ?? 0}/3</b></span>
+          <span>Missed: <b style="color: #ef4444;">${debrief?.requestsUnverifiedCount ?? 0}/3</b></span>
+        </div>
+      `;
+      return;
+    }
+
+    if (state.phase === 'DOWNLINK') {
+      const elapsed = state.downlinkElapsedSec.toFixed(1);
+      const total = state.downlinkWindowSec.toFixed(1);
+      const remaining = Math.max(0, state.downlinkWindowSec - state.downlinkElapsedSec).toFixed(1);
+      this.reconEl.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(56, 189, 248, 0.25); padding-bottom: 4px; margin-bottom: 6px;">
+          <span style="font-weight: 700; color: #38bdf8; letter-spacing: 0.5px;">ORBITAL LINK TRACKING</span>
+          <span style="font-size: 10px; background: rgba(16, 185, 129, 0.2); color: #10b981; padding: 1px 6px; border-radius: 4px; font-weight: 700;">
+            CARRIER LOCKED
+          </span>
+        </div>
+        <div style="background: rgba(15, 23, 42, 0.85); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 10px;">
+          <div style="color: #94a3b8; margin-bottom: 2px;">Ground Station: <b style="color: #f8fafc;">Karachi Downlink Terminal (24.86° N, 67.00° E)</b></div>
+          <div style="color: #94a3b8; margin-bottom: 2px;">Carrier Frequency: <b style="color: #38bdf8;">S-Band 2205.5 MHz (BPSK)</b></div>
+          <div style="color: #94a3b8; margin-bottom: 2px;">Link SNR: <b style="color: #10b981;">18.4 dB [Nominal Lock]</b></div>
+          <div style="color: #94a3b8;">Doppler Offset: <b style="color: #cbd5e1;">+14.2 kHz (Ascending Arc)</b></div>
+        </div>
+        <div style="background: rgba(15, 23, 42, 0.85); border-radius: 6px; padding: 6px 8px; font-size: 10px;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+            <span style="color: #94a3b8;">Contact Window:</span>
+            <b style="color: #34d399;">${elapsed}s / ${total}s</b>
+          </div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+            <span style="color: #94a3b8;">Time to LOS (Cutoff):</span>
+            <b style="color: ${Number(remaining) < 3.0 ? '#ef4444' : '#f59e0b'};">${remaining}s</b>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #94a3b8;">Committed Packets:</span>
+            <b style="color: #f8fafc;">${state.queuePacketIds.length} queued</b>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
     const sector = SECTORS[state.selectedSectorId];
     if (!sector) return;
     const isStorm = sector.cloudCover === 'DENSE_STORM';
@@ -1288,16 +1384,16 @@ export class DesktopControlsManager {
     const cost = activeSensor === 'OPTICAL' ? 8 : 14;
 
     // Optical atmospheric profile
-    const opticalAlbedo = isStorm ? '88% (Convective Nimbus)' : '< 5% (Clear Atmosphere)';
+    const opticalAlbedo = isStorm ? '88% (Convective Nimbus) [Scenario Calibration]' : '< 5% (Clear Atmosphere)';
     const opticalTau = isStorm ? 'τ > 15 (Droplet Mie Scattering Washout)' : 'τ ≈ 0.02 (Direct Solar Illumination)';
-    const opticalTrans = isStorm ? 'T < 0.1% — Passive VIS/NIR Completely Occluded' : 'T ≈ 92% — High-Contrast Surface Reflectance';
+    const opticalTrans = isStorm ? 'T = e^(-τ) < 0.001% — Complete Mie Extinction' : 'T = e^(-τ) ≈ 98.02% — High Direct Surface Reflectance';
 
     // Active microwave SAR profile
     let radarPhenomenology = '';
     if (sector.id === 'B') {
-      radarPhenomenology = 'Specular water forward-scatter (σ⁰ < -22 dB) — dark tone reveals 2.4 km inundated highway through clouds!';
+      radarPhenomenology = 'Specular water forward-scatter (σ⁰ < -22 dB [Scenario Calibration]) — dark tone reveals 2.4 km inundated road through clouds (Depth unmeasured by SAR amplitude)';
     } else if (sector.id === 'C') {
-      radarPhenomenology = 'Dihedral corner multipath glare on steel truss (σ⁰ > +18 dB flare masks deck water state)';
+      radarPhenomenology = 'Dihedral corner multipath glare on steel truss (σ⁰ > +18.5 dB flare [Scenario Calibration] masks deck water state)';
     } else if (sector.id === 'E') {
       radarPhenomenology = 'Elevated corridor above floodline; steep orographic slope causes geometric layover and foreshortening near Km 4';
     } else if (sector.id === 'A') {
@@ -1347,7 +1443,7 @@ export class DesktopControlsManager {
         </div>
         <div style="display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 2px;">
           <span style="color: #94a3b8;">Atmospheric Transmission:</span>
-          <b style="color: #10b981;">100% (Unhindered Cloud/Rain Penetration)</b>
+          <b style="color: #10b981;">> 98% (Minimal droplet attenuation; rain cores scatter [Scenario Calibration])</b>
         </div>
         <div style="font-size: 10px; color: #cbd5e1; margin-top: 2px;">
           <span style="color: #94a3b8;">Surface Response:</span> ${radarPhenomenology}
@@ -1363,6 +1459,138 @@ export class DesktopControlsManager {
 
   private renderCompareCard(state: MissionState): void {
     if (!this.compareEl) return;
+
+    if (state.phase === 'DEBRIEF') {
+      const debrief = state.debrief;
+      if (!debrief) return;
+      const txPackets = state.packets.filter((p) => debrief.transmittedPacketIds.includes(p.id));
+      const dropPackets = state.packets.filter((p) => debrief.droppedPacketIds.includes(p.id));
+      const unqueuedPackets = state.packets.filter(
+        (p) => !debrief.transmittedPacketIds.includes(p.id) && !debrief.droppedPacketIds.includes(p.id)
+      );
+
+      this.compareEl.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(16, 185, 129, 0.25); padding-bottom: 4px; margin-bottom: 6px;">
+          <span style="font-weight: 700; color: #10b981; letter-spacing: 0.5px;">TELEMETRY DELIVERY ACCOUNTING</span>
+          <span style="font-size: 10px; background: rgba(16, 185, 129, 0.2); color: #10b981; padding: 1px 6px; border-radius: 4px; font-weight: 700;">
+            DOWNLINK COMPLETE
+          </span>
+        </div>
+
+        <div style="font-size: 10px; color: #94a3b8; margin-bottom: 6px;">
+          Transmitted to Ground Station vs Retained/Lost in Orbit:
+        </div>
+
+        <div style="background: rgba(15, 23, 42, 0.85); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 10px;">
+          <div style="font-weight: 700; color: #10b981; margin-bottom: 3px;">DELIVERED TO RESCUE TEAMS (${txPackets.length}):</div>
+          ${txPackets.length === 0 ? '<div style="color: #ef4444; font-style: italic;">Zero telemetry packets transmitted!</div>' : txPackets.map((p) => `
+            <div style="display: flex; justify-content: space-between; color: #cbd5e1; font-size: 9px; margin-bottom: 1px;">
+              <span>✓ Sector ${p.sectorId} (${p.sensorMode})</span>
+              <span style="color: #34d399;">${p.storageCost} MB (${p.transmitSec.toFixed(1)}s TX) [${p.confidence}]</span>
+            </div>
+          `).join('')}
+        </div>
+
+        ${dropPackets.length > 0 ? `
+          <div style="background: rgba(15, 23, 42, 0.85); border-left: 3px solid #ef4444; border-radius: 0 6px 6px 0; padding: 6px 8px; margin-bottom: 6px; font-size: 10px;">
+            <div style="font-weight: 700; color: #ef4444; margin-bottom: 2px;">DROPPED (HORIZON CUTOFF) (${dropPackets.length}):</div>
+            ${dropPackets.map((p) => `
+              <div style="color: #ef4444; font-size: 9px;">❌ Sector ${p.sectorId}: Exceeded 10.0s window cutoff!</div>
+            `).join('')}
+          </div>
+        ` : ''}
+
+        ${unqueuedPackets.length > 0 ? `
+          <div style="background: rgba(15, 23, 42, 0.85); border-left: 3px solid #f59e0b; border-radius: 0 6px 6px 0; padding: 6px 8px; margin-bottom: 6px; font-size: 10px;">
+            <div style="font-weight: 700; color: #f59e0b; margin-bottom: 2px;">RETAINED IN STORAGE (${unqueuedPackets.length}):</div>
+            ${unqueuedPackets.map((p) => `
+              <div style="color: #cbd5e1; font-size: 9px;">⏸️ Sector ${p.sectorId} (${p.sensorMode}): Acquired but never staged to bay.</div>
+            `).join('')}
+          </div>
+        ` : ''}
+
+        <!-- Strategic Feedback & Counterfactual Analysis -->
+        <div style="background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 10px;">
+          <div style="font-weight: 700; color: #38bdf8; font-size: 9px; letter-spacing: 0.5px; margin-bottom: 2px;">
+            TACTICAL LESSON & REPLAY STRATEGY
+          </div>
+          <div style="color: #cbd5e1; margin-bottom: 3px; font-size: 9px;">
+            ${debrief.deterministicRecommendation}
+          </div>
+          <div style="color: #94a3b8; font-style: italic; font-size: 9px;">
+            ${debrief.counterfactualComparison}
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 4px;">
+          <span>Power Used: <b style="color: #f8fafc;">${debrief.powerUsed} Wh</b></span>
+          <span>Window Used: <b style="color: #f8fafc;">${debrief.downlinkUsedSec.toFixed(1)}s</b></span>
+          <span>Margin: <b style="color: #34d399;">${debrief.windowMarginSec.toFixed(1)}s</b></span>
+        </div>
+      `;
+      return;
+    }
+
+    if (state.phase === 'DOWNLINK') {
+      const queuedPackets = state.packets.filter((p) => state.queuePacketIds.includes(p.id));
+      let cumulativeTime = 0;
+
+      this.compareEl.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(16, 185, 129, 0.25); padding-bottom: 4px; margin-bottom: 6px;">
+          <span style="font-weight: 700; color: #10b981; letter-spacing: 0.5px;">LIVE DOWNLINK PIPELINE</span>
+          <span style="font-size: 10px; background: rgba(56, 189, 248, 0.2); color: #38bdf8; padding: 1px 6px; border-radius: 4px; font-weight: 700;">
+            S-BAND STREAM
+          </span>
+        </div>
+
+        <div style="font-size: 10px; color: #94a3b8; margin-bottom: 6px;">
+          Transmitting staged evidence packets across orbital contact horizon:
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px;">
+          ${queuedPackets.map((p, idx) => {
+            const startT = cumulativeTime;
+            const endT = cumulativeTime + p.transmitSec;
+            cumulativeTime = endT;
+            const isTransmitted = p.transmitted;
+            const isStreaming = p.id === state.activeDownlinkPacketId;
+            const isOverflow = endT > state.downlinkWindowSec;
+
+            let statusLabel = 'QUEUED ⏳';
+            let statusColor = '#f59e0b';
+            if (isTransmitted) {
+              statusLabel = 'TRANSMITTED ✓';
+              statusColor = '#10b981';
+            } else if (isStreaming) {
+              statusLabel = 'STREAMING 📡';
+              statusColor = '#38bdf8';
+            } else if (isOverflow) {
+              statusLabel = 'LOS RISK ⚠️';
+              statusColor = '#ef4444';
+            }
+
+            return `
+              <div style="background: rgba(15, 23, 42, 0.85); border-left: 3px solid ${statusColor}; border-radius: 0 6px 6px 0; padding: 5px 8px; font-size: 10px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                  <b style="color: #f8fafc;">Slot ${idx + 1}: Sector ${p.sectorId} (${p.sensorMode})</b>
+                  <b style="color: ${statusColor}; font-size: 9px;">${statusLabel}</b>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 9px; color: #94a3b8;">
+                  <span>${p.headline}</span>
+                  <span>${startT.toFixed(1)}s - ${endT.toFixed(1)}s (${p.transmitSec.toFixed(1)}s)</span>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+
+        <div style="font-size: 9px; color: #94a3b8; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 4px;">
+          Total Transmission Load: <b style="color: ${state.downlinkCommittedSec > state.downlinkWindowSec ? '#ef4444' : '#34d399'}">${state.downlinkCommittedSec.toFixed(1)}s / ${state.downlinkWindowSec.toFixed(1)}s</b>
+        </div>
+      `;
+      return;
+    }
+
     const packets = state.packets;
     if (packets.length === 0) {
       this.compareEl.innerHTML = `
@@ -1407,7 +1635,7 @@ export class DesktopControlsManager {
         agreeText = `Both observations confirm geographic coordinates and transit alignment of Sector ${sel.sectorId} (${sel.sectorName}).`;
         if (sel.sensorMode !== otherPkt.sensorMode) {
           if (sel.sectorId === 'B') {
-            deltaText = `Optical is completely blocked by convective cloud deck (τ > 15, SNR 4.1 dB); active C-band SAR pierces clouds to identify 2.4 km smooth water specular forward-scatter across the highway.`;
+            deltaText = `Optical is completely blocked by convective cloud deck (τ > 15, SNR 4.1 dB); active C-band SAR pierces clouds to identify 2.4 km smooth water specular forward-scatter across the highway (flood depth unmeasured by amplitude alone).`;
           } else if (sel.sectorId === 'C') {
             deltaText = `Optical achieves 0.75m daylight surface contrast verifying dry deck asphalt; active SAR encounters +18.5 dB metallic dihedral glare leaving road deck flood status ambiguous.`;
           } else {
@@ -1422,9 +1650,9 @@ export class DesktopControlsManager {
       }
 
       if (sel.sensorMode === 'OPTICAL') {
-        uncertText = `Spaceborne optical frames confirm visible surface state; cannot evaluate sub-surface structural load capacity or penetrate cloud decks.`;
+        uncertText = `Physical Limit: Optical imagery confirms visible daylight surfaces; cannot evaluate subsurface structural load capacity or penetrate cloud decks.`;
       } else {
-        uncertText = `Active SAR amplitude identifies smooth water sheets and dihedral corner reflectors; cannot measure floodwater depth from single-pass intensity.`;
+        uncertText = `Physical Limit: SAR single-pass amplitude identifies smooth water sheets and dihedral corner reflectors; cannot measure floodwater depth without in-situ ground validation.`;
       }
     }
 
