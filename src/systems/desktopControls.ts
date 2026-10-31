@@ -961,13 +961,15 @@ export class DesktopControlsManager {
 
     // 1. Top Tutorial & Mission Objective Banner
     this.bannerEl = document.createElement('div');
+    this.bannerEl.id = 'orbit-zero-hud-banner';
     this.bannerEl.style.cssText = `
       position: absolute;
       top: 14px; left: 50%;
       transform: translateX(-50%);
-      background: rgba(11, 18, 32, 0.94);
+      background: rgba(11, 18, 32, 0.98);
+      backdrop-filter: blur(12px);
       border: 1px solid #38bdf8;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65), 0 0 16px rgba(56, 189, 248, 0.25);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8), 0 0 16px rgba(56, 189, 248, 0.25);
       border-radius: 10px;
       padding: 12px 20px;
       min-width: 520px;
@@ -981,11 +983,13 @@ export class DesktopControlsManager {
 
     // 2. Action Toast Notification Pill
     this.toastEl = document.createElement('div');
+    this.toastEl.id = 'orbit-zero-hud-action';
     this.toastEl.style.cssText = `
       position: absolute;
       bottom: 84px; left: 50%;
       transform: translate(-50%, 12px);
-      background: rgba(6, 78, 59, 0.95);
+      background: rgba(6, 78, 59, 0.98);
+      backdrop-filter: blur(8px);
       border: 1px solid #34d399;
       color: #f8fafc;
       padding: 8px 18px;
@@ -993,7 +997,7 @@ export class DesktopControlsManager {
       font-size: 13px;
       font-weight: 600;
       letter-spacing: 0.3px;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
       opacity: 0;
       transition: opacity 0.25s ease, transform 0.25s ease;
       pointer-events: none;
@@ -1007,9 +1011,10 @@ export class DesktopControlsManager {
       position: absolute;
       bottom: 14px; left: 50%;
       transform: translateX(-50%);
-      background: rgba(11, 18, 32, 0.94);
+      background: rgba(11, 18, 32, 0.98);
+      backdrop-filter: blur(12px);
       border: 1px solid rgba(56, 189, 248, 0.4);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
       border-radius: 10px;
       padding: 8px 14px;
       display: flex;
@@ -1027,9 +1032,10 @@ export class DesktopControlsManager {
       top: 92px; left: 16px;
       width: 330px;
       max-width: 35vw;
-      background: rgba(11, 18, 32, 0.94);
+      background: rgba(11, 18, 32, 0.98);
+      backdrop-filter: blur(12px);
       border: 1px solid rgba(56, 189, 248, 0.4);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
       border-radius: 8px;
       padding: 10px 14px;
       color: #cbd5e1;
@@ -1049,9 +1055,10 @@ export class DesktopControlsManager {
       top: 92px; right: 16px;
       width: 360px;
       max-width: 38vw;
-      background: rgba(11, 18, 32, 0.94);
+      background: rgba(11, 18, 32, 0.98);
+      backdrop-filter: blur(12px);
       border: 1px solid rgba(16, 185, 129, 0.4);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
       border-radius: 8px;
       padding: 10px 14px;
       color: #cbd5e1;
@@ -1228,7 +1235,7 @@ export class DesktopControlsManager {
         case 'SELECT_SENSOR':
           stepBadge = 'STEP 2: SENSOR TRADE-OFF';
           title = 'SOLVE SENSOR DILEMMA: CLOUD PENETRATION';
-          prompt = 'Dense convective nimbus clouds (τ > 15) extinguish optical photons (0% SNR, 8 Wh). Active Microwave Radar (SAR, 14 Wh) pierces clouds to identify specular floodwaters. Balance your 40 Wh battery reserve against cloud penetration.';
+          prompt = 'Dense convective nimbus clouds (τ > 15) extinguish optical photons (SNR < 0 dB — Complete Droplet Washout, 8 Wh). Active Microwave Radar (SAR, 14 Wh) pierces clouds with C-band pulses (5.4 GHz) to detect specular floodwaters. Balance your 40 Wh battery reserve against cloud penetration.';
           tip = 'Switch sensor mode to RADAR [M] or click the sensor button.';
           break;
         case 'SCAN_SECTOR':
@@ -1310,11 +1317,11 @@ export class DesktopControlsManager {
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(56, 189, 248, 0.25); padding-bottom: 4px; margin-bottom: 6px;">
           <span style="font-weight: 700; color: #38bdf8; letter-spacing: 0.5px;">GROUND RESCUE IMPACT</span>
           <span style="font-size: 10px; background: rgba(56, 189, 248, 0.2); color: #38bdf8; padding: 1px 6px; border-radius: 4px; font-weight: 700;">
-            DISASTER ZONE OUTCOMES
+            [SIMULATED CRISIS MODEL]
           </span>
         </div>
         <div style="font-size: 11px; color: #94a3b8; margin-bottom: 8px;">
-          Downlinked telemetry directly determined emergency response operations on the ground:
+          Simulated ground response consequences based on downlinked orbital evidence:
         </div>
         ${evs.map((ev) => {
           const color = ev.status === 'VERIFIED' ? '#10b981' : ev.status === 'PARTIAL' ? '#f59e0b' : '#ef4444';
@@ -1325,7 +1332,7 @@ export class DesktopControlsManager {
                 <span style="font-size: 9px; background: rgba(255,255,255,0.08); padding: 1px 4px; border-radius: 3px; color: ${color}; font-weight: 700;">${ev.statusBadge} (${ev.scorePoints}/${ev.maxPoints} pts)</span>
               </div>
               <div style="font-size: 10px; color: #f8fafc; margin-bottom: 2px;">
-                <b>Rescue Impact:</b> ${ev.groundConsequence}
+                <b>Simulated Operational Impact:</b> ${ev.groundConsequence}
               </div>
               <div style="font-size: 9px; color: #94a3b8; font-style: italic;">
                 <b>Telemetry Evidence:</b> ${ev.explanation}
@@ -1350,13 +1357,13 @@ export class DesktopControlsManager {
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(56, 189, 248, 0.25); padding-bottom: 4px; margin-bottom: 6px;">
           <span style="font-weight: 700; color: #38bdf8; letter-spacing: 0.5px;">ORBITAL LINK TRACKING</span>
           <span style="font-size: 10px; background: rgba(16, 185, 129, 0.2); color: #10b981; padding: 1px 6px; border-radius: 4px; font-weight: 700;">
-            CARRIER LOCKED
+            [SIMULATED TELEMETRY]
           </span>
         </div>
         <div style="background: rgba(15, 23, 42, 0.85); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 10px;">
-          <div style="color: #94a3b8; margin-bottom: 2px;">Ground Station: <b style="color: #f8fafc;">Karachi Downlink Terminal (24.86° N, 67.00° E)</b></div>
-          <div style="color: #94a3b8; margin-bottom: 2px;">Carrier Frequency: <b style="color: #38bdf8;">S-Band 2205.5 MHz (BPSK)</b></div>
-          <div style="color: #94a3b8; margin-bottom: 2px;">Link SNR: <b style="color: #10b981;">18.4 dB [Nominal Lock]</b></div>
+          <div style="color: #94a3b8; margin-bottom: 2px;">Ground Station: <b style="color: #f8fafc;">Karachi Downlink Terminal (24.86° N, 67.00° E) [Simulated Horizon Tracking]</b></div>
+          <div style="color: #94a3b8; margin-bottom: 2px;">Carrier Frequency: <b style="color: #38bdf8;">S-Band 2205.5 MHz BPSK [Simulated Carrier Lock]</b></div>
+          <div style="color: #94a3b8; margin-bottom: 2px;">Link SNR: <b style="color: #10b981;">18.4 dB [Simulated Receiver Metric]</b></div>
           <div style="color: #94a3b8;">Doppler Offset: <b style="color: #cbd5e1;">+14.2 kHz (Ascending Arc)</b></div>
         </div>
         <div style="background: rgba(15, 23, 42, 0.85); border-radius: 6px; padding: 6px 8px; font-size: 10px;">
@@ -1473,7 +1480,7 @@ export class DesktopControlsManager {
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(16, 185, 129, 0.25); padding-bottom: 4px; margin-bottom: 6px;">
           <span style="font-weight: 700; color: #10b981; letter-spacing: 0.5px;">TELEMETRY DELIVERY ACCOUNTING</span>
           <span style="font-size: 10px; background: rgba(16, 185, 129, 0.2); color: #10b981; padding: 1px 6px; border-radius: 4px; font-weight: 700;">
-            DOWNLINK COMPLETE
+            [SIMULATED FLIGHT TELEMETRY]
           </span>
         </div>
 
@@ -1539,7 +1546,7 @@ export class DesktopControlsManager {
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(16, 185, 129, 0.25); padding-bottom: 4px; margin-bottom: 6px;">
           <span style="font-weight: 700; color: #10b981; letter-spacing: 0.5px;">LIVE DOWNLINK PIPELINE</span>
           <span style="font-size: 10px; background: rgba(56, 189, 248, 0.2); color: #38bdf8; padding: 1px 6px; border-radius: 4px; font-weight: 700;">
-            S-BAND STREAM
+            [SIMULATED S-BAND STREAM]
           </span>
         </div>
 
@@ -1676,7 +1683,7 @@ export class DesktopControlsManager {
         ${sel.headline}
       </div>
       <div style="font-size: 10px; color: #94a3b8; margin-bottom: 6px;">
-        ${sel.sectorName} | ${sel.sensorMode} | Res: ${sel.resolutionMeters}m | SNR: ${sel.snrDb} dB
+        ${sel.sectorName} | ${sel.sensorMode} | Res: ${sel.resolutionMeters}m | SNR: ${sel.snrDb} dB [Signal-to-Noise Ratio]
       </div>
 
       <div style="background: rgba(15, 23, 42, 0.85); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 10px;">
