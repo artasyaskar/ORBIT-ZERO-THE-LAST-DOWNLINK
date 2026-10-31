@@ -552,7 +552,7 @@ export class MissionControlSystem extends createSystem({
     if (globe) {
       const cloudSphere = globe.getObjectByName('GlobeCloudSphere');
       if (cloudSphere) {
-        cloudSphere.rotation.y += (reducedMotion ? 0 : delta) * 0.0028;
+        cloudSphere.rotation.y += (reducedMotion ? 0 : delta) * 0.018;
       }
       const ring = globe.getObjectByName('EquatorTelemetryRing');
       if (ring) {
@@ -562,6 +562,16 @@ export class MissionControlSystem extends createSystem({
       if (outerBand) {
         outerBand.rotation.z -= (reducedMotion ? 0 : delta) * 0.09;
       }
+      // Glowing atmosphere rim halo pulse
+      const atmoRim = globe.getObjectByName('GlobeAtmosphereRim');
+      if (atmoRim instanceof Mesh && atmoRim.material instanceof MeshBasicMaterial) {
+        atmoRim.material.opacity = 0.20 + 0.08 * Math.sin(this.elapsedTime * 2.2);
+      }
+      const horizonHalo = globe.getObjectByName('GlobeHorizonHalo');
+      if (horizonHalo instanceof Mesh && horizonHalo.material instanceof MeshBasicMaterial) {
+        horizonHalo.material.opacity = 0.28 + 0.06 * Math.sin(this.elapsedTime * 1.8);
+      }
+
       // Dynamic breathing pulse on active target sector ribbon
       const selectedId = this.engine.getState().selectedSectorId;
       const selectedRibbon = globe.getObjectByName(`SectorPoly_${selectedId}`);
@@ -570,7 +580,7 @@ export class MissionControlSystem extends createSystem({
         selectedRibbon.material instanceof MeshStandardMaterial
       ) {
         selectedRibbon.material.emissiveIntensity =
-          1.35 + 0.35 * Math.sin(this.elapsedTime * 4.5);
+          1.45 + 0.45 * Math.sin(this.elapsedTime * 4.5);
       }
 
       // Animate Sub-Satellite Nadir Pip gliding along ground track over the Indus Basin
@@ -621,44 +631,51 @@ export class MissionControlSystem extends createSystem({
         swathCone instanceof Mesh &&
         swathCone.material instanceof MeshBasicMaterial
       ) {
-        if (this.scanBeamPulseTimer > 0) {
-          this.scanBeamPulseTimer = Math.max(0, this.scanBeamPulseTimer - delta);
-          const progress = 1.0 - this.scanBeamPulseTimer / 0.85;
-          const opacity = Math.sin(progress * Math.PI) * 0.58;
-          const beamHex = this.scanBeamMode === 'OPTICAL' ? 0x38bdf8 : 0xf59e0b;
+        const cubesat = this.world.getSceneObject('cubesat-spacecraft');
+        const activeSectorId = this.scanBeamPulseTimer > 0 ? this.scanBeamSectorId : this.engine.getState().selectedSectorId;
+        const sectorDef = SECTOR_GEO_DEFINITIONS[activeSectorId];
 
-          swathCone.material.color.setHex(beamHex);
-          swathCone.material.opacity = opacity;
-          swathCone.visible = true;
+        if (cubesat && sectorDef) {
+          const satWorld = new Vector3();
+          cubesat.getWorldPosition(satWorld);
+          const pSatLocal = globe.worldToLocal(satWorld);
+          const pSectorLocal = latLonToGlobePoint(
+            sectorDef.centerLatLon[0],
+            sectorDef.centerLatLon[1],
+            GLOBE_RADIUS,
+          );
+          const len = alignSpan(swathCone, pSatLocal, pSectorLocal);
+          swathCone.scale.set(1, len, 1);
 
-          const cubesat = this.world.getSceneObject('cubesat-spacecraft');
-          const sectorDef = SECTOR_GEO_DEFINITIONS[this.scanBeamSectorId];
-          if (cubesat && sectorDef) {
-            const satWorld = new Vector3();
-            cubesat.getWorldPosition(satWorld);
-            satWorld.y -= 0.035; // payload optical/radar nadir lens
-            const pSatLocal = globe.worldToLocal(satWorld);
-            const pSectorLocal = latLonToGlobePoint(
-              sectorDef.centerLatLon[0],
-              sectorDef.centerLatLon[1],
-              GLOBE_RADIUS,
-            );
-            const len = alignSpan(swathCone, pSatLocal, pSectorLocal);
-            swathCone.scale.set(1, len, 1);
+          if (this.scanBeamPulseTimer > 0) {
+            this.scanBeamPulseTimer = Math.max(0, this.scanBeamPulseTimer - delta);
+            const progress = 1.0 - this.scanBeamPulseTimer / 0.85;
+            const opacity = Math.sin(progress * Math.PI) * 0.75;
+            const beamHex = this.scanBeamMode === 'OPTICAL' ? 0x38bdf8 : 0xf59e0b;
+
+            swathCone.material.color.setHex(beamHex);
+            swathCone.material.opacity = opacity;
+            swathCone.visible = true;
+          } else {
+            // Ambient observation swath cone gently tracking the active sector
+            const isOptical = this.engine.getState().activeSensorMode === 'OPTICAL';
+            const beamHex = isOptical ? 0x0284c7 : 0xd97706;
+            swathCone.material.color.setHex(beamHex);
+            swathCone.material.opacity = 0.12 + 0.05 * Math.sin(this.elapsedTime * 2.8);
+            swathCone.visible = true;
           }
         } else {
           swathCone.visible = false;
-          swathCone.material.opacity = 0.0;
         }
       }
     }
 
-    // Subtle orbital station-keeping motion & active ADCS attitude slewing toward target sector
+    // Dynamic 3D Low-Earth-Orbit (LEO) Spacecraft Motion & Active ADCS Ground Tracking
     const cubesat = this.world.getSceneObject('cubesat-spacecraft');
     if (cubesat) {
       this.initSpacecraftTelemetryLEDs(cubesat);
 
-      // Spacecraft Avionics Bus Telemetry Indicators (subtle, non-distracting scientific telemetry)
+      // Spacecraft Avionics Bus Telemetry Indicators
       const attitudeLock = cubesat.getObjectByName('AdcsAttitudeLockLED');
       if (attitudeLock instanceof Mesh && attitudeLock.material instanceof MeshStandardMaterial) {
         attitudeLock.material.emissiveIntensity = 0.8 + 0.2 * Math.sin(this.elapsedTime * 2.0);
@@ -671,22 +688,29 @@ export class MissionControlSystem extends createSystem({
         epsHeartbeat.material.emissiveIntensity = 0.5 + 0.3 * Math.sin(this.elapsedTime * 3.14);
       }
 
-      cubesat.position.y = 1.255 + Math.sin(this.elapsedTime * 1.4) * 0.005;
+      // Continuous 3D Low-Earth-Orbit Trajectory around Tactical Earth Globe (R = 0.285m, ~52° inclination pass)
+      const orbitSpeed = reducedMotion ? 0.03 : 0.12;
+      const orbitAngle = (this.elapsedTime * orbitSpeed) % (Math.PI * 2);
+      const cosA = Math.cos(orbitAngle);
+      const sinA = Math.sin(orbitAngle);
+      const rOrbit = 0.285;
 
+      // Ascending orbital trajectory over Pakistan / Indus Basin theater:
+      const satX = GLOBE_CENTER_WORLD.x + rOrbit * cosA * 0.94;
+      const satY = GLOBE_CENTER_WORLD.y + 0.10 + rOrbit * sinA * 0.45; // [0.95m to 1.23m], clear of desk
+      const satZ = GLOBE_CENTER_WORLD.z + rOrbit * sinA * 0.78;
+      cubesat.position.set(satX, satY, satZ);
+
+      // Active ADCS Attitude: Nadir instruments (+Z bulkhead) target Earth Globe center
+      const awayFromGlobe = this.tempVec.copy(cubesat.position).sub(GLOBE_CENTER_WORLD).multiplyScalar(2).add(cubesat.position);
+      cubesat.lookAt(awayFromGlobe);
+
+      // Add dynamic ADCS slewing bias toward the currently active target sector
       const sectorCfg = getScenarioSector(this.frameSnapshot.scenarioId, this.frameSnapshot.selectedSectorId);
       if (sectorCfg) {
         const [nx, ny] = sectorCfg.globeNormalizedPosition;
-        const targetRotY = (-36 * Math.PI) / 180 + nx * 0.08;
-        const targetRotX = (18 * Math.PI) / 180 - ny * 0.06;
-        const targetRotZ = (-8 * Math.PI) / 180 + (nx - ny) * 0.04;
-        const slewDelta = reducedMotion ? 0 : delta;
-
-        cubesat.rotation.x +=
-          (targetRotX - cubesat.rotation.x) * Math.min(1, slewDelta * 3.5);
-        cubesat.rotation.y +=
-          (targetRotY - cubesat.rotation.y) * Math.min(1, slewDelta * 3.5);
-        cubesat.rotation.z +=
-          (targetRotZ - cubesat.rotation.z) * Math.min(1, slewDelta * 3.5);
+        cubesat.rotation.z += (nx * 0.12);
+        cubesat.rotation.x += (ny * 0.08);
       }
     }
 

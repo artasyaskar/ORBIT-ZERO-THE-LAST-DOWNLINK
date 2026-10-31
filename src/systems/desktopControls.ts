@@ -95,6 +95,7 @@ export class DesktopControlsManager {
   private tutorialActive = true;
   private showDiagnostics = false;
   private showHelp = false;
+  private hudMinimized = false;
   private lastActionMessage = 'System Ready';
   private lastActionOk = true;
   private cleanupCallbacks: (() => void)[] = [];
@@ -738,6 +739,12 @@ export class DesktopControlsManager {
         this.toggleHelpModal();
         break;
       }
+      case 'v':
+      case 'V': {
+        e.preventDefault();
+        this.toggleHud();
+        break;
+      }
       case 'F1':
       case '`':
       case '[': {
@@ -921,6 +928,12 @@ export class DesktopControlsManager {
     this.updateHud();
   }
 
+  public toggleHud(): void {
+    this.hudMinimized = !this.hudMinimized;
+    this.notifyAction(this.hudMinimized ? 'HUD Minimized — Panoramic 3D Space View' : 'HUD Expanded — Telemetry Active');
+    this.updateHud();
+  }
+
   private notifyAction(message: string, ok = true): void {
     this.lastActionMessage = message;
     this.lastActionOk = ok;
@@ -966,18 +979,20 @@ export class DesktopControlsManager {
       position: absolute;
       top: 14px; left: 50%;
       transform: translateX(-50%);
-      background: rgba(11, 18, 32, 0.98);
-      backdrop-filter: blur(12px);
-      border: 1px solid #38bdf8;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8), 0 0 16px rgba(56, 189, 248, 0.25);
-      border-radius: 10px;
-      padding: 12px 20px;
-      min-width: 520px;
-      max-width: 780px;
+      background: rgba(8, 14, 26, 0.78);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65), 0 0 16px rgba(56, 189, 248, 0.15);
+      border-radius: 12px;
+      padding: 10px 18px;
+      min-width: 440px;
+      max-width: 660px;
       color: #f8fafc;
-      pointer-events: none;
+      pointer-events: auto;
       text-align: center;
-      transition: all 0.2s ease;
+      transition: all 0.25s ease;
+      z-index: 9999;
     `;
     this.containerEl.appendChild(this.bannerEl);
 
@@ -988,8 +1003,9 @@ export class DesktopControlsManager {
       position: absolute;
       bottom: 84px; left: 50%;
       transform: translate(-50%, 12px);
-      background: rgba(6, 78, 59, 0.98);
-      backdrop-filter: blur(8px);
+      background: rgba(6, 78, 59, 0.92);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
       border: 1px solid #34d399;
       color: #f8fafc;
       padding: 8px 18px;
@@ -1001,26 +1017,30 @@ export class DesktopControlsManager {
       opacity: 0;
       transition: opacity 0.25s ease, transform 0.25s ease;
       pointer-events: none;
+      z-index: 10000;
     `;
     this.toastEl.innerText = 'Desktop Operator Mode Initialized';
     this.containerEl.appendChild(this.toastEl);
 
     // 3. Bottom Desktop Controls Toolbar
     this.toolbarEl = document.createElement('div');
+    this.toolbarEl.id = 'orbit-zero-bottom-toolbar';
     this.toolbarEl.style.cssText = `
       position: absolute;
       bottom: 14px; left: 50%;
       transform: translateX(-50%);
-      background: rgba(11, 18, 32, 0.98);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(56, 189, 248, 0.4);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
-      border-radius: 10px;
+      background: rgba(8, 14, 26, 0.82);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7), 0 0 16px rgba(56, 189, 248, 0.1);
+      border-radius: 12px;
       padding: 8px 14px;
       display: flex;
       gap: 8px;
       align-items: center;
-      pointer-events: none;
+      pointer-events: auto;
+      z-index: 9999;
     `;
     this.containerEl.appendChild(this.toolbarEl);
 
@@ -1030,20 +1050,23 @@ export class DesktopControlsManager {
     this.reconEl.style.cssText = `
       position: absolute;
       top: 92px; left: 16px;
-      width: 330px;
-      max-width: 35vw;
-      background: rgba(11, 18, 32, 0.98);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(56, 189, 248, 0.4);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
-      border-radius: 8px;
+      width: 285px;
+      max-width: 27vw;
+      background: rgba(8, 14, 26, 0.75);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(56, 189, 248, 0.28);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), inset 0 0 16px rgba(56, 189, 248, 0.04);
+      border-radius: 10px;
       padding: 10px 14px;
       color: #cbd5e1;
       font-size: 11px;
       line-height: 1.45;
-      pointer-events: none;
+      pointer-events: auto;
       max-height: calc(100vh - 180px);
       overflow-y: auto;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 9998;
     `;
     this.containerEl.appendChild(this.reconEl);
 
@@ -1053,20 +1076,23 @@ export class DesktopControlsManager {
     this.compareEl.style.cssText = `
       position: absolute;
       top: 92px; right: 16px;
-      width: 360px;
-      max-width: 38vw;
-      background: rgba(11, 18, 32, 0.98);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(16, 185, 129, 0.4);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
-      border-radius: 8px;
+      width: 295px;
+      max-width: 28vw;
+      background: rgba(8, 14, 26, 0.75);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(16, 185, 129, 0.28);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), inset 0 0 16px rgba(16, 185, 129, 0.04);
+      border-radius: 10px;
       padding: 10px 14px;
       color: #cbd5e1;
       font-size: 11px;
       line-height: 1.45;
-      pointer-events: none;
+      pointer-events: auto;
       max-height: calc(100vh - 180px);
       overflow-y: auto;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 9998;
     `;
     this.containerEl.appendChild(this.compareEl);
 
@@ -1390,6 +1416,22 @@ export class DesktopControlsManager {
     const activeSensor = state.activeSensorMode;
     const cost = activeSensor === 'OPTICAL' ? 8 : 14;
 
+    if (this.hudMinimized) {
+      this.reconEl.style.maxHeight = '42px';
+      this.reconEl.style.overflow = 'hidden';
+      this.reconEl.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; height: 22px;" id="btn-toggle-hud-recon">
+          <span style="font-weight: 700; color: #38bdf8; font-size: 11px;">📡 ${sector.code} [${isStorm ? '95% STORM' : 'CLEAR'}]</span>
+          <span style="font-size: 9px; background: rgba(56, 189, 248, 0.2); color: #38bdf8; padding: 2px 6px; border-radius: 4px; font-weight: 700;">+ EXPAND [V]</span>
+        </div>
+      `;
+      this.reconEl.querySelector('#btn-toggle-hud-recon')?.addEventListener('click', () => this.toggleHud());
+      return;
+    }
+
+    this.reconEl.style.maxHeight = 'calc(100vh - 180px)';
+    this.reconEl.style.overflowY = 'auto';
+
     // Optical atmospheric profile
     const opticalAlbedo = isStorm ? '88% (Convective Nimbus) [Scenario Calibration]' : '< 5% (Clear Atmosphere)';
     const opticalTau = isStorm ? 'τ > 15 (Droplet Mie Scattering Washout)' : 'τ ≈ 0.02 (Direct Solar Illumination)';
@@ -1414,9 +1456,12 @@ export class DesktopControlsManager {
     this.reconEl.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(56, 189, 248, 0.25); padding-bottom: 4px; margin-bottom: 6px;">
         <span style="font-weight: 700; color: #38bdf8; letter-spacing: 0.5px;">TACTICAL RECONNAISSANCE</span>
-        <span style="font-size: 10px; background: ${isStorm ? 'rgba(245, 158, 11, 0.2)' : 'rgba(56, 189, 248, 0.2)'}; color: ${isStorm ? '#f59e0b' : '#38bdf8'}; padding: 1px 6px; border-radius: 4px; font-weight: 700;">
-          ${isStorm ? '95% CONVECTIVE STORM' : 'CLEAR SKY SLOT'}
-        </span>
+        <div style="display: flex; gap: 4px; align-items: center;">
+          <span style="font-size: 9px; background: ${isStorm ? 'rgba(245, 158, 11, 0.2)' : 'rgba(56, 189, 248, 0.2)'}; color: ${isStorm ? '#f59e0b' : '#38bdf8'}; padding: 1px 5px; border-radius: 4px; font-weight: 700;">
+            ${isStorm ? '95% CONVECTIVE STORM' : 'CLEAR SKY SLOT'}
+          </span>
+          <button id="btn-min-recon" style="background: none; border: 1px solid rgba(56, 189, 248, 0.3); color: #94a3b8; font-size: 10px; border-radius: 3px; padding: 0 4px; cursor: pointer;" title="Minimize Card [V]">—</button>
+        </div>
       </div>
       <div style="font-size: 13px; font-weight: 700; color: #f8fafc; margin-bottom: 2px;">
         SECTOR ${sector.id}: ${sector.name}
@@ -1462,6 +1507,7 @@ export class DesktopControlsManager {
         <span>Batt After: <b style="color: ${state.power >= cost ? '#34d399' : '#ef4444'}">${Math.max(0, state.power - cost)} Wh</b></span>
       </div>
     `;
+    this.reconEl.querySelector('#btn-min-recon')?.addEventListener('click', () => this.toggleHud());
   }
 
   private renderCompareCard(state: MissionState): void {
@@ -1599,23 +1645,42 @@ export class DesktopControlsManager {
     }
 
     const packets = state.packets;
-    if (packets.length === 0) {
-      this.compareEl.innerHTML = `
-        <div style="font-weight: 700; color: #10b981; letter-spacing: 0.5px; border-bottom: 1px solid rgba(16, 185, 129, 0.25); padding-bottom: 4px; margin-bottom: 6px;">
-          FORENSIC EVIDENCE & DOWNLINK
-        </div>
-        <div style="color: #64748b; font-size: 11px; text-align: center; padding: 16px 0;">
-          No evidence cubes acquired yet.<br/>Scan a sector with [Space] to acquire telemetry.
-        </div>
-      `;
-      return;
-    }
-
-    const sel = packets.find((p) => p.id === state.selectedPacketId) || packets[0];
     const queuedPackets = packets.filter((p) => state.queuePacketIds.includes(p.id));
     const totalQueuedTx = queuedPackets.reduce((acc, p) => acc + p.transmitSec, 0);
     const windowSec = state.downlinkWindowSec;
     const isOverflow = totalQueuedTx > windowSec;
+
+    if (this.hudMinimized) {
+      this.compareEl.style.maxHeight = '42px';
+      this.compareEl.style.overflow = 'hidden';
+      this.compareEl.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; height: 22px;" id="btn-toggle-hud-compare">
+          <span style="font-weight: 700; color: #10b981; font-size: 11px;">🛰️ BAY: ${totalQueuedTx.toFixed(1)}s / ${windowSec.toFixed(1)}s (${queuedPackets.length} queued)</span>
+          <span style="font-size: 9px; background: rgba(16, 185, 129, 0.2); color: #10b981; padding: 2px 6px; border-radius: 4px; font-weight: 700;">+ EXPAND [V]</span>
+        </div>
+      `;
+      this.compareEl.querySelector('#btn-toggle-hud-compare')?.addEventListener('click', () => this.toggleHud());
+      return;
+    }
+
+    this.compareEl.style.maxHeight = 'calc(100vh - 180px)';
+    this.compareEl.style.overflowY = 'auto';
+
+    if (packets.length === 0) {
+      this.compareEl.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(16, 185, 129, 0.25); padding-bottom: 4px; margin-bottom: 6px;">
+          <span style="font-weight: 700; color: #10b981; letter-spacing: 0.5px;">FORENSIC EVIDENCE & DOWNLINK</span>
+          <button id="btn-min-compare" style="background: none; border: 1px solid rgba(16, 185, 129, 0.3); color: #94a3b8; font-size: 10px; border-radius: 3px; padding: 0 4px; cursor: pointer;" title="Minimize Card [V]">—</button>
+        </div>
+        <div style="color: #94a3b8; font-size: 11px; text-align: center; padding: 12px 0;">
+          No evidence cubes acquired yet.<br/>Scan a sector with [Space] to acquire telemetry.
+        </div>
+      `;
+      this.compareEl.querySelector('#btn-min-compare')?.addEventListener('click', () => this.toggleHud());
+      return;
+    }
+
+    const sel = packets.find((p) => p.id === state.selectedPacketId) || packets[0];
 
     // Intelligent Evidence Pairing Strategy:
     // Priority 1: Same sector, cross-sensor comparison (highest forensic value)
@@ -1674,9 +1739,12 @@ export class DesktopControlsManager {
     this.compareEl.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(16, 185, 129, 0.25); padding-bottom: 4px; margin-bottom: 6px;">
         <span style="font-weight: 700; color: #10b981; letter-spacing: 0.5px;">EVIDENCE TELEMETRY</span>
-        <span style="font-size: 10px; background: ${sel.confidence === 'CONFIRMED' ? 'rgba(16, 185, 129, 0.2)' : sel.confidence === 'PROBABLE' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(239, 68, 68, 0.2)'}; color: ${sel.confidence === 'CONFIRMED' ? '#10b981' : sel.confidence === 'PROBABLE' ? '#f59e0b' : '#ef4444'}; padding: 1px 6px; border-radius: 4px; font-weight: 700;">
-          ${sel.confidenceBadge}
-        </span>
+        <div style="display: flex; gap: 4px; align-items: center;">
+          <span style="font-size: 10px; background: ${sel.confidence === 'CONFIRMED' ? 'rgba(16, 185, 129, 0.2)' : sel.confidence === 'PROBABLE' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(239, 68, 68, 0.2)'}; color: ${sel.confidence === 'CONFIRMED' ? '#10b981' : sel.confidence === 'PROBABLE' ? '#f59e0b' : '#ef4444'}; padding: 1px 6px; border-radius: 4px; font-weight: 700;">
+            ${sel.confidenceBadge}
+          </span>
+          <button id="btn-min-compare" style="background: none; border: 1px solid rgba(16, 185, 129, 0.3); color: #94a3b8; font-size: 10px; border-radius: 3px; padding: 0 4px; cursor: pointer;" title="Minimize Card [V]">—</button>
+        </div>
       </div>
 
       <div style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-bottom: 2px;">
@@ -1775,6 +1843,7 @@ export class DesktopControlsManager {
         this.updateHud();
       });
     });
+    this.compareEl?.querySelector('#btn-min-compare')?.addEventListener('click', () => this.toggleHud());
   }
 
   private renderBottomToolbar(state: MissionState): void {
@@ -1804,6 +1873,7 @@ export class DesktopControlsManager {
       </div>
 
       <button id="tb-transmit" style="${this.btnStyle('#34d399', hasQueue)}">TRANSMIT [T]</button>
+      <button id="tb-hud-view" style="${this.btnStyle(this.hudMinimized ? '#f59e0b' : '#38bdf8')}">${this.hudMinimized ? 'HUD [FULL]' : 'HUD [MIN]'}</button>
       <button id="tb-help" style="${this.btnStyle('#94a3b8')}">HELP [H]</button>
       <button id="tb-diag" style="${this.btnStyle('#94a3b8')}">DEV [F1]</button>
     `;
@@ -1820,6 +1890,7 @@ export class DesktopControlsManager {
     this.toolbarEl.querySelector('#tb-queue')?.addEventListener('click', () => this.queuePacket());
     this.toolbarEl.querySelector('#tb-discard')?.addEventListener('click', () => this.discardPacket());
     this.toolbarEl.querySelector('#tb-transmit')?.addEventListener('click', () => this.commitDownlink());
+    this.toolbarEl.querySelector('#tb-hud-view')?.addEventListener('click', () => this.toggleHud());
     this.toolbarEl.querySelector('#tb-help')?.addEventListener('click', () => this.toggleHelpModal());
     this.toolbarEl.querySelector('#tb-diag')?.addEventListener('click', () => this.toggleDiagnostics());
   }
