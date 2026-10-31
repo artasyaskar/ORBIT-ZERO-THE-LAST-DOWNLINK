@@ -653,114 +653,133 @@ export function createSectorMarkerAsset(
   const beaconMat = new MeshStandardMaterial({
     color: accentHex,
     emissive: accentHex,
-    emissiveIntensity: 1.0,
+    emissiveIntensity: 1.25,
     roughness: 0.2,
     metalness: 0.35,
   });
+  const glowLightMat = new MeshBasicMaterial({
+    color: accentHex,
+    transparent: true,
+    opacity: 0.75,
+    depthWrite: false,
+  });
+
+  // 1. Surface Ground Anchor Socket (titanium bevel ring flush with globe surface)
+  const anchorSocket = new Mesh(
+    new CylinderGeometry(0.0055, 0.0075, 0.0025, 12),
+    beaconMat,
+  );
+  anchorSocket.name = 'SectorAnchorSocket';
+  anchorSocket.position.set(0, 0.0012, 0);
+  root.add(anchorSocket);
+
+  // 2. Elevated Vertical Tactical Holographic Pylon Shaft (extends 32mm radially outward)
+  const pylonHeight = 0.032;
+  const pylonGeo = new CylinderGeometry(0.0009, 0.0013, pylonHeight, 8);
+  const pylonMesh = new Mesh(pylonGeo, beaconMat);
+  pylonMesh.name = 'SectorPylonShaft';
+  pylonMesh.position.set(0, pylonHeight / 2 + 0.002, 0);
+  root.add(pylonMesh);
+
+  // 3. Floating Tactical Collar Ring (hovers along pylon at y = 22mm)
+  const collarRing = new Mesh(
+    new TorusGeometry(0.0095, 0.0009, 6, 24),
+    beaconMat,
+  );
+  collarRing.name = 'SectorCollarRing';
+  collarRing.rotation.set(Math.PI / 2, 0, 0);
+  collarRing.position.set(0, 0.022, 0);
+  root.add(collarRing);
 
   if (isCloudCovered) {
-    // 1. Hexagonal tactical radar hazard ring (6 segments for colorblind-safe geometry)
+    // 4a. Hexagonal tactical radar hazard crown atop the pylon (y = 35mm)
     const reticleRing = new Mesh(
-      new TorusGeometry(0.011, 0.0011, 6, 6),
+      new TorusGeometry(0.0125, 0.0012, 6, 6),
       beaconMat,
     );
     reticleRing.name = 'SectorHaloRing';
     reticleRing.rotation.set(Math.PI / 2, 0, Math.PI / 6);
-    reticleRing.position.set(0, 0.0018, 0);
+    reticleRing.position.set(0, pylonHeight + 0.003, 0);
     root.add(reticleRing);
 
-    // 2. Three radiating radar wave arc brackets (120 deg apart)
+    // Three radiating radar wave arc brackets (120 deg apart)
     for (let b = 0; b < 3; b++) {
       const arc = new Mesh(
-        new TorusGeometry(0.0145, 0.0008, 6, 16, Math.PI * 0.42),
+        new TorusGeometry(0.016, 0.0008, 6, 16, Math.PI * 0.42),
         beaconMat,
       );
       arc.name = `SectorBracketArc_${b}`;
       arc.rotation.set(Math.PI / 2, 0, (b * Math.PI * 2) / 3);
-      arc.position.set(0, 0.002, 0);
+      arc.position.set(0, pylonHeight + 0.0032, 0);
       root.add(arc);
     }
 
-    // 3. Three triangular inward hazard ticks
-    const tickGeo = bevelBox(0.0016, 0.001, 0.0036, 0.0002, 0.0003, 1);
-    for (let i = 0; i < 3; i++) {
-      const angle = (i * Math.PI * 2) / 3;
-      const dist = 0.0082;
-      const tick = new Mesh(tickGeo, beaconMat);
-      tick.name = `SectorCrosshairTick_${i}`;
-      tick.position.set(Math.sin(angle) * dist, 0.002, Math.cos(angle) * dist);
-      tick.rotation.set(0, angle, 0);
-      root.add(tick);
-    }
-
-    // 4. Faceted triangular hazard beacon core
-    const collar = new Mesh(
-      new CylinderGeometry(0.0032, 0.004, 0.002, 6),
-      baseMat,
-    );
-    collar.name = 'SectorCollar';
-    collar.position.set(0, 0.0012, 0);
-    root.add(collar);
-
+    // Faceted triangular hazard beacon core
     const corePip = new Mesh(
-      new CylinderGeometry(0.0024, 0.0012, 0.005, 3),
+      new CylinderGeometry(0.0032, 0.0014, 0.007, 3),
       beaconMat,
     );
     corePip.name = 'SectorBeaconCore';
-    corePip.position.set(0, 0.0038, 0);
+    corePip.position.set(0, pylonHeight + 0.0055, 0);
     root.add(corePip);
   } else {
-    // 1. Sleek circular optical target reticle ring
+    // 4b. Sleek circular optical target reticle crown atop the pylon (y = 35mm)
     const reticleRing = new Mesh(
-      new TorusGeometry(0.0105, 0.00095, 8, 32),
+      new TorusGeometry(0.0118, 0.001, 8, 32),
       beaconMat,
     );
     reticleRing.name = 'SectorHaloRing';
     reticleRing.rotation.set(Math.PI / 2, 0, 0);
-    reticleRing.position.set(0, 0.0018, 0);
+    reticleRing.position.set(0, pylonHeight + 0.003, 0);
     root.add(reticleRing);
 
-    // 2. Two outer framing arc brackets (opposite quadrants)
+    // Two outer framing arc brackets (opposite quadrants)
     for (let b = 0; b < 2; b++) {
       const arc = new Mesh(
-        new TorusGeometry(0.014, 0.0007, 6, 18, Math.PI * 0.56),
+        new TorusGeometry(0.0155, 0.0007, 6, 18, Math.PI * 0.56),
         beaconMat,
       );
       arc.name = `SectorBracketArc_${b}`;
       arc.rotation.set(Math.PI / 2, 0, b * Math.PI + 0.45);
-      arc.position.set(0, 0.002, 0);
+      arc.position.set(0, pylonHeight + 0.0032, 0);
       root.add(arc);
     }
 
-    // 3. Four precision inward crosshair ticks (leaving center open)
+    // Four precision inward crosshair ticks
     const tickGeo = bevelBox(0.0012, 0.001, 0.0036, 0.0002, 0.0003, 1);
     for (let i = 0; i < 4; i++) {
       const angle = (i * Math.PI) / 2;
-      const dist = 0.008;
+      const dist = 0.0085;
       const tick = new Mesh(tickGeo, beaconMat);
       tick.name = `SectorCrosshairTick_${i}`;
-      tick.position.set(Math.sin(angle) * dist, 0.002, Math.cos(angle) * dist);
+      tick.position.set(Math.sin(angle) * dist, pylonHeight + 0.0032, Math.cos(angle) * dist);
       tick.rotation.set(0, angle, 0);
       root.add(tick);
     }
 
-    // 4. Compact central cylindrical optical lens core + slim collar
-    const collar = new Mesh(
-      new CylinderGeometry(0.0028, 0.0036, 0.002, 12),
-      baseMat,
-    );
-    collar.name = 'SectorCollar';
-    collar.position.set(0, 0.0012, 0);
-    root.add(collar);
-
+    // Compact central cylindrical optical lens core
     const corePip = new Mesh(
-      new CylinderGeometry(0.0022, 0.0014, 0.0045, 6),
+      new CylinderGeometry(0.0026, 0.0016, 0.006, 6),
       beaconMat,
     );
     corePip.name = 'SectorBeaconCore';
-    corePip.position.set(0, 0.0038, 0);
+    corePip.position.set(0, pylonHeight + 0.0055, 0);
     root.add(corePip);
   }
+
+  // 5. Generous Semi-Transparent Pick Collider Sphere (r = 28mm)
+  // Ensures mouse raycasts and VR index fingers reliably hit the beacon from any orientation
+  const pickCollider = new Mesh(
+    new SphereGeometry(0.028, 12, 8),
+    new MeshBasicMaterial({
+      transparent: true,
+      opacity: 0.001,
+      depthWrite: false,
+    }),
+  );
+  pickCollider.name = 'SectorPickCollider';
+  pickCollider.position.set(0, 0.020, 0);
+  root.add(pickCollider);
 
   mergeStaticMeshesByMaterial(root);
 

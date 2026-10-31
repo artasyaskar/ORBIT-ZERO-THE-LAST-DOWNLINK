@@ -15,6 +15,7 @@ import {
   Color,
   createSystem,
   Entity,
+  Euler,
   Grabbed,
   GrabSystem,
   InputSystem,
@@ -26,6 +27,7 @@ import {
   Points,
   PointsMaterial,
   Pressed,
+  Quaternion,
   Raycaster,
   SphereGeometry,
   SRGBColorSpace,
@@ -158,6 +160,16 @@ export class MissionControlSystem extends createSystem({
 
   // Desktop Controls & First-Time Player Experience
   private desktopControls?: DesktopControlsManager;
+
+  // Phase 1: 3D Gimbal Globe Interactive Rotation & Focal Zoom
+  private globeAngularVelocity = new Vector2(0, 0);
+  private globeTargetQuaternion = new Quaternion();
+  private globeCurrentQuaternion = new Quaternion();
+  private globeFocalDistance = -0.58;
+  private targetFocalDistance = -0.58;
+  private isSlerpingToSector = false;
+  private slerpProgress = 1.0;
+  private slerpDuration = 0.65;
 
   init(): void {
     const inputSystem = this.world.getSystem(InputSystem);
@@ -328,6 +340,8 @@ export class MissionControlSystem extends createSystem({
       nextMission: () => this.nextMission(),
       togglePause: () => this.togglePause(),
       reorderQueue: () => this.handleReorderQueue(),
+      rotateGlobe: (yaw, pitch) => this.rotateGlobe(yaw, pitch),
+      zoomGlobe: (delta) => this.zoomGlobe(delta),
       playCue: (cue) => this.playCue(cue as never),
       getSceneObject: (id) => this.world.getSceneObject(id),
       highlightDropZones: (active) => this.highlightDropZones(active),
@@ -406,6 +420,19 @@ export class MissionControlSystem extends createSystem({
         trigger3DNode: (nodeId: string) => this.handleTrigger3DNodeById(nodeId),
         highlightDropZones: (active: boolean) => this.highlightDropZones(active),
         handleControlAction: (action: string) => this.handleControlAction(action),
+        rotateGlobe: (yaw: number, pitch: number) => this.rotateGlobe(yaw, pitch),
+        zoomGlobe: (delta: number) => this.zoomGlobe(delta),
+        getGlobeRotationDelta: () => {
+          const globe = this.world.getSceneObject('earth-globe');
+          if (!globe) return 0;
+          return 2 * Math.acos(Math.min(1, Math.max(-1, globe.quaternion.w)));
+        },
+        getGlobeFocalDistance: () => {
+          const globe = this.world.getSceneObject('earth-globe');
+          return globe ? globe.position.z : -0.58;
+        },
+        getDrawCalls: () => this.world.renderer.info.render.calls,
+        getTriangles: () => this.world.renderer.info.render.triangles,
         setScenario: (id: MissionScenarioId) => {
           this.dailyDate = null;
           this.engine.setScenario(id);
@@ -546,10 +573,38 @@ export class MissionControlSystem extends createSystem({
       if (skyDome) {
         skyDome.rotation.y += (reducedMotion ? 0 : delta) * 0.0018;
       }
+      // Phase 1: 2,500 Starfield Scintillation & Cosmic Drift
+      const starfield = orbitalConsole.getObjectByName('CupolaStarfieldDome');
+      if (starfield instanceof Points && starfield.material instanceof PointsMaterial) {
+        starfield.rotation.y += (reducedMotion ? 0 : delta) * 0.0012;
+        starfield.material.opacity = 0.90 + 0.07 * Math.sin(this.elapsedTime * 2.5);
+      }
     }
 
     const globe = this.world.getSceneObject('earth-globe');
     if (globe) {
+      // Phase 1: Interactive Globe Gimbal Slerp or Damped Angular Momentum
+      if (this.isSlerpingToSector) {
+        this.slerpProgress += delta / this.slerpDuration;
+        globe.quaternion.slerp(this.globeTargetQuaternion, 1.0 - Math.exp(-8.0 * delta));
+        if (this.slerpProgress >= 1.0 || globe.quaternion.dot(this.globeTargetQuaternion) > 0.9995) {
+          globe.quaternion.copy(this.globeTargetQuaternion);
+          this.isSlerpingToSector = false;
+        }
+      } else if (this.globeAngularVelocity.lengthSq() > 0.000001) {
+        this.globeAngularVelocity.multiplyScalar(0.92);
+        const qYaw = new Quaternion().setFromAxisAngle(this.worldUp, this.globeAngularVelocity.x);
+        const rightAxis = new Vector3(1, 0, 0);
+        const qPitch = new Quaternion().setFromAxisAngle(rightAxis, this.globeAngularVelocity.y);
+        const qDelta = new Quaternion().multiplyQuaternions(qYaw, qPitch);
+        globe.quaternion.premultiply(qDelta);
+      }
+
+      // Phase 1: Smooth Focal Zoom Distance Interpolation
+      if (Math.abs(globe.position.z - this.targetFocalDistance) > 0.0005) {
+        this.globeFocalDistance += (this.targetFocalDistance - this.globeFocalDistance) * (1.0 - Math.exp(-12.0 * delta));
+        globe.position.z = this.globeFocalDistance;
+      }
       const cloudSphere = globe.getObjectByName('GlobeCloudSphere');
       if (cloudSphere) {
         cloudSphere.rotation.y += (reducedMotion ? 0 : delta) * 0.018;
@@ -927,6 +982,11 @@ export class MissionControlSystem extends createSystem({
   private bindEarthPlanetTextures(): void {
     const globe = this.world.getSceneObject('earth-globe');
     if (!globe) return;
+
+    this.globeCurrentQuaternion.copy(globe.quaternion);
+    this.globeTargetQuaternion.copy(globe.quaternion);
+    this.globeFocalDistance = globe.position.z;
+    this.targetFocalDistance = globe.position.z;
 
     const albedoTex = AssetManager.getTexture('earth-albedo-tex');
     const normalTex = AssetManager.getTexture('earth-normal-tex');
@@ -1457,9 +1517,49 @@ export class MissionControlSystem extends createSystem({
     bindClick(this.debriefPanel, 'Btn_ReplayDecision', () => this.cycleReplay());
   }
 
+  public rotateGlobe(deltaYaw: number, deltaPitch: number): void {
+    const globe = this.world.getSceneObject('earth-globe');
+    if (!globe) return;
+    this.isSlerpingToSector = false;
+
+    // Yaw around world Up, pitch around world Right
+    const qYaw = new Quaternion().setFromAxisAngle(this.worldUp, deltaYaw);
+    const rightAxis = new Vector3(1, 0, 0);
+    const qPitch = new Quaternion().setFromAxisAngle(rightAxis, deltaPitch);
+
+    const qDelta = new Quaternion().multiplyQuaternions(qYaw, qPitch);
+    globe.quaternion.premultiply(qDelta);
+    this.globeCurrentQuaternion.copy(globe.quaternion);
+    this.globeAngularVelocity.set(deltaYaw, deltaPitch);
+  }
+
+  public zoomGlobe(deltaZoom: number): void {
+    this.targetFocalDistance = Math.max(-0.85, Math.min(-0.38, this.targetFocalDistance - deltaZoom));
+  }
+
+  public slerpGlobeToSector(sectorId: SectorId): void {
+    const globe = this.world.getSceneObject('earth-globe');
+    if (!globe) return;
+
+    const sectorDef = SECTOR_GEO_DEFINITIONS[sectorId];
+    if (!sectorDef) return;
+
+    // Center normal of the selected sector in globe-local space
+    const [lat, lon] = sectorDef.centerLatLon;
+    const localSectorNormal = latLonToGlobePoint(lat, lon, 1.0).normalize();
+
+    // In world space, we want this sector normal to point directly at the player & CubeSat nadir beam
+    const targetWorldDir = new Vector3(0, 0.38, 0.92).normalize();
+
+    this.globeTargetQuaternion.setFromUnitVectors(localSectorNormal, targetWorldDir);
+    this.isSlerpingToSector = true;
+    this.slerpProgress = 0.0;
+  }
+
   private handleSelectSector(sectorId: SectorId): void {
     this.applyAction({ type: 'SELECT_SECTOR', sectorId });
     this.playCue('SELECT_SECTOR');
+    this.slerpGlobeToSector(sectorId);
     this.syncAll();
   }
 

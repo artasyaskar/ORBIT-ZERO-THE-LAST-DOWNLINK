@@ -21,6 +21,8 @@ import {
   MeshBasicMaterial,
   MeshStandardMaterial,
   Object3D,
+  Points,
+  PointsMaterial,
   SphereGeometry,
   TorusGeometry,
   Vector3,
@@ -1022,15 +1024,42 @@ export function createOrbitalConsoleAsset(): Object3D {
   starLowerGusset.rotation.set(0, 0, -0.32);
   cupolaGroup.add(starLowerGusset);
 
-  // Rich 420-star deep-space canopy in 1 single draw call behind the cupola window
-  const starGeo = buildDeepSpaceStarfieldGeometry();
-  const starMat = new MeshBasicMaterial({
-    vertexColors: true,
+  // 10. Heavy Aerodynamic Canopy Brow Arch & Anti-Reflective Viewport Glass Glare
+  const canopyBrowBeam = new Mesh(
+    bevelBox(2.96, 0.046, 0.088, 0.006, 0.014, 2),
+    hullDarkMat,
+  );
+  canopyBrowBeam.name = 'CanopyBrowStrut';
+  canopyBrowBeam.position.set(0, 1.96, -0.90);
+  cupolaGroup.add(canopyBrowBeam);
+
+  // Anti-reflective aerospace glass glare layer (subtle optical reflection)
+  const canopyGlassMat = new MeshBasicMaterial({
+    color: 0x38bdf8,
     transparent: true,
-    opacity: 0.92,
+    opacity: 0.032,
     depthWrite: false,
+    side: DoubleSide,
   });
-  const starfieldDome = new Mesh(starGeo, starMat);
+  const canopyGlass = new Mesh(
+    bevelBox(2.88, 1.35, 0.004, 0.001, 0.002, 1),
+    canopyGlassMat,
+  );
+  canopyGlass.name = 'CanopyGlassGlare';
+  canopyGlass.position.set(0, 1.44, -0.87);
+  cupolaGroup.add(canopyGlass);
+
+  // 11. Breathtaking 2,500-Star Procedural Deep-Space Celestial Sphere in 1 single draw call
+  const starGeo = buildDeepSpaceStarfieldGeometry();
+  const starMat = new PointsMaterial({
+    vertexColors: true,
+    size: 0.042,
+    transparent: true,
+    opacity: 0.95,
+    depthWrite: false,
+    sizeAttenuation: true,
+  });
+  const starfieldDome = new Points(starGeo, starMat);
   starfieldDome.name = 'CupolaStarfieldDome';
   cupolaGroup.add(starfieldDome);
 
@@ -1045,6 +1074,7 @@ export function createOrbitalConsoleAsset(): Object3D {
   cabinEnclosureShell.add(cabinFloorGroup, cabinWallsGroup, cabinCeilingGroup, cupolaGroup);
   mergeStaticMeshesByMaterial(cabinEnclosureShell);
   root.add(cabinEnclosureShell);
+  root.userData.hasCanopyBrowStrut = true;
 
   // Dynamic interactive stations added after static merge to preserve animation transforms & material states
   root.add(cradleGroup);
@@ -1082,42 +1112,46 @@ function buildDeepSpaceStarfieldGeometry(): BufferGeometry {
     return (seed - 1) / 2147483646;
   };
 
-  const starCount = 420;
-  const radius = 4.6;
+  const starCount = 2500;
+  const radius = 18.5; // Outer deep-space celestial dome
 
   for (let i = 0; i < starCount; i++) {
-    // Generate spherical points in forward hemisphere (z <= -1.6m)
-    const azimuth = (rand() - 0.5) * Math.PI * 1.15;
-    const elevation = 0.05 + rand() * 1.05;
+    // Generate spherical points across forward and panoramic hemisphere
+    const azimuth = (rand() - 0.5) * Math.PI * 1.85;
+    const elevation = -0.35 + rand() * 1.55;
 
-    const cx = Math.sin(azimuth) * Math.cos(elevation) * radius;
-    const cy = 1.1 + Math.sin(elevation) * radius;
-    const cz = -Math.cos(azimuth) * Math.cos(elevation) * radius - 1.5;
+    const rDist = radius + (rand() - 0.5) * 6.0;
+    const cx = Math.sin(azimuth) * Math.cos(elevation) * rDist;
+    const cy = 1.25 + Math.sin(elevation) * rDist;
+    const cz = -Math.cos(azimuth) * Math.cos(elevation) * rDist - 2.0;
 
-    // Small triangular billboard
-    const starSize = 0.010 + rand() * 0.022;
+    positions.push(cx, cy, cz);
+
+    // Harvard Spectral Classification Color Palette
+    const spectralType = rand();
     const brightness = 0.55 + rand() * 0.45;
-
-    // Triangle vertices
-    positions.push(cx, cy + starSize, cz);
-    positions.push(cx - starSize * 0.866, cy - starSize * 0.5, cz);
-    positions.push(cx + starSize * 0.866, cy - starSize * 0.5, cz);
-
-    // Star colors (white, faint cyan, stellar amber, cosmic violet)
-    const tintType = rand();
     let r = brightness;
     let g = brightness;
     let b = brightness;
-    if (tintType < 0.3) {
-      r *= 0.78;
-      g *= 0.92;
-    } else if (tintType > 0.75) {
-      b *= 0.72;
+
+    if (spectralType < 0.58) {
+      // Class M/K warm orange-amber dwarfs (58%)
+      r = brightness * 1.0;
+      g = brightness * 0.82;
+      b = brightness * 0.62;
+    } else if (spectralType < 0.82) {
+      // Class G/F solar white-yellow stars (24%)
+      r = brightness * 0.98;
+      g = brightness * 0.98;
+      b = brightness * 1.0;
+    } else {
+      // Class B/A bright electric cyan/blue stars (18%)
+      r = brightness * 0.65;
+      g = brightness * 0.88;
+      b = brightness * 1.0;
     }
 
-    for (let v = 0; v < 3; v++) {
-      colors.push(r, g, b);
-    }
+    colors.push(r, g, b);
   }
 
   geo.setAttribute('position', new Float32BufferAttribute(positions, 3));

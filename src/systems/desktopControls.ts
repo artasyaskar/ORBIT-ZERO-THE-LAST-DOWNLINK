@@ -52,6 +52,8 @@ export interface DesktopControllerHost {
   getSceneObject: (id: string) => Object3D | undefined;
   highlightDropZones?: (active: boolean) => void;
   setObjectTint?: (root: Object3D, hex: number, intensity: number) => void;
+  rotateGlobe?: (deltaYaw: number, deltaPitch: number) => void;
+  zoomGlobe?: (deltaZoom: number) => void;
   syncAll?: () => void;
 }
 
@@ -114,6 +116,15 @@ export class DesktopControlsManager {
   private originalHoverY = 0;
   private lastActionTime = 0;
 
+  // Phase 1: 3D Gimbal Globe Interactive Rotation & Focal Zoom
+  private isGlobeDragging = false;
+  private globeDragCandidate?: {
+    pointerDownPos: Vector2;
+    lastPos: Vector2;
+    hitObject: Object3D;
+    hitPoint?: Vector3;
+  };
+
   constructor(host: DesktopControllerHost) {
     this.host = host;
     this.init();
@@ -131,17 +142,24 @@ export class DesktopControlsManager {
     const onPointerDown = (e: PointerEvent) => this.handlePointerDown(e);
     const onPointerUp = (e: PointerEvent) => this.handlePointerUp(e);
     const onKeyDown = (e: KeyboardEvent) => this.handleKeyDown(e);
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const zoomDelta = e.deltaY * 0.0006;
+      this.host.zoomGlobe?.(zoomDelta);
+    };
 
     canvas.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('keydown', onKeyDown);
+    canvas.addEventListener('wheel', onWheel, { passive: false });
 
     this.cleanupCallbacks.push(() => {
       canvas.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('keydown', onKeyDown);
+      canvas.removeEventListener('wheel', onWheel);
       this.containerEl?.remove();
     });
 
@@ -186,8 +204,8 @@ export class DesktopControlsManager {
         const cfg = SECTORS[secId];
         return `🎯 Target Sector ${secId}: ${cfg?.name || 'Sector'} [Click to Lock]`;
       }
-      if (name === 'earth-globe' || name === 'TacticalEarthGlobe') {
-        return `🌍 Tactical Earth Globe [Click to Target Nearest Sector]`;
+      if (name === 'earth-globe' || name === 'TacticalEarthGlobe' || name === 'GlobeCoreSphere' || name === 'GlobeCloudSphere') {
+        return `🌍 Tactical Earth Globe [Drag to Rotate | Wheel to Zoom | Click to Target]`;
       }
       if (/scanner-tool/i.test(name) || /ScannerTool/i.test(name)) {
         return `📡 3U CubeSat Swath Sensor [Click to Fire Active Scan]`;
@@ -251,6 +269,28 @@ export class DesktopControlsManager {
     return null;
   }
 
+  private isGlobeOrBeaconHit(obj: Object3D): boolean {
+    let curr: Object3D | null = obj;
+    while (curr) {
+      const name = curr.name || '';
+      if (
+        name === 'earth-globe' ||
+        name === 'TacticalEarthGlobe' ||
+        /^sector-[a-f]$/i.test(name) ||
+        /^SectorBeacon/i.test(name) ||
+        name === 'SectorPickCollider' ||
+        name === 'SectorPylonShaft' ||
+        name === 'SectorHaloRing' ||
+        name === 'GlobeCoreSphere' ||
+        name === 'GlobeCloudSphere'
+      ) {
+        return true;
+      }
+      curr = curr.parent;
+    }
+    return false;
+  }
+
   private handlePointerDown(e: PointerEvent): void {
     if (this.host.world.renderer.xr.isPresenting) return;
     if (e.button !== 0) return; // Only primary left-click
@@ -284,7 +324,19 @@ export class DesktopControlsManager {
         }
       }
 
-      // 2. Dispatch other object clicks
+      // 2. Check if hit Earth Globe or a Sector Beacon -> candidate for Drag Rotation OR Click/Select
+      if (this.isGlobeOrBeaconHit(hit.object)) {
+        this.globeDragCandidate = {
+          pointerDownPos: new Vector2(e.clientX, e.clientY),
+          lastPos: new Vector2(e.clientX, e.clientY),
+          hitObject: hit.object,
+          hitPoint: hit.point,
+        };
+        e.preventDefault();
+        return;
+      }
+
+      // 3. Dispatch other object clicks
       if (this.dispatchObjectClick(hit.object, hit.point)) {
         e.preventDefault();
         break;
@@ -297,7 +349,7 @@ export class DesktopControlsManager {
     this.updateMouseNdc(e);
     this.raycaster.setFromCamera(this.mouse, this.host.camera);
 
-    // 1. Dragging Mode
+    // 1. Cube Dragging Mode
     if (this.dragCandidate) {
       const moveDist = Math.hypot(
         e.clientX - this.dragCandidate.pointerDownPos.x,
@@ -350,6 +402,21 @@ export class DesktopControlsManager {
           this.hoverTooltipEl.style.top = `${e.clientY + 14}px`;
           this.hoverTooltipEl.style.display = 'block';
         }
+        return;
+      }
+    } else if (this.globeDragCandidate) {
+      // 1b. Phase 1 Globe Drag Rotation Mode
+      const moveDist = Math.hypot(
+        e.clientX - this.globeDragCandidate.pointerDownPos.x,
+        e.clientY - this.globeDragCandidate.pointerDownPos.y,
+      );
+      if (moveDist >= 4) {
+        this.isGlobeDragging = true;
+        const deltaX = e.clientX - this.globeDragCandidate.lastPos.x;
+        const deltaY = e.clientY - this.globeDragCandidate.lastPos.y;
+        this.globeDragCandidate.lastPos.set(e.clientX, e.clientY);
+        this.host.rotateGlobe?.(deltaX * 0.0055, deltaY * 0.0055);
+        this.host.renderer.domElement.style.cursor = 'grabbing';
         return;
       }
     }
@@ -509,6 +576,22 @@ export class DesktopControlsManager {
       }
       this.dragCandidate = undefined;
       this.updateHud();
+      return;
+    }
+
+    // 6. Phase 1: Globe Drag or Tap
+    if (this.isGlobeDragging) {
+      this.isGlobeDragging = false;
+      this.globeDragCandidate = undefined;
+      this.host.renderer.domElement.style.cursor = 'default';
+      return;
+    } else if (this.globeDragCandidate) {
+      // Pure click / tap on globe or beacon!
+      const cand = this.globeDragCandidate;
+      this.globeDragCandidate = undefined;
+      this.dispatchObjectClick(cand.hitObject, cand.hitPoint);
+      this.updateHud();
+      return;
     }
   }
 
@@ -530,7 +613,12 @@ export class DesktopControlsManager {
       }
 
       // 2. Earth Globe Surface Click: determine nearest sector beacon
-      if (name === 'earth-globe' || name === 'TacticalEarthGlobe') {
+      if (
+        name === 'earth-globe' ||
+        name === 'TacticalEarthGlobe' ||
+        name === 'GlobeCoreSphere' ||
+        name === 'GlobeCloudSphere'
+      ) {
         if (point) {
           const nearestSector = this.findNearestSectorToPoint(point);
           if (nearestSector) {
