@@ -59,11 +59,7 @@ export function createOrbitalConsoleAsset(): Object3D {
     roughness: 0.26,
     metalness: 0.85,
   });
-  const carbonWellMat = new MeshStandardMaterial({
-    color: 0x040810,
-    roughness: 0.65,
-    metalness: 0.35,
-  });
+  const carbonWellMat = hullDarkMat;
   const cyanAccentMat = new MeshStandardMaterial({
     color: 0x38bdf8,
     emissive: 0x0284c7,
@@ -114,11 +110,7 @@ export function createOrbitalConsoleAsset(): Object3D {
     roughness: 0.75,
     metalness: 0.2,
   });
-  const deckPlateFloorMat = new MeshStandardMaterial({
-    color: 0x0f172a,
-    roughness: 0.65,
-    metalness: 0.72,
-  });
+  const deckPlateFloorMat = hullDarkMat;
 
   // 1. Pedestal Base & Hydraulic Support Architecture
   const baseGroup = new Group();

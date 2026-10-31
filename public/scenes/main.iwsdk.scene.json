@@ -462,6 +462,48 @@
       }
     },
     {
+      "id": "desk-gauges",
+      "name": "Diegetic Desk Gauges",
+      "content": {
+        "type": "asset",
+        "asset": "desk-gauges",
+        "castShadow": false,
+        "receiveShadow": false
+      },
+      "transform": {
+        "position": [
+          0,
+          0.788,
+          -0.47
+        ]
+      },
+      "components": {}
+    },
+    {
+      "id": "pad-fire-swath",
+      "name": "Fire Swath Plunger",
+      "content": {
+        "type": "asset",
+        "asset": "swath-plunger",
+        "castShadow": false,
+        "receiveShadow": false
+      },
+      "transform": {
+        "position": [
+          0,
+          0.788,
+          -0.38
+        ]
+      },
+      "components": {
+        "RayInteractable": {},
+        "PokeInteractable": {},
+        "ConsoleControlNode": {
+          "action": "SCAN"
+        }
+      }
+    },
+    {
       "id": "pad-toggle-sensor",
       "name": "Toggle Sensor Pad",
       "content": {

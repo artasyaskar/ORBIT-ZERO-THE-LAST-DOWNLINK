@@ -299,7 +299,15 @@ describe('Desktop Controls & First-Time Player Experience', () => {
     engine.selectSector('B');
     manager.updateHud();
 
-    const reconHtml = (manager as any).reconEl?.innerHTML || '';
+    // In default minimized mode, renders clean 42px tactical badge
+    let reconHtml = (manager as any).reconEl?.innerHTML || '';
+    expect(reconHtml).toContain('📡 SEC-B');
+    expect(reconHtml).toContain('+ EXPAND [V]');
+
+    // Press 'V' to expand full telemetry
+    manager.toggleHud();
+    reconHtml = (manager as any).reconEl?.innerHTML || '';
+
     // Must contain Optical domain
     expect(reconHtml).toContain('ATMOSPHERIC PROFILE (VIS/NIR OPTICAL');
     expect(reconHtml).toContain('Cloud Top Albedo');
@@ -319,8 +327,9 @@ describe('Desktop Controls & First-Time Player Experience', () => {
     engine.scanSector('C', 'RADAR');
     expect(engine.getState().packets.length).toBe(2);
 
-    // Select Sector C Optical
+    // Select Sector C Optical & expand HUD
     engine.selectPacket('PKT-1');
+    manager.toggleHud();
     manager.updateHud();
 
     const compareHtml = (manager as any).compareEl?.innerHTML || '';
@@ -342,6 +351,7 @@ describe('Desktop Controls & First-Time Player Experience', () => {
     expect(engine.getState().packets.length).toBe(2);
 
     engine.selectPacket('PKT-1');
+    manager.toggleHud();
     manager.updateHud();
 
     const compareHtml = (manager as any).compareEl?.innerHTML || '';
@@ -363,6 +373,7 @@ describe('Desktop Controls & First-Time Player Experience', () => {
     engine.queuePacket('PKT-3', 2);
     expect(engine.getState().queuePacketIds.length).toBe(3);
 
+    manager.toggleHud();
     manager.updateHud();
 
     const compareHtml = (manager as any).compareEl?.innerHTML || '';

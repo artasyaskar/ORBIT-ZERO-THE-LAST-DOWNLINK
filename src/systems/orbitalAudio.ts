@@ -26,7 +26,8 @@ export type OrbitalSoundCue =
   | 'LINK_CUTOFF'
   | 'QUINDAR_INTRO'
   | 'QUINDAR_OUTRO'
-  | 'RADIO_SQUELCH';
+  | 'RADIO_SQUELCH'
+  | 'SWITCH_CLICK';
 
 export class OrbitalAudioController {
   private ctx: AudioContext | null = null;
@@ -171,6 +172,46 @@ export class OrbitalAudioController {
       case 'RADIO_SQUELCH':
         this.playRadioSquelchBurst();
         break;
+      case 'SWITCH_CLICK':
+        this.playMechanicalSwitchClick(true);
+        break;
+    }
+  }
+
+  /**
+   * Procedural Mechanical Switch Click Audio:
+   * Snappy aerospace tactile microswitch click (2,400 Hz -> 320 Hz on depress, 1,800 Hz -> 540 Hz on release).
+   */
+  public playMechanicalSwitchClick(isDepress = true): void {
+    if (this.volume <= 0) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    try {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const now = ctx.currentTime;
+
+      osc.type = 'triangle';
+      const startFreq = isDepress ? 2400 : 1800;
+      const endFreq = isDepress ? 320 : 540;
+      osc.frequency.setValueAtTime(startFreq, now);
+      osc.frequency.exponentialRampToValueAtTime(endFreq, now + 0.018);
+
+      gain.gain.setValueAtTime(0.18 * this.volume, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.022);
+
+      osc.connect(gain);
+      gain.connect(this.master ?? ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.025);
+      osc.onended = () => {
+        try {
+          osc.disconnect();
+          gain.disconnect();
+        } catch {}
+      };
+    } catch {
+      // Graceful degradation in headless
     }
   }
 

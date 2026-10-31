@@ -50,6 +50,7 @@ export interface DesktopControllerHost {
   reorderQueue: () => void;
   playCue: (cue: string) => void;
   getSceneObject: (id: string) => Object3D | undefined;
+  handleControlAction?: (action: string) => void;
   highlightDropZones?: (active: boolean) => void;
   setObjectTint?: (root: Object3D, hex: number, intensity: number) => void;
   rotateGlobe?: (deltaYaw: number, deltaPitch: number) => void;
@@ -97,7 +98,7 @@ export class DesktopControlsManager {
   private tutorialActive = true;
   private showDiagnostics = false;
   private showHelp = false;
-  private hudMinimized = false;
+  private hudMinimized = true;
   private lastActionMessage = 'System Ready';
   private lastActionOk = true;
   private cleanupCallbacks: (() => void)[] = [];
@@ -210,6 +211,12 @@ export class DesktopControlsManager {
       if (/scanner-tool/i.test(name) || /ScannerTool/i.test(name)) {
         return `📡 3U CubeSat Swath Sensor [Click to Fire Active Scan]`;
       }
+      if (/pad-fire-swath/i.test(name) || /swath-plunger/i.test(name) || /Plunger/i.test(name)) {
+        return `🔴 Swath Plunger Button: Fire Active Ground Track Scan [Click to Scan]`;
+      }
+      if (/desk-gauges/i.test(name) || /Gauge/i.test(name)) {
+        return `📊 Diegetic Desk Gauges: Battery Bus (55 Wh), Storage Buffer (9 MB), Downlink Window (10.0s)`;
+      }
       if (/pad-toggle-sensor/i.test(name)) {
         const mode = state.activeSensorMode;
         return `🔄 Sensor Mode Switch: Armed with ${mode} [Click to Toggle]`;
@@ -257,6 +264,8 @@ export class DesktopControlsManager {
         /^scanner-tool$/i.test(name) ||
         /^ScannerTool/i.test(name) ||
         /^pad-/i.test(name) ||
+        /^swath-plunger/i.test(name) ||
+        /^SwathPlunger/i.test(name) ||
         /^ProcessingCradle/i.test(name) ||
         /^DownlinkBay/i.test(name) ||
         name === 'earth-globe' ||
@@ -643,8 +652,15 @@ export class DesktopControlsManager {
         }
       }
 
-      // 4. Scanner Tool Click -> Trigger Scan
-      if (/scanner-tool/i.test(name) || /ScannerTool/i.test(name)) {
+      // 4. Scanner Tool & Swath Plunger Click -> Trigger Scan
+      if (
+        /scanner-tool/i.test(name) ||
+        /ScannerTool/i.test(name) ||
+        /pad-fire-swath/i.test(name) ||
+        /swath-plunger/i.test(name) ||
+        /SwathPlunger/i.test(name) ||
+        /Plunger/i.test(name)
+      ) {
         this.scanSector();
         return true;
       }
@@ -866,7 +882,11 @@ export class DesktopControlsManager {
   }
 
   public toggleSensor(): void {
-    this.host.toggleSensor();
+    if (this.host.handleControlAction) {
+      this.host.handleControlAction('TOGGLE_SENSOR');
+    } else {
+      this.host.toggleSensor();
+    }
     const mode = this.host.engine.getState().activeSensorMode;
     const desc = mode === 'RADAR' ? 'MICROWAVE RADAR (SAR - Cloud Penetrating)' : 'OPTICAL CAMERA (High-Res Daylight)';
     this.notifyAction(`Sensor Mode: ${desc}`);
@@ -877,7 +897,11 @@ export class DesktopControlsManager {
   }
 
   public scanSector(): void {
-    this.host.scan();
+    if (this.host.handleControlAction) {
+      this.host.handleControlAction('SCAN');
+    } else {
+      this.host.scan();
+    }
     const state = this.host.engine.getState();
     if (state.lastActionOk) {
       const lastPkt = state.packets[state.packets.length - 1];
@@ -892,7 +916,11 @@ export class DesktopControlsManager {
   }
 
   public processPacket(): void {
-    this.host.processSelected();
+    if (this.host.handleControlAction) {
+      this.host.handleControlAction('PROCESS');
+    } else {
+      this.host.processSelected();
+    }
     const state = this.host.engine.getState();
     if (state.lastActionOk) {
       const sel = state.packets.find((p) => p.id === state.selectedPacketId);
@@ -912,7 +940,11 @@ export class DesktopControlsManager {
       this.unqueuePacket();
       return;
     }
-    this.host.queueSelected();
+    if (this.host.handleControlAction) {
+      this.host.handleControlAction('QUEUE');
+    } else {
+      this.host.queueSelected();
+    }
     const nextState = this.host.engine.getState();
     if (nextState.lastActionOk) {
       const queuedPackets = nextState.packets.filter((p) => nextState.queuePacketIds.includes(p.id));
@@ -950,7 +982,11 @@ export class DesktopControlsManager {
   }
 
   public discardPacket(): void {
-    this.host.discardSelected();
+    if (this.host.handleControlAction) {
+      this.host.handleControlAction('DISCARD');
+    } else {
+      this.host.discardSelected();
+    }
     const state = this.host.engine.getState();
     if (state.lastActionOk) {
       this.notifyAction('✓ PACKET DISCARDED: Freed 1 tray storage slot', true);
@@ -967,7 +1003,11 @@ export class DesktopControlsManager {
         this.notifyAction('⚠️ DOWNLINK BLOCKED: Downlink Bay is empty! Queue at least 1 evidence packet [Q].', false);
         return;
       }
-      this.host.commitDownlink();
+      if (this.host.handleControlAction) {
+        this.host.handleControlAction('COMMIT_DOWNLINK');
+      } else {
+        this.host.commitDownlink();
+      }
       this.notifyAction('🚀 CARRIER LOCK: Transmitting Downlink Queue to Ground Station!', true);
       this.advanceTutorial('DOWNLINK');
     } else if (state.phase === 'DEBRIEF') {

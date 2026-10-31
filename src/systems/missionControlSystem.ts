@@ -568,23 +568,78 @@ export class MissionControlSystem extends createSystem({
       this.syncAll();
     }
 
-    // Tactile button mechanical depression & spring-back animation (-5mm travel over 180ms)
+    // Phase 3: Tactile 3D button mechanical spring-loaded depression & recoil physics (-12mm travel)
     for (const [padId, timer] of this.padPressTimers.entries()) {
       const newTimer = Math.max(0, timer - delta);
       const padObj = this.world.getSceneObject(padId);
       const cap = padObj?.getObjectByName('PadIlluminatedCap');
+      const restY = padId === 'pad-fire-swath' ? 0.018 : 0.016;
+      const stroke = padId === 'pad-fire-swath' ? 0.012 : 0.009; // -12mm stroke for plunger, -9mm for pads
       if (cap) {
         if (newTimer > 0) {
           this.padPressTimers.set(padId, newTimer);
           const progress = 1.0 - newTimer / 0.18;
-          const depression = reducedMotion ? 0 : Math.sin(progress * Math.PI); // 0 -> 1 -> 0
-          cap.position.y = 0.016 - depression * 0.005; // -5mm travel
+          const depression = reducedMotion ? 0 : Math.sin(progress * Math.PI) * Math.exp(-1.8 * progress);
+          cap.position.y = restY - depression * stroke;
         } else {
-          cap.position.y = 0.016;
+          cap.position.y = restY;
           this.padPressTimers.delete(padId);
+          this.audio.playMechanicalSwitchClick(false);
         }
       } else if (newTimer <= 0) {
         this.padPressTimers.delete(padId);
+      }
+    }
+
+    // Phase 3: Diegetic 3D Segmented Arc Gauges Update (Battery, Storage, Karachi Window)
+    const deskGauges = this.world.getSceneObject('desk-gauges');
+    if (deskGauges && this.frameSnapshot) {
+      const state = this.frameSnapshot;
+      const mats = deskGauges.userData.materials;
+      if (mats) {
+        // 1. Battery Gauge (10 segments, 55 Wh total capacity)
+        const litBattSegs = Math.max(0, Math.min(10, Math.ceil((state.power / 55) * 10)));
+        const battMat = state.power > 44 ? mats.cyan : state.power >= 20 ? mats.amber : mats.red;
+        for (let i = 0; i < 10; i++) {
+          const seg = deskGauges.getObjectByName(`GaugeBattSeg_${i}`);
+          if (seg instanceof Mesh) {
+            seg.material = i < litBattSegs ? battMat : mats.unlit;
+          }
+        }
+
+        // 2. Solid-State Storage Buffer Gauge (9 segments, 9 MB total capacity)
+        const litStorageSegs = Math.max(0, Math.min(9, Math.ceil(state.storageUsed)));
+        for (let i = 0; i < 9; i++) {
+          const seg = deskGauges.getObjectByName(`GaugeStorageSeg_${i}`);
+          if (seg instanceof Mesh) {
+            seg.material = i < litStorageSegs ? mats.amber : mats.unlit;
+          }
+        }
+
+        // 3. Karachi Contact Window Gauge (10 segments, 10.0s window)
+        const queuedPackets = state.packets.filter((p) => state.queuePacketIds.includes(p.id));
+        const totalTxSec = queuedPackets.reduce((acc, p) => acc + p.transmitSec, 0);
+        const isOverflow = totalTxSec > state.downlinkWindowSec;
+        const litWinSegs = Math.max(0, Math.min(10, Math.ceil(totalTxSec)));
+        const flashRed = isOverflow && Math.sin(this.elapsedTime * 14) > 0;
+        const winMat = flashRed ? mats.red : totalTxSec <= 8 ? mats.cyan : mats.amber;
+
+        for (let i = 0; i < 10; i++) {
+          const seg = deskGauges.getObjectByName(`GaugeWindowSeg_${i}`);
+          if (seg instanceof Mesh) {
+            seg.material = i < litWinSegs ? winMat : mats.unlit;
+          }
+        }
+      }
+    }
+
+    // Phase 3: Swath Plunger Safety Guard Ring Pulse
+    const plunger = this.world.getSceneObject('pad-fire-swath');
+    if (plunger && this.frameSnapshot) {
+      const guardRing = plunger.getObjectByName('PlungerGuardRing');
+      if (guardRing instanceof Mesh && guardRing.material instanceof MeshStandardMaterial) {
+        const hasTarget = Boolean(this.frameSnapshot.selectedSectorId);
+        guardRing.material.emissiveIntensity = hasTarget ? 0.75 + 0.35 * Math.sin(this.elapsedTime * 4) : 0.2;
       }
     }
 
@@ -2025,6 +2080,7 @@ export class MissionControlSystem extends createSystem({
 
   private handleControlAction(action: string): void {
     const padMap: Record<string, string> = {
+      SCAN: 'pad-fire-swath',
       TOGGLE_SENSOR: 'pad-toggle-sensor',
       PROCESS: 'pad-process-cradle',
       QUEUE: 'pad-queue-downlink',
@@ -2034,6 +2090,7 @@ export class MissionControlSystem extends createSystem({
     const targetPadId = padMap[action];
     if (targetPadId) {
       this.padPressTimers.set(targetPadId, 0.18);
+      this.audio.playMechanicalSwitchClick(true);
     }
 
     switch (action) {

@@ -18,12 +18,16 @@ import {
   createScannerToolAsset,
 } from './scene-assets/tactileHardware.scene-asset';
 import { createAvatarAriaAsset } from './scene-assets/avatarAria.scene-asset';
+import { createDeskGaugesAsset } from './scene-assets/deskGauges.scene-asset';
+import { createSwathPlungerAsset } from './scene-assets/swathPlunger.scene-asset';
 
 const publicAssetUrl = (filePath: string): string =>
   `${import.meta.env.BASE_URL}${filePath.replace(/^\/+/u, '')}`;
 
 export default defineAssets({
   'avatar-aria': createAvatarAriaAsset(),
+  'desk-gauges': createDeskGaugesAsset(),
+  'swath-plunger': createSwathPlungerAsset(),
   'orbital-console': createOrbitalConsoleAsset(),
   'earth-globe': createEarthGlobeAsset(),
   'nasa-cubesat': createOrbitZeroCubeSatAsset(),
