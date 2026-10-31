@@ -633,6 +633,12 @@ export function createEarthGlobeAsset(): Object3D {
   return root;
 }
 
+const sharedPickColliderMat = new MeshBasicMaterial({
+  transparent: true,
+  opacity: 0.001,
+  depthWrite: false,
+});
+
 /**
  * Open-center surface-tangent holographic target reticle for interactive Sectors A-F.
  * Oriented so local +Y points along the outward sphere normal, keeping the terrain inside
@@ -771,11 +777,7 @@ export function createSectorMarkerAsset(
   // Ensures mouse raycasts and VR index fingers reliably hit the beacon from any orientation
   const pickCollider = new Mesh(
     new SphereGeometry(0.028, 12, 8),
-    new MeshBasicMaterial({
-      transparent: true,
-      opacity: 0.001,
-      depthWrite: false,
-    }),
+    sharedPickColliderMat,
   );
   pickCollider.name = 'SectorPickCollider';
   pickCollider.position.set(0, 0.020, 0);

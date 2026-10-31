@@ -23,16 +23,35 @@ export type OrbitalSoundCue =
   | 'SCENARIO_CYCLE'
   | 'WAND_LOCK'
   | 'PACKET_RECEIVED'
-  | 'LINK_CUTOFF';
+  | 'LINK_CUTOFF'
+  | 'QUINDAR_INTRO'
+  | 'QUINDAR_OUTRO'
+  | 'RADIO_SQUELCH';
 
 export class OrbitalAudioController {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private volume = 0.65;
+  private isDucked = false;
 
   public setVolume(value: number): void {
     this.volume = Math.max(0, Math.min(1, value));
-    if (this.master && this.ctx) this.master.gain.setTargetAtTime(this.volume, this.ctx.currentTime, 0.03);
+    this.applyMasterGain();
+  }
+
+  public setDucked(ducked: boolean): void {
+    this.isDucked = ducked;
+    this.applyMasterGain(0.08);
+  }
+
+  private applyMasterGain(rampTime = 0.03): void {
+    if (!this.master || !this.ctx) return;
+    const effectiveVolume = this.isDucked ? this.volume * 0.35 : this.volume;
+    try {
+      this.master.gain.setTargetAtTime(effectiveVolume, this.ctx.currentTime, rampTime);
+    } catch {
+      this.master.gain.value = effectiveVolume;
+    }
   }
 
   public dispose(): void {
@@ -143,6 +162,96 @@ export class OrbitalAudioController {
       case 'MISSION_RESET':
         this.tone(ctx, 520, 780, 0.14, 'sine', 0.09, now);
         break;
+      case 'QUINDAR_INTRO':
+        this.playQuindarTone(true);
+        break;
+      case 'QUINDAR_OUTRO':
+        this.playQuindarTone(false);
+        break;
+      case 'RADIO_SQUELCH':
+        this.playRadioSquelchBurst();
+        break;
+    }
+  }
+
+  /**
+   * NASA Apollo Quindar Tone Generator:
+   * 2,525 Hz for PTT key-down (intro); 2,475 Hz for PTT key-up (outro).
+   * 120ms duration with soft exponential attack and decay.
+   */
+  public playQuindarTone(isIntro: boolean): void {
+    if (this.volume <= 0) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    try {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const now = ctx.currentTime;
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(isIntro ? 2525 : 2475, now);
+
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.08 * this.volume, now + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+
+      osc.connect(gain);
+      gain.connect(this.master ?? ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.13);
+      osc.onended = () => {
+        try {
+          osc.disconnect();
+          gain.disconnect();
+        } catch {}
+      };
+    } catch {
+      // Audio context may be suspended or blocked
+    }
+  }
+
+  /**
+   * Walkie-Talkie Bandpass VHF Radio Squelch Burst:
+   * 90ms shaped white noise filtered through 1,800 Hz bandpass (Q: 3.5).
+   */
+  public playRadioSquelchBurst(): void {
+    if (this.volume <= 0) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    try {
+      const sampleRate = ctx.sampleRate || 44100;
+      const bufferSize = Math.max(256, Math.floor(sampleRate * 0.09));
+      const noiseBuffer = ctx.createBuffer(1, bufferSize, sampleRate);
+      const output = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        output[i] = Math.random() * 2 - 1;
+      }
+
+      const whiteNoise = ctx.createBufferSource();
+      whiteNoise.buffer = noiseBuffer;
+
+      const bandpass = ctx.createBiquadFilter();
+      bandpass.type = 'bandpass';
+      bandpass.frequency.setValueAtTime(1800, ctx.currentTime);
+      bandpass.Q.setValueAtTime(3.5, ctx.currentTime);
+
+      const gain = ctx.createGain();
+      const now = ctx.currentTime;
+      gain.gain.setValueAtTime(0.12 * this.volume, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
+
+      whiteNoise.connect(bandpass);
+      bandpass.connect(gain);
+      gain.connect(this.master ?? ctx.destination);
+      whiteNoise.start(now);
+      whiteNoise.onended = () => {
+        try {
+          whiteNoise.disconnect();
+          bandpass.disconnect();
+          gain.disconnect();
+        } catch {}
+      };
+    } catch {
+      // Graceful fallback in test / headless
     }
   }
 

@@ -135,6 +135,30 @@
       "components": {}
     },
     {
+      "id": "avatar-aria",
+      "name": "Commander ARIA-7 Hologram",
+      "content": {
+        "type": "asset",
+        "asset": "avatar-aria",
+        "castShadow": false,
+        "receiveShadow": false
+      },
+      "transform": {
+        "position": [
+          -0.42,
+          1.15,
+          -0.48
+        ],
+        "rotationDeg": [
+          0,
+          26,
+          0
+        ],
+        "scale": 1.0
+      },
+      "components": {}
+    },
+    {
       "id": "cubesat-spacecraft",
       "name": "NASA 3U Earth-Observation CubeSat",
       "content": {

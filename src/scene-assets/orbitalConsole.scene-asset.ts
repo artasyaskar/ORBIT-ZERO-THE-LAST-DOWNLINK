@@ -161,8 +161,6 @@ export function createOrbitalConsoleAsset(): Object3D {
   rightStrut.scale.set(1, rightSpan, 1);
   baseGroup.add(rightStrut);
 
-  root.add(baseGroup);
-
   // 2. Wrap-Around Aerospace Console Deck (y = 0.75m - 0.78m)
   const deckGroup = new Group();
   deckGroup.name = 'ConsoleDeck';
@@ -247,14 +245,6 @@ export function createOrbitalConsoleAsset(): Object3D {
   scannerDockWell.name = 'ScannerHolsterWell';
   scannerDockWell.position.set(-0.48, 0.782, 0.02);
   deckGroup.add(scannerDockWell);
-
-  const scannerHolster = new Group();
-  scannerHolster.name = 'ScannerHolster';
-  scannerHolster.position.x = -0.48;
-  scannerDockOuter.position.x = 0;
-  scannerDockWell.position.x = 0;
-  scannerHolster.add(scannerDockOuter, scannerDockWell);
-  mergeStaticMeshesByMaterial(scannerHolster);
 
   // 3-Slot Raw Evidence Cube Tray at world z = -0.43 -> local z = +0.13, x = [-0.46, -0.37, -0.28]
   const trayOuterBezel = new Mesh(
@@ -580,8 +570,6 @@ export function createOrbitalConsoleAsset(): Object3D {
   discardHalo.visible = false;
   downlinkDynamicGroup.add(discardHalo);
 
-  root.add(deckGroup);
-
   // 6. Cockpit Architectural Interior: Heavy Anti-Slip Floor Deck & Forward Kickplate
   const cabinFloorGroup = new Group();
   cabinFloorGroup.name = 'CockpitCabinFloor';
@@ -649,8 +637,6 @@ export function createOrbitalConsoleAsset(): Object3D {
     kickRib.position.set(rx, 0.36, -0.85);
     cabinFloorGroup.add(kickRib);
   }
-
-  root.add(cabinFloorGroup);
 
   // 7. Structural Cockpit Bulkhead Side Walls (Port & Starboard Cabin Enclosure)
   const cabinWallsGroup = new Group();
@@ -749,8 +735,6 @@ export function createOrbitalConsoleAsset(): Object3D {
   starConduit.rotation.set(Math.PI / 2, 0, 0);
   cabinWallsGroup.add(starConduit);
 
-  root.add(cabinWallsGroup);
-
   // 8. Overhead Cockpit Ceiling Canopy, Avionics Housing & Indirect Lighting
   const cabinCeilingGroup = new Group();
   cabinCeilingGroup.name = 'CockpitOverheadCeiling';
@@ -816,8 +800,6 @@ export function createOrbitalConsoleAsset(): Object3D {
   ceilingBeacon.name = 'OverheadAvionicsStatusBeacon';
   ceilingBeacon.position.set(0, 2.06, -0.42);
   cabinCeilingGroup.add(ceilingBeacon);
-
-  root.add(cabinCeilingGroup);
 
   // 9. Heavy Multi-Pane Panoramic Cupola Window Frame & Atmospheric Planetary Limb
   const cupolaGroup = new Group();
@@ -1063,12 +1045,14 @@ export function createOrbitalConsoleAsset(): Object3D {
   starfieldDome.name = 'CupolaStarfieldDome';
   cupolaGroup.add(starfieldDome);
 
-  root.add(cupolaGroup);
+  // 1. Merge console pedestal and deck together into a unified console desk assembly
+  const consoleDesk = new Group();
+  consoleDesk.name = 'ConsoleDeskAssembly';
+  consoleDesk.add(baseGroup, deckGroup);
+  mergeStaticMeshesByMaterial(consoleDesk);
+  root.add(consoleDesk);
 
-  // Merge console pedestal and deck separately from the surrounding cabin shell
-  // so MR Tabletop Mode can hide the enclosing cabin/skybox in a single toggle while keeping the console desk visible!
-  mergeStaticMeshesByMaterial(baseGroup);
-  mergeStaticMeshesByMaterial(deckGroup);
+  // 2. Merge surrounding cockpit cabin interior and cupola frame
   const cabinEnclosureShell = new Group();
   cabinEnclosureShell.name = 'CockpitEnclosureShell';
   cabinEnclosureShell.add(cabinFloorGroup, cabinWallsGroup, cabinCeilingGroup, cupolaGroup);
@@ -1078,7 +1062,6 @@ export function createOrbitalConsoleAsset(): Object3D {
 
   // Dynamic interactive stations added after static merge to preserve animation transforms & material states
   root.add(cradleGroup);
-  root.add(scannerHolster);
   root.add(downlinkDynamicGroup);
 
   // Dynamic Panoramic Deep-Space Milky Way Cosmic Dome (textured with milky-way-tex at runtime)

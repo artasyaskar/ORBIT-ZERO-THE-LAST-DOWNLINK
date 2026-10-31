@@ -17,11 +17,13 @@ import {
   createDataCubeAsset,
   createScannerToolAsset,
 } from './scene-assets/tactileHardware.scene-asset';
+import { createAvatarAriaAsset } from './scene-assets/avatarAria.scene-asset';
 
 const publicAssetUrl = (filePath: string): string =>
   `${import.meta.env.BASE_URL}${filePath.replace(/^\/+/u, '')}`;
 
 export default defineAssets({
+  'avatar-aria': createAvatarAriaAsset(),
   'orbital-console': createOrbitalConsoleAsset(),
   'earth-globe': createEarthGlobeAsset(),
   'nasa-cubesat': createOrbitZeroCubeSatAsset(),

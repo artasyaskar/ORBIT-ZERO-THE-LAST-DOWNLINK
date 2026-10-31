@@ -64,6 +64,7 @@ import {
 } from '../scene-assets/earthGlobe.scene-asset';
 import { alignSpan } from '../scene-assets/lib/hardsurface';
 import { OrbitalAudioController, type OrbitalSoundCue } from './orbitalAudio';
+import { VoiceCommander, type VoiceDialogueId } from './voiceCommander';
 import {
   getDailyPass, loadMissionProfile, recordDailyPass, recordMissionMastery, saveMissionProfile,
   type MissionPreferences,
@@ -161,6 +162,9 @@ export class MissionControlSystem extends createSystem({
   // Desktop Controls & First-Time Player Experience
   private desktopControls?: DesktopControlsManager;
 
+  // Phase 2: Commander ARIA-7 Holographic Voice Handler & Radio DSP
+  private voiceCommander?: VoiceCommander;
+
   // Phase 1: 3D Gimbal Globe Interactive Rotation & Focal Zoom
   private globeAngularVelocity = new Vector2(0, 0);
   private globeTargetQuaternion = new Quaternion();
@@ -182,6 +186,14 @@ export class MissionControlSystem extends createSystem({
     });
     this.audio.setVolume(this.profile.preferences.audioLevel);
     this.cleanupFuncs.push(() => this.audio.dispose());
+
+    // Phase 2: Initialize Commander ARIA-7 Tactical Voice Handler & Subtitle Ribbon
+    this.voiceCommander = new VoiceCommander({
+      audio: this.audio,
+      subtitlesEnabled: true,
+      voiceEnabled: true,
+    });
+    this.cleanupFuncs.push(() => this.voiceCommander?.dispose());
     if (typeof navigator !== 'undefined' && 'xr' in navigator) {
       (navigator as any).xr?.isSessionSupported?.('immersive-ar').then((supported: boolean) => {
         this.isArSupported = Boolean(supported);
@@ -471,11 +483,20 @@ export class MissionControlSystem extends createSystem({
           this.camera.updateMatrixWorld(true);
         },
         desktopControls: this.desktopControls,
+        voiceCommander: this.voiceCommander,
+        triggerVoice: (dialogueId: VoiceDialogueId) => this.voiceCommander?.trigger(dialogueId),
+        getAvatarMetrics: () => this.voiceCommander?.getAvatarMetrics(0.016),
+        toggleVoiceMute: () => this.voiceCommander?.toggleMute(),
         triggerDesktopKey: (key: string) => {
           window.dispatchEvent(new KeyboardEvent('keydown', { key }));
         },
       };
     }
+
+    // Trigger Commander ARIA-7 Opening Tactical Pass Briefing
+    window.setTimeout(() => {
+      this.voiceCommander?.trigger('PASS_START');
+    }, 600);
 
     this.syncAll();
   }
@@ -578,6 +599,44 @@ export class MissionControlSystem extends createSystem({
       if (starfield instanceof Points && starfield.material instanceof PointsMaterial) {
         starfield.rotation.y += (reducedMotion ? 0 : delta) * 0.0012;
         starfield.material.opacity = 0.90 + 0.07 * Math.sin(this.elapsedTime * 2.5);
+      }
+    }
+
+    // Phase 2: Commander ARIA-7 Voice Handler Tick & 3D Holographic AI Avatar Dynamic Animation
+    this.voiceCommander?.tick(delta);
+    const avatarObj = this.world.getSceneObject('avatar-aria');
+    if (avatarObj && this.voiceCommander) {
+      const metrics = this.voiceCommander.getAvatarMetrics(delta);
+      const core = avatarObj.getObjectByName('AriaCore');
+      const ring1 = avatarObj.getObjectByName('AriaRing1');
+      const ring2 = avatarObj.getObjectByName('AriaRing2');
+      const ring3 = avatarObj.getObjectByName('AriaRing3');
+      const emitter = avatarObj.getObjectByName('AriaEmitter');
+
+      if (core) {
+        core.rotation.y += (reducedMotion ? 0 : delta) * (metrics.isSpeaking ? 1.8 : 0.45);
+        core.rotation.x += (reducedMotion ? 0 : delta) * (metrics.isSpeaking ? 1.2 : 0.25);
+        const s = metrics.coreScale;
+        core.scale.set(s, s, s);
+      }
+
+      const ringMult = metrics.ringSpeedMultiplier;
+      const exp = 1.0 + metrics.ringExpansion;
+
+      if (ring1) {
+        ring1.rotation.z += (reducedMotion ? 0 : delta) * 0.85 * ringMult;
+        ring1.scale.set(exp, exp, exp);
+      }
+      if (ring2) {
+        ring2.rotation.y += (reducedMotion ? 0 : delta) * 1.15 * ringMult;
+        ring2.scale.set(exp, exp, exp);
+      }
+      if (ring3) {
+        ring3.rotation.x += (reducedMotion ? 0 : delta) * 0.95 * ringMult;
+        ring3.scale.set(exp, exp, exp);
+      }
+      if (emitter instanceof Mesh && emitter.material instanceof MeshStandardMaterial) {
+        emitter.material.emissiveIntensity = 0.9 + (metrics.isSpeaking ? 0.8 * metrics.intensity : 0.12 * Math.sin(this.elapsedTime * 3));
       }
     }
 
@@ -884,8 +943,10 @@ export class MissionControlSystem extends createSystem({
         if (nextState.phase === 'DEBRIEF') {
           if (nextState.debrief && nextState.debrief.totalScore >= nextState.debrief.achievableScore) {
             this.playCue('OPTIMAL_VICTORY');
+            this.voiceCommander?.trigger('DEBRIEF_VICTORY');
           } else {
             this.playCue('LINK_CUTOFF');
+            this.voiceCommander?.trigger('DEBRIEF_RETRY');
           }
         }
         this.lastTransmittedCount = txCount;
@@ -1560,6 +1621,7 @@ export class MissionControlSystem extends createSystem({
     this.applyAction({ type: 'SELECT_SECTOR', sectorId });
     this.playCue('SELECT_SECTOR');
     this.slerpGlobeToSector(sectorId);
+    this.voiceCommander?.handleSectorSelection(sectorId, this.engine.getState().activeSensorMode);
     this.syncAll();
   }
 
@@ -1573,6 +1635,8 @@ export class MissionControlSystem extends createSystem({
   private handleToggleSensor(): void {
     this.applyAction({ type: 'SET_SENSOR', sensorMode: this.engine.getState().activeSensorMode === 'RADAR' ? 'OPTICAL' : 'RADAR' });
     this.playCue('TOGGLE_SENSOR');
+    const state = this.engine.getState();
+    this.voiceCommander?.handleSectorSelection(state.selectedSectorId, state.activeSensorMode);
     this.syncAll();
   }
 
@@ -1586,6 +1650,7 @@ export class MissionControlSystem extends createSystem({
       this.scanBeamSectorId = this.engine.getState().selectedSectorId;
       this.scanBeamMode = mode;
       this.playCue(mode === 'OPTICAL' ? 'SCAN_OPTICAL' : 'SCAN_RADAR');
+      this.voiceCommander?.trigger('SCAN_ACQUIRED');
 
       // Immediately illuminate 3D observation swath cone
       const globe = this.world.getSceneObject('earth-globe');
@@ -1607,6 +1672,7 @@ export class MissionControlSystem extends createSystem({
       if (res.packet) this.cubeTransitions.set(res.packet.id, { kind: 'PROCESS', remaining: 0.65 });
       this.cradlePulseTimer = 0.65;
       this.playCue('PROCESS_SUCCESS');
+      this.voiceCommander?.trigger('PROCESS_SUCCESS');
     } else {
       this.playCue('ERROR_REJECT');
     }
@@ -1626,6 +1692,10 @@ export class MissionControlSystem extends createSystem({
         slotIndex: preferredSlotIndex,
       });
       this.playCue(res.ok ? 'QUEUE_SLOT' : 'ERROR_REJECT');
+      const nextState = this.engine.getState();
+      if (nextState.downlinkCommittedSec > nextState.downlinkWindowSec + 0.01) {
+        this.voiceCommander?.trigger('QUEUE_OVERFLOW');
+      }
     }
     this.syncAll();
   }
@@ -1673,6 +1743,7 @@ export class MissionControlSystem extends createSystem({
       this.cubeTransitions.clear();
       this.lastDownlinkTickSecond = -1;
       this.playCue('DOWNLINK_COMMIT');
+      this.voiceCommander?.trigger('DOWNLINK_TRANSMIT');
 
       // Immediately activate live S-Band microwave uplink beam
       const consoleObj = this.world.getSceneObject('orbital-console');
@@ -1723,6 +1794,7 @@ export class MissionControlSystem extends createSystem({
     this.solverSignature = '';
     this.engine.reset();
     this.playCue('MISSION_RESET');
+    this.voiceCommander?.trigger('PASS_START');
     this.syncAll();
   }
 

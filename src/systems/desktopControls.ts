@@ -1961,6 +1961,7 @@ export class DesktopControlsManager {
       </div>
 
       <button id="tb-transmit" style="${this.btnStyle('#34d399', hasQueue)}">TRANSMIT [T]</button>
+      <button id="tb-aria-comms" style="${this.btnStyle('#06b6d4')}">🔊 ARIA-7</button>
       <button id="tb-hud-view" style="${this.btnStyle(this.hudMinimized ? '#f59e0b' : '#38bdf8')}">${this.hudMinimized ? 'HUD [FULL]' : 'HUD [MIN]'}</button>
       <button id="tb-help" style="${this.btnStyle('#94a3b8')}">HELP [H]</button>
       <button id="tb-diag" style="${this.btnStyle('#94a3b8')}">DEV [F1]</button>
@@ -1978,6 +1979,12 @@ export class DesktopControlsManager {
     this.toolbarEl.querySelector('#tb-queue')?.addEventListener('click', () => this.queuePacket());
     this.toolbarEl.querySelector('#tb-discard')?.addEventListener('click', () => this.discardPacket());
     this.toolbarEl.querySelector('#tb-transmit')?.addEventListener('click', () => this.commitDownlink());
+    this.toolbarEl.querySelector('#tb-aria-comms')?.addEventListener('click', () => {
+      const isMuted = (window as any).__ORBIT_ZERO__?.toggleVoiceMute?.();
+      this.notifyAction(isMuted ? 'Commander ARIA-7: Radio Voice MUTED (Subtitles Active)' : 'Commander ARIA-7: Radio Voice ACTIVE');
+      const btn = this.toolbarEl?.querySelector('#tb-aria-comms') as HTMLButtonElement | null;
+      if (btn) btn.innerText = isMuted ? '🔇 ARIA [MUTE]' : '🔊 ARIA-7';
+    });
     this.toolbarEl.querySelector('#tb-hud-view')?.addEventListener('click', () => this.toggleHud());
     this.toolbarEl.querySelector('#tb-help')?.addEventListener('click', () => this.toggleHelpModal());
     this.toolbarEl.querySelector('#tb-diag')?.addEventListener('click', () => this.toggleDiagnostics());
