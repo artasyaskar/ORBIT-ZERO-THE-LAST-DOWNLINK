@@ -232,16 +232,10 @@ export function createDataCubeAsset(accentHex = 0x45c9c0): Object3D {
   acrylicShell.position.set(0, 0.035, 0);
   root.add(acrylicShell);
 
-  // 3. Dark Slate Base Substrate Plinth (geological foundation)
-  const substrateMat = new MeshStandardMaterial({
-    color: 0x0f172a,
-    roughness: 0.72,
-    metalness: 0.28,
-  });
-  substrateMat.name = 'CubeSubstrateMat';
+  // 3. Dark Slate Base Substrate Plinth (geological foundation, shares frameMat to merge static chassis)
   const baseSubstrate = new Mesh(
     bevelBox(0.050, 0.008, 0.050, 0.002, 0.004, 2),
-    substrateMat,
+    frameMat,
   );
   baseSubstrate.name = 'CubeBaseSubstrate';
   baseSubstrate.position.set(0, 0.014, 0);
@@ -294,31 +288,45 @@ export function createDataCubeAsset(accentHex = 0x45c9c0): Object3D {
   });
   contourMat.name = 'CubeContourMat';
 
-  const contourGroup = new Group();
-  contourGroup.name = 'CubeContourGroup';
-  const contour1 = new Mesh(
-    bevelBox(0.046, 0.0015, 0.046, 0.001, 0.001, 1),
-    contourMat,
-  );
-  contour1.name = 'CubeContourWireframe_1';
-  contour1.position.set(0, 0.038, 0);
-  contourGroup.add(contour1);
+  const contourCoords = [
+    { size: 0.046, y: 0.038 },
+    { size: 0.038, y: 0.046 },
+  ];
+  const posC: number[] = [];
+  const normC: number[] = [];
+  const idxC: number[] = [];
+  let vOffC = 0;
 
-  const contour2 = new Mesh(
-    bevelBox(0.038, 0.0015, 0.038, 0.001, 0.001, 1),
-    contourMat,
-  );
-  contour2.name = 'CubeContourWireframe_2';
-  contour2.position.set(0, 0.046, 0);
-  contourGroup.add(contour2);
-  mergeStaticMeshesByMaterial(contourGroup);
-  root.add(contourGroup);
+  for (const c of contourCoords) {
+    const geo = bevelBox(c.size, 0.0015, c.size, 0.001, 0.001, 1);
+    const pos = geo.getAttribute('position');
+    const norm = geo.getAttribute('normal');
+    const idx = geo.getIndex();
+    for (let i = 0; i < pos.count; i++) {
+      posC.push(pos.getX(i), pos.getY(i) + c.y, pos.getZ(i));
+      normC.push(norm.getX(i), norm.getY(i), norm.getZ(i));
+    }
+    if (idx) {
+      for (let i = 0; i < idx.count; i++) {
+        idxC.push(vOffC + idx.getX(i));
+      }
+    }
+    vOffC += pos.count;
+  }
+  const mergedContourGeo = new BufferGeometry();
+  mergedContourGeo.setAttribute('position', new Float32BufferAttribute(posC, 3));
+  mergedContourGeo.setAttribute('normal', new Float32BufferAttribute(normC, 3));
+  if (idxC.length > 0) mergedContourGeo.setIndex(idxC);
+
+  const contourWireframe = new Mesh(mergedContourGeo, contourMat);
+  contourWireframe.name = 'CubeContourWireframe_1';
+  root.add(contourWireframe);
 
   // 7. Sector-Specific Features (pre-authored for dynamic runtime toggling)
   // Miniature Steel Truss Bridge spanning the flood channel (visible for Sectors C & D)
   const bridgeSpan = new Mesh(
     bevelBox(0.012, 0.005, 0.024, 0.001, 0.002, 2),
-    frameMat.clone(),
+    frameMat,
   );
   bridgeSpan.name = 'CubeBridgeSpan';
   bridgeSpan.position.set(0, 0.039, 0);
@@ -345,6 +353,72 @@ export function createDataCubeAsset(accentHex = 0x45c9c0): Object3D {
   cloudCap.position.set(0, 0.048, 0);
   cloudCap.visible = false;
   root.add(cloudCap);
+
+  // Phase 4: Jagged Radar Multipath Backscatter Spikes (visible when confidence === 'PROBABLE')
+  const spikeMat = new MeshStandardMaterial({
+    color: 0xf59e0b,
+    emissive: 0xb45309,
+    emissiveIntensity: 1.25,
+    roughness: 0.22,
+    metalness: 0.82,
+  });
+  spikeMat.name = 'CubeRadarSpikesMat';
+
+  const spikeCoords = [
+    [-0.010, 0.042, -0.006],
+    [0.008, 0.044, 0.006],
+    [-0.002, 0.048, 0.002],
+    [0.010, 0.043, -0.008],
+  ];
+  const spikeBaseGeo = new CylinderGeometry(0.0006, 0.0034, 0.018, 5);
+  const posArr: number[] = [];
+  const normArr: number[] = [];
+  const idxArr: number[] = [];
+  const basePos = spikeBaseGeo.getAttribute('position');
+  const baseNorm = spikeBaseGeo.getAttribute('normal');
+  const baseIdx = spikeBaseGeo.getIndex();
+  let vOffset = 0;
+
+  for (const [sx, sy, sz] of spikeCoords) {
+    for (let i = 0; i < basePos.count; i++) {
+      posArr.push(basePos.getX(i) + sx, basePos.getY(i) + sy, basePos.getZ(i) + sz);
+      normArr.push(baseNorm.getX(i), baseNorm.getY(i), baseNorm.getZ(i));
+    }
+    if (baseIdx) {
+      for (let i = 0; i < baseIdx.count; i++) {
+        idxArr.push(vOffset + baseIdx.getX(i));
+      }
+    }
+    vOffset += basePos.count;
+  }
+  const mergedSpikesGeo = new BufferGeometry();
+  mergedSpikesGeo.setAttribute('position', new Float32BufferAttribute(posArr, 3));
+  mergedSpikesGeo.setAttribute('normal', new Float32BufferAttribute(normArr, 3));
+  if (idxArr.length > 0) mergedSpikesGeo.setIndex(idxArr);
+
+  const radarSpikesMesh = new Mesh(mergedSpikesGeo, spikeMat);
+  radarSpikesMesh.name = 'CubeRadarSpikes';
+  radarSpikesMesh.visible = false;
+  root.add(radarSpikesMesh);
+
+  // Phase 4: Glowing Highway Vector Line (visible when confidence === 'CONFIRMED' for safe convoy path)
+  const highwayMat = new MeshStandardMaterial({
+    color: 0x10b981,
+    emissive: 0x059669,
+    emissiveIntensity: 1.45,
+    roughness: 0.2,
+    metalness: 0.35,
+  });
+  highwayMat.name = 'CubeHighwayVectorMat';
+  const highwayVector = new Mesh(
+    bevelBox(0.044, 0.0024, 0.005, 0.0006, 0.001, 1),
+    highwayMat,
+  );
+  highwayVector.name = 'CubeHighwayVector';
+  highwayVector.position.set(0, 0.038, -0.006);
+  highwayVector.rotation.set(0, -0.26, 0);
+  highwayVector.visible = false;
+  root.add(highwayVector);
 
   // 8. Front & Top High-Contrast Telemetry Display Plates (bound to CanvasTexture at runtime)
   const frontDisplay = new Mesh(
@@ -382,7 +456,7 @@ export function createDataCubeAsset(accentHex = 0x45c9c0): Object3D {
 
   mergeStaticMeshesByMaterial(root, [
     'CubeAcrylicShell', 'CubeConfidenceCore', 'CubeContourWireframe_1', 'CubeContourWireframe_2',
-    'CubeBridgeSpan', 'CubeCloudObscurationCap',
+    'CubeBridgeSpan', 'CubeCloudObscurationCap', 'CubeRadarSpikes', 'CubeHighwayVector',
   ]);
   return root;
 }

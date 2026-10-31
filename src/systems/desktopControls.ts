@@ -116,6 +116,9 @@ export class DesktopControlsManager {
   private hoveredInteractiveObj: Object3D | null = null;
   private originalHoverY = 0;
   private lastActionTime = 0;
+  private lastCubeClickTime = 0;
+  private lastClickedCubePacketId = '';
+  private wasNearSnap = false;
 
   // Phase 1: 3D Gimbal Globe Interactive Rotation & Focal Zoom
   private isGlobeDragging = false;
@@ -376,6 +379,29 @@ export class DesktopControlsManager {
           intersection.x = Math.max(-0.62, Math.min(0.62, intersection.x));
           intersection.z = Math.max(-0.68, Math.min(-0.32, intersection.z));
           intersection.y = 0.83; // Elevated 3D hover height
+
+          // Phase 4: Magnetic snap suction bias toward active drop sockets
+          const distCradle = intersection.distanceTo(PROCESS_CRADLE_POS);
+          const distBay = intersection.distanceTo(DOWNLINK_BAY_CENTER);
+          const distTray = intersection.distanceTo(RAW_TRAY_CENTER);
+          const distDiscard = intersection.distanceTo(DISCARD_CHUTE_POS);
+
+          if (distCradle < 0.16) {
+            intersection.lerp(PROCESS_CRADLE_POS, 0.40);
+          } else if (distBay < 0.18) {
+            intersection.lerp(DOWNLINK_BAY_CENTER, 0.40);
+          } else if (distTray < 0.20) {
+            intersection.lerp(RAW_TRAY_CENTER, 0.40);
+          } else if (distDiscard < 0.15) {
+            intersection.lerp(DISCARD_CHUTE_POS, 0.40);
+          }
+
+          const nearSnap = distCradle < 0.16 || distBay < 0.18 || distTray < 0.20 || distDiscard < 0.15;
+          if (nearSnap && !this.wasNearSnap) {
+            this.host.playCue('MAGNETIC_HOVER');
+          }
+          this.wasNearSnap = nearSnap;
+
           this.dragCandidate.cubeRoot.position.copy(intersection);
         }
 
@@ -575,10 +601,40 @@ export class DesktopControlsManager {
     }
 
     if (this.dragCandidate && !this.isDragging) {
-      // Pure click!
+      // Pure click or Phase 4 quick double-click auto-route!
       const pktId = this.dragCandidate.packetId;
       const state = this.host.engine.getState();
       const pkt = state.packets.find((p) => p.id === pktId);
+
+      this.host.selectPacket(pktId);
+
+      const now = performance.now();
+      const isDoubleClick = now - this.lastCubeClickTime < 380 && this.lastClickedCubePacketId === pktId;
+      this.lastCubeClickTime = now;
+      this.lastClickedCubePacketId = pktId;
+
+      if (isDoubleClick && pkt) {
+        if (!pkt.processed && state.power >= 6) {
+          this.processPacket();
+          this.notifyAction(`⚡ QUICK-ROUTE: ${pkt.headline} auto-routed to Amber Cradle for compression`);
+          this.dragCandidate = undefined;
+          this.updateHud();
+          return;
+        } else if (!pkt.queued) {
+          this.queuePacket();
+          this.notifyAction(`⚡ QUICK-ROUTE: ${pkt.headline} auto-routed to Downlink Bay`);
+          this.dragCandidate = undefined;
+          this.updateHud();
+          return;
+        } else if (pkt.queued) {
+          this.unqueuePacket();
+          this.notifyAction(`⚡ QUICK-ROUTE: ${pkt.headline} returned to Storage Tray`);
+          this.dragCandidate = undefined;
+          this.updateHud();
+          return;
+        }
+      }
+
       if (pkt) {
         this.notifyAction(`Selected Evidence Cube: ${pkt.headline} (${pkt.storageCost} MB)`);
         this.advanceTutorial('SELECT_CUBE');

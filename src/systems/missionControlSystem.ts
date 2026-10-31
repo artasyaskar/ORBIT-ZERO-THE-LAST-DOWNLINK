@@ -457,7 +457,7 @@ export class MissionControlSystem extends createSystem({
         },
         simulateCubeDrop: (
           slotIndex: number,
-          targetZone: 'PROCESS' | 'QUEUE' | 'DISCARD' | 'INVALID',
+          targetZone: 'PROCESS' | 'QUEUE' | 'RAW_TRAY' | 'DISCARD' | 'INVALID',
         ) => this.handleSimulateCubeDrop(slotIndex, targetZone),
         getRendererStats: () => ({
           calls: this.renderer.info.render.calls,
@@ -640,6 +640,20 @@ export class MissionControlSystem extends createSystem({
       if (guardRing instanceof Mesh && guardRing.material instanceof MeshStandardMaterial) {
         const hasTarget = Boolean(this.frameSnapshot.selectedSectorId);
         guardRing.material.emissiveIntensity = hasTarget ? 0.75 + 0.35 * Math.sin(this.elapsedTime * 4) : 0.2;
+      }
+    }
+
+    // Phase 4: Dynamic 5Hz pulse on radar multipath backscatter spikes & highway route pulse
+    for (const cubeEntity of this.queries.cubes.entities) {
+      const obj = cubeEntity.object3D;
+      const spikes = obj?.getObjectByName('CubeRadarSpikes');
+      if (spikes && spikes.visible) {
+        const pulse = 1.0 + 0.35 * Math.sin(this.elapsedTime * 31.4); // 5Hz pulse
+        spikes.scale.set(1, pulse, 1);
+      }
+      const hVec = obj?.getObjectByName('CubeHighwayVector');
+      if (hVec instanceof Mesh && hVec.visible && hVec.material instanceof MeshStandardMaterial) {
+        hVec.material.emissiveIntensity = 1.25 + 0.35 * Math.sin(this.elapsedTime * 4.0);
       }
     }
 
@@ -1727,6 +1741,7 @@ export class MissionControlSystem extends createSystem({
       if (res.packet) this.cubeTransitions.set(res.packet.id, { kind: 'PROCESS', remaining: 0.65 });
       this.cradlePulseTimer = 0.65;
       this.playCue('PROCESS_SUCCESS');
+      this.audio.playCompressionChirp();
       this.voiceCommander?.trigger('PROCESS_SUCCESS');
     } else {
       this.playCue('ERROR_REJECT');
@@ -2159,7 +2174,7 @@ export class MissionControlSystem extends createSystem({
 
   private handleSimulateCubeDrop(
     slotIndex: number,
-    targetZone: 'PROCESS' | 'QUEUE' | 'DISCARD' | 'INVALID',
+    targetZone: 'PROCESS' | 'QUEUE' | 'RAW_TRAY' | 'DISCARD' | 'INVALID',
   ): boolean {
     const cubeEntity = Array.from(this.queries.cubes.entities).find(
       (e) => (e.getValue(EvidenceCubeNode, 'slotIndex') ?? -1) === slotIndex,
@@ -2171,9 +2186,11 @@ export class MissionControlSystem extends createSystem({
         ? PROCESS_CRADLE_WORLD
         : targetZone === 'QUEUE'
           ? DOWNLINK_BAY_CENTER_WORLD
-          : targetZone === 'DISCARD'
-            ? DISCARD_CHUTE_WORLD
-            : new Vector3(0, 1.15, -0.2);
+          : targetZone === 'RAW_TRAY'
+            ? RAW_TRAY_CENTER_WORLD
+            : targetZone === 'DISCARD'
+              ? DISCARD_CHUTE_WORLD
+              : new Vector3(0, 1.15, -0.2);
 
     cubeEntity.object3D.position.copy(targetPos);
     cubeEntity.object3D.updateMatrixWorld(true);
@@ -2595,7 +2612,14 @@ export class MissionControlSystem extends createSystem({
       } else if (!this.profile.preferences.reducedMotion) {
         object.position.copy(PROCESS_CRADLE_WORLD);
         object.position.y += 0.02;
-        object.scale.set((1.04 - 0.18 * smooth) * selected, (1.04 - 0.30 * smooth) * selected, (1.04 - 0.18 * smooth) * selected);
+        const scaleProgress = 1.04 - 0.34 * smooth;
+        object.scale.set(scaleProgress * selected, (1.04 - 0.39 * smooth) * selected, scaleProgress * selected);
+        if (particles instanceof Points && particles.material instanceof PointsMaterial) {
+          particles.visible = !this.profile.preferences.reducedMotion && transition.remaining > 0;
+          particles.material.color.setHex(0xf59e0b); // Golden photon compression burst
+          particles.material.opacity = Math.sin(progress * Math.PI) * 0.95;
+          particles.rotation.y = progress * Math.PI * 2;
+        }
       }
       if (transition.remaining === 0) {
         if (particles) particles.visible = false;
@@ -2634,6 +2658,10 @@ export class MissionControlSystem extends createSystem({
         if (bridgeSpan) bridgeSpan.visible = false;
         const cloudCap = obj.getObjectByName('CubeCloudObscurationCap');
         if (cloudCap) cloudCap.visible = false;
+        const radarSpikes = obj.getObjectByName('CubeRadarSpikes');
+        if (radarSpikes) radarSpikes.visible = false;
+        const highwayVector = obj.getObjectByName('CubeHighwayVector');
+        if (highwayVector) highwayVector.visible = false;
         const terrainCore = obj.getObjectByName('CubeConfidenceCore');
         if (terrainCore) {
           terrainCore.scale.set(1, 1, 1);
@@ -2660,15 +2688,25 @@ export class MissionControlSystem extends createSystem({
         obj.rotation.set(0, 0, 0);
       }
 
-      // Update sector-specific 3D internal physical features (Phase 3.2)
+      // Update sector-specific 3D internal physical features (Phase 4 Living Micro-Holograms)
       const bridgeSpan = obj.getObjectByName('CubeBridgeSpan');
       if (bridgeSpan) {
-        bridgeSpan.visible = pkt.sectorId === 'C' || pkt.sectorId === 'D';
+        bridgeSpan.visible = (pkt.sectorId === 'C' || pkt.sectorId === 'D') && pkt.confidence !== 'UNVERIFIED';
       }
 
       const cloudCap = obj.getObjectByName('CubeCloudObscurationCap');
       if (cloudCap) {
         cloudCap.visible = pkt.confidence === 'UNVERIFIED';
+      }
+
+      const radarSpikes = obj.getObjectByName('CubeRadarSpikes');
+      if (radarSpikes) {
+        radarSpikes.visible = pkt.confidence === 'PROBABLE';
+      }
+
+      const highwayVector = obj.getObjectByName('CubeHighwayVector');
+      if (highwayVector) {
+        highwayVector.visible = pkt.confidence === 'CONFIRMED';
       }
 
       const terrainCore = obj.getObjectByName('CubeConfidenceCore');
@@ -2692,11 +2730,12 @@ export class MissionControlSystem extends createSystem({
       }
 
       const isSelected = state.selectedPacketId === pkt.id;
-      const baseScale = pkt.processed ? 0.86 : 1.04;
+      // Phase 4: 70% scale for compressed feature cubes
+      const baseScale = pkt.processed ? 0.70 : 1.04;
       const selectBoost = isSelected ? 1.15 : 1.0;
       obj.scale.set(
         baseScale * selectBoost,
-        (pkt.processed ? 0.74 : 1.04) * selectBoost,
+        (pkt.processed ? 0.65 : 1.04) * selectBoost,
         baseScale * selectBoost,
       );
 

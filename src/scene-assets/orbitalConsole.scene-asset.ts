@@ -330,30 +330,16 @@ export function createOrbitalConsoleAsset(): Object3D {
   cradleGroup.name = 'ProcessingCradleAssembly';
   cradleGroup.position.set(0.24, 0.78, 0.01);
 
-  const cradleCoreMat = new MeshStandardMaterial({
-    color: 0xf59e0b,
-    emissive: 0xb45309,
-    emissiveIntensity: 0.95,
-    roughness: 0.25,
-    metalness: 0.45,
-  });
   const cradleInductionCore = new Mesh(
     bevelBox(0.084, 0.024, 0.088, 0.003, 0.008, 2),
-    cradleCoreMat,
+    amberInductionMat,
   );
   cradleInductionCore.name = 'ProcessingCradleCore';
   cradleInductionCore.position.set(0, 0.002, 0);
   cradleGroup.add(cradleInductionCore);
 
   const inductionRingGeo = new TorusGeometry(0.038, 0.0035, 8, 28);
-  const inductionRingMat = new MeshStandardMaterial({
-    color: 0xd97706,
-    emissive: 0xf59e0b,
-    emissiveIntensity: 0.6,
-    roughness: 0.28,
-    metalness: 0.85,
-  });
-  const inductionRing = new Mesh(inductionRingGeo, inductionRingMat);
+  const inductionRing = new Mesh(inductionRingGeo, amberInductionMat);
   inductionRing.name = 'CradleInductionRing';
   inductionRing.rotation.set(Math.PI / 2, 0, 0);
   inductionRing.position.set(0, 0.014, 0);
@@ -368,15 +354,16 @@ export function createOrbitalConsoleAsset(): Object3D {
 
   // Raised copper induction clamp jaws on left and right of cradle (dynamic animation targets)
   const clampJawGeo = bevelBox(0.012, 0.028, 0.092, 0.002, 0.004, 2);
-  const leftJaw = new Mesh(clampJawGeo, copperClampMat.clone());
+  const leftJaw = new Mesh(clampJawGeo, copperClampMat);
   leftJaw.name = 'CradleClampLeft';
   leftJaw.position.set(-0.048, 0.016, 0);
   cradleGroup.add(leftJaw);
 
-  const rightJaw = new Mesh(clampJawGeo, copperClampMat.clone());
+  const rightJaw = new Mesh(clampJawGeo, copperClampMat);
   rightJaw.name = 'CradleClampRight';
   rightJaw.position.set(0.048, 0.016, 0);
   cradleGroup.add(rightJaw);
+  mergeStaticMeshesByMaterial(cradleGroup, ['CradleClampLeft', 'CradleClampRight']);
 
   // Discard / Recycle Chute at world [0.49, 0.78, -0.58] -> local [0.49, 0.78, -0.02]
   const discardRim = new Mesh(
@@ -419,24 +406,26 @@ export function createOrbitalConsoleAsset(): Object3D {
   const downlinkDynamicGroup = new Group();
   downlinkDynamicGroup.name = 'DownlinkBayDynamicGroup';
 
+  const waveguideMat = new MeshStandardMaterial({
+    color: 0x334155,
+    emissive: 0x0f172a,
+    emissiveIntensity: 0.2,
+    roughness: 0.35,
+    metalness: 0.45,
+  });
+  const progressMat = new MeshBasicMaterial({ color: 0x38bdf8 });
+
   for (let i = 0; i < 3; i++) {
     const slotBase = new Mesh(dlSlotBezelGeo, gunmetalBezelMat);
     slotBase.name = `DownlinkSlotBezel_${i + 1}`;
     slotBase.position.set(dlSlotX[i], 0.788, 0.10);
     deckGroup.add(slotBase);
 
-    const waveguideMat = new MeshStandardMaterial({
-      color: 0x334155,
-      emissive: 0x0f172a,
-      emissiveIntensity: 0.2,
-      roughness: 0.35,
-      metalness: 0.45,
-    });
     const waveguide = new Mesh(dlWaveguideGeo, waveguideMat);
     waveguide.name = `DownlinkSlotWaveguide_${i + 1}`;
     waveguide.position.set(dlSlotX[i], 0.789, 0.132);
     downlinkDynamicGroup.add(waveguide);
-    const progressBar = new Mesh(dlWaveguideGeo, new MeshBasicMaterial({ color: 0x38bdf8 }));
+    const progressBar = new Mesh(dlWaveguideGeo, progressMat);
     progressBar.name = `DownlinkSlotProgress_${i + 1}`;
     progressBar.position.set(dlSlotX[i], 0.794, 0.132);
     progressBar.visible = false;
@@ -561,6 +550,10 @@ export function createOrbitalConsoleAsset(): Object3D {
   discardHalo.position.set(0.49, 0.787, -0.02);
   discardHalo.visible = false;
   downlinkDynamicGroup.add(discardHalo);
+  mergeStaticMeshesByMaterial(downlinkDynamicGroup, [
+    'DownlinkSlotProgress_1', 'DownlinkSlotProgress_2', 'DownlinkSlotProgress_3',
+    'CradleDropHalo', 'QueueDropHalo', 'DiscardDropHalo',
+  ]);
 
   // 6. Cockpit Architectural Interior: Heavy Anti-Slip Floor Deck & Forward Kickplate
   const cabinFloorGroup = new Group();

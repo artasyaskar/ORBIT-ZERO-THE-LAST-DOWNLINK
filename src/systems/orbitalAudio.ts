@@ -27,7 +27,9 @@ export type OrbitalSoundCue =
   | 'QUINDAR_INTRO'
   | 'QUINDAR_OUTRO'
   | 'RADIO_SQUELCH'
-  | 'SWITCH_CLICK';
+  | 'SWITCH_CLICK'
+  | 'COMPRESSION_CHIRP'
+  | 'MAGNETIC_HOVER';
 
 export class OrbitalAudioController {
   private ctx: AudioContext | null = null;
@@ -175,6 +177,12 @@ export class OrbitalAudioController {
       case 'SWITCH_CLICK':
         this.playMechanicalSwitchClick(true);
         break;
+      case 'COMPRESSION_CHIRP':
+        this.playCompressionChirp();
+        break;
+      case 'MAGNETIC_HOVER':
+        this.playMagneticHoverBuzz();
+        break;
     }
   }
 
@@ -213,6 +221,71 @@ export class OrbitalAudioController {
     } catch {
       // Graceful degradation in headless
     }
+  }
+
+  /**
+   * Phase 4: Procedural Laser Compression Chirp Audio:
+   * Upward frequency sweep (1,200 Hz -> 3,200 Hz over 280ms) for Amber Cradle feature extraction.
+   */
+  public playCompressionChirp(): void {
+    if (this.volume <= 0) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    try {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const now = ctx.currentTime;
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(1200, now);
+      osc.frequency.exponentialRampToValueAtTime(3200, now + 0.28);
+
+      gain.gain.setValueAtTime(0.12 * this.volume, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+
+      osc.connect(gain);
+      gain.connect(this.master ?? ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.34);
+      osc.onended = () => {
+        try {
+          osc.disconnect();
+          gain.disconnect();
+        } catch {}
+      };
+    } catch {}
+  }
+
+  /**
+   * Phase 4: Procedural Magnetic Snap Hover Buzz Audio:
+   * Low-frequency magnetic induction tone (220 Hz triangle) when entering drop socket proximity.
+   */
+  public playMagneticHoverBuzz(): void {
+    if (this.volume <= 0) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    try {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const now = ctx.currentTime;
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(220, now);
+
+      gain.gain.setValueAtTime(0.08 * this.volume, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+
+      osc.connect(gain);
+      gain.connect(this.master ?? ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.09);
+      osc.onended = () => {
+        try {
+          osc.disconnect();
+          gain.disconnect();
+        } catch {}
+      };
+    } catch {}
   }
 
   /**
