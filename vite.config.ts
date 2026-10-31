@@ -4,6 +4,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   plugins: [iwsdkDev()],
   server: { host: '0.0.0.0', port: 8081, open: false },
+  preview: { host: '0.0.0.0', port: 8081 },
   build: {
     outDir: 'dist',
     sourcemap: process.env.NODE_ENV !== 'production',

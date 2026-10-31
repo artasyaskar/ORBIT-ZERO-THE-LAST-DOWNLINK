@@ -1,43 +1,55 @@
 # ORBIT ZERO: THE LAST DOWNLINK
 # RC8 Meta Quest 3/3S Physical Device Testing Checklist
 
-**Document Version:** 1.0 (Freeze Baseline `e6059f4`)  
+**Document Version:** 1.1 (Freeze Baseline `e6059f4`)  
 **Target Hardware:** Meta Quest 3 / Meta Quest 3S (Horizon OS Browser)  
 **Track:** Gaming Track, New Experience Division (Meta VR Start Developer Competition 2026)  
 **Standard:** Hands-First Mandate, Seated Airplane-Seat Ergonomics, 72 FPS Target  
+**Verification Status:** **Checklist Prepared / Physical Headset Testing Pending**  
+*(Do not claim Quest accessibility or compatibility until verified on a physical device).*
 
 ---
 
 ## 1. Network & Local SSL Setup for Meta Quest Browser
 
-Because WebXR requires a secure context (`HTTPS`), running the development or preview server on a local PC for Meta Quest Browser requires local network bridging:
+Because WebXR requires a secure context (`HTTPS`), running the development or preview server on a local PC for Meta Quest Browser requires local network bridging.
 
-### Option A: Local Wi-Fi Network with HTTPS
-1. Find your development PC's local IP address on Wi-Fi:
+> [!IMPORTANT]
+> **Do not bind to 127.0.0.1 for Quest testing!**  
+> Running with `--host 127.0.0.1` binds strictly to the PC's loopback interface. A physical Quest headset running on your Wi-Fi cannot access your PC through loopback. You must bind to `0.0.0.0`.
+
+### Step-by-Step LAN Setup:
+1. **Find your PC's Wi-Fi IPv4 Address:**
    ```powershell
    ipconfig
-   # Look for IPv4 Address (e.g., 192.168.1.50)
+   # Note IPv4 Address under Wireless LAN adapter Wi-Fi (e.g. 10.5.32.225)
    ```
-2. Start Vite preview bound to all network interfaces:
+2. **Start the Production Preview Server bound to 0.0.0.0:**
    ```powershell
    npm run preview -- --host 0.0.0.0 --port 8081
    ```
-3. Put on Meta Quest 3/3S and open **Meta Quest Browser**.
-4. In the URL bar, type:
-   `https://<YOUR_PC_IP>:8081/` (e.g. `https://192.168.1.50:8081/`)
-5. **Self-Signed Certificate Bypass in Quest Browser:**
-   - The browser will display: *"Your connection is not private"* (due to the dev SSL cert).
-   - Click **Advanced** $\to$ click **Proceed to <IP> (unsafe)**.
-
-### Option B: Hosted Origin (When Deployed)
-- If deployed to a public HTTPS origin (e.g., Vercel / Netlify / Cloudflare):
-  Type the production HTTPS URL directly in Meta Quest Browser. Zero certificate bypass required.
+3. **Pre-Flight Sanity Check (Test from Smartphone First):**
+   Before putting on the headset, connect your phone to the same Wi-Fi and open:  
+   `https://<YOUR_PC_IP>:8081/` (e.g., `https://10.5.32.225:8081/`).  
+   - If the page loads (after accepting the self-signed certificate warning), your LAN routing is working.
+   - If the connection times out, your Wi-Fi router has **AP Client Isolation** enabled (common on university/corporate networks like `uet.edu.pk`). In that case, use a secure tunnel (see Step 4).
+4. **Alternative Tunneling Option (Bypasses AP Isolation & Cert Warnings):**
+   If router AP isolation blocks local IP connections:
+   ```powershell
+   npx cloudflared tunnel --url https://localhost:8081
+   # Or: npx localtunnel --port 8081
+   ```
+   This gives a public HTTPS URL with a trusted CA certificate that loads on Quest Browser with zero SSL warnings.
+5. **Open in Meta Quest Browser:**
+   - Put on Meta Quest 3/3S and launch **Meta Quest Browser**.
+   - Navigate to `https://<YOUR_PC_IP>:8081/` (or the tunnel URL).
+   - If using local IP: Click **Advanced** $\to$ **Proceed to <IP> (unsafe)** to accept the self-signed developer certificate.
 
 ---
 
 ## 2. Meta Quest Horizon OS Settings Checklist
 
-Before launching the WebXR session, verify Horizon OS headset configuration:
+Before entering the WebXR session, verify Horizon OS headset settings:
 
 - [ ] **Hand Tracking Enabled:**
   - Navigate to: **Settings** $\to$ **Movement tracking** $\to$ **Hand Tracking** $\to$ Toggle **ON**.
@@ -47,13 +59,13 @@ Before launching the WebXR session, verify Horizon OS headset configuration:
   - Ensure you are seated comfortably in a chair with desk or lap space clear.
 - [ ] **WebXR Hand Input Flag in Quest Browser:**
   - Navigate to `chrome://flags` in Quest Browser.
-  - Ensure **WebXR Hand Input** is set to **Default** or **Enabled**.
+  - Verify **WebXR Hand Input** is set to **Default** or **Enabled**.
 
 ---
 
 ## 3. Entering Immersive WebXR Mode
 
-1. Once the page loads, observe the 2D windowed briefing.
+1. Once the page loads in Meta Quest Browser, observe the 2D windowed briefing.
 2. In the bottom-right of the window (or via the 3D left panel), locate:
    `[Enter VR Headset / XR Mode]`
    *(Alternatively, click the goggles icon in the Meta Quest Browser navigation bar).*
@@ -91,6 +103,6 @@ Before launching the WebXR session, verify Horizon OS headset configuration:
 
 ## 6. Known Limitations & Fallback Paths
 
-1. **Self-Signed SSL on Local Wi-Fi:** If Meta Quest Browser refuses to connect, use `npx localtunnel --port 8081` or deploy to a public HTTPS staging URL to eliminate certificate warnings.
+1. **AP Isolation & Self-Signed SSL:** If Meta Quest Browser refuses to connect to the local IP, use a Cloudflare tunnel or localtunnel (`npx cloudflared tunnel --url https://localhost:8081`) to eliminate router firewall and certificate warnings.
 2. **Controller Compatibility:** If lighting conditions are too dim for optical hand tracking, pick up the Meta Quest Touch Plus controllers; the same raycasts and grip triggers operate identically via controller emulation.
 3. **Seated Calibration:** If the console appears too high or low relative to your physical chair, press the **Meta Quest button** on the right controller (or long-pinch right thumb/index) to reset headset zero-origin.
