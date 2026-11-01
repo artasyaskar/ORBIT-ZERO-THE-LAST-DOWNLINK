@@ -21,6 +21,7 @@ import {
   Group,
   LineBasicMaterial,
   LineSegments,
+  Matrix4,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
@@ -629,6 +630,87 @@ export function createEarthGlobeAsset(): Object3D {
   swathCone.name = 'OrbitalScanSwathCone';
   swathCone.visible = false;
   root.add(swathCone);
+
+  // 8. Phase 5: Karachi Downlink Ground Station Terminal (24.86° N, 67.0° E)
+  const karachiGroup = new Group();
+  karachiGroup.name = 'KarachiGroundStation';
+  const karachiLocal = latLonToGlobePoint(24.86, 67.0, GLOBE_RADIUS);
+  karachiGroup.position.copy(karachiLocal);
+
+  // Orient local +Y along globe radial normal outward
+  const normalK = karachiLocal.clone().normalize();
+  const upHintK = Math.abs(normalK.y) > 0.95 ? new Vector3(1, 0, 0) : new Vector3(0, 1, 0);
+  const xDirK = new Vector3().crossVectors(upHintK, normalK).normalize();
+  const zDirK = new Vector3().crossVectors(normalK, xDirK).normalize();
+  karachiGroup.quaternion.setFromRotationMatrix(new Matrix4().makeBasis(xDirK, normalK, zDirK));
+
+  const dishMat = new MeshStandardMaterial({
+    color: 0x38bdf8,
+    emissive: 0x0284c7,
+    emissiveIntensity: 1.25,
+    roughness: 0.25,
+    metalness: 0.75,
+  });
+  dishMat.name = 'KarachiDishMat';
+  const dishMesh = new Mesh(new CylinderGeometry(0.0075, 0.0015, 0.0035, 12), dishMat);
+  dishMesh.name = 'KarachiGroundStationDish';
+  dishMesh.position.set(0, 0.002, 0);
+  karachiGroup.add(dishMesh);
+
+  const hornMesh = new Mesh(new CylinderGeometry(0.0008, 0.0012, 0.006, 8), dishMat);
+  hornMesh.name = 'KarachiStationFeedHorn';
+  hornMesh.position.set(0, 0.0055, 0);
+  karachiGroup.add(hornMesh);
+
+  // Demodulation Shockwave Ripple Ring (pulsing circular dish reception field)
+  const shockwaveMat = new MeshBasicMaterial({
+    color: 0x38bdf8,
+    transparent: true,
+    opacity: 0.0,
+    depthWrite: false,
+  });
+  shockwaveMat.name = 'KarachiShockwaveMat';
+  const shockwaveMesh = new Mesh(new TorusGeometry(0.012, 0.0014, 6, 24), shockwaveMat);
+  shockwaveMesh.name = 'KarachiDishShockwave';
+  shockwaveMesh.rotation.set(Math.PI / 2, 0, 0);
+  shockwaveMesh.position.set(0, 0.0025, 0);
+  shockwaveMesh.visible = false;
+  karachiGroup.add(shockwaveMesh);
+
+  mergeStaticMeshesByMaterial(karachiGroup, ['KarachiDishShockwave']);
+  root.add(karachiGroup);
+
+  // 9. Phase 5: Volumetric Space-to-Ground Downlink Telemetry Laser (CubeSat -> Karachi)
+  const laserGroup = new Group();
+  laserGroup.name = 'DownlinkLaserBeamGroup';
+
+  const laserCoreMat = new MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.0,
+    depthWrite: false,
+  });
+  laserCoreMat.name = 'DownlinkLaserCoreMat';
+  const laserCore = new Mesh(new CylinderGeometry(0.0022, 0.0022, 1, 12, 1, true), laserCoreMat);
+  laserCore.name = 'DownlinkLaserCore';
+  laserCore.visible = false;
+  laserGroup.add(laserCore);
+
+  const laserSheathMat = new MeshBasicMaterial({
+    color: 0x0ea5e9,
+    transparent: true,
+    opacity: 0.0,
+    side: DoubleSide,
+    depthWrite: false,
+  });
+  laserSheathMat.name = 'DownlinkLaserSheathMat';
+  const laserSheath = new Mesh(new CylinderGeometry(0.012, 0.012, 1, 16, 1, true), laserSheathMat);
+  laserSheath.name = 'DownlinkLaserSheath';
+  laserSheath.visible = false;
+  laserGroup.add(laserSheath);
+
+  laserGroup.visible = false;
+  root.add(laserGroup);
 
   return root;
 }

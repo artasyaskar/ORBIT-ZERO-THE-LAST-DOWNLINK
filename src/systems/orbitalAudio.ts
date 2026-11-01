@@ -29,7 +29,10 @@ export type OrbitalSoundCue =
   | 'RADIO_SQUELCH'
   | 'SWITCH_CLICK'
   | 'COMPRESSION_CHIRP'
-  | 'MAGNETIC_HOVER';
+  | 'MAGNETIC_HOVER'
+  | 'FSK_BURST'
+  | 'SOLENOID_LATCH'
+  | 'HANDSHAKE_CONFIRM';
 
 export class OrbitalAudioController {
   private ctx: AudioContext | null = null;
@@ -183,6 +186,15 @@ export class OrbitalAudioController {
       case 'MAGNETIC_HOVER':
         this.playMagneticHoverBuzz();
         break;
+      case 'FSK_BURST':
+        this.playBell202FskBurst();
+        break;
+      case 'SOLENOID_LATCH':
+        this.playHeavySolenoidLatch();
+        break;
+      case 'HANDSHAKE_CONFIRM':
+        this.playHandshakeConfirm();
+        break;
     }
   }
 
@@ -285,6 +297,111 @@ export class OrbitalAudioController {
           gain.disconnect();
         } catch {}
       };
+    } catch {}
+  }
+
+  /**
+   * Phase 5: Bell 202 FSK Telemetry Bursts:
+   * Rapid data packet bursts alternating between 1,200 Hz (mark) and 2,200 Hz (space).
+   */
+  public playBell202FskBurst(): void {
+    if (this.volume <= 0) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    try {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const now = ctx.currentTime;
+
+      osc.type = 'square';
+      // Step through 4 fast FSK mark/space baud shifts (1200 / 2200 Hz)
+      osc.frequency.setValueAtTime(1200, now);
+      osc.frequency.setValueAtTime(2200, now + 0.035);
+      osc.frequency.setValueAtTime(1200, now + 0.070);
+      osc.frequency.setValueAtTime(2200, now + 0.105);
+
+      gain.gain.setValueAtTime(0.06 * this.volume, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+
+      osc.connect(gain);
+      gain.connect(this.master ?? ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.15);
+      osc.onended = () => {
+        try {
+          osc.disconnect();
+          gain.disconnect();
+        } catch {}
+      };
+    } catch {}
+  }
+
+  /**
+   * Phase 5: Heavy Mechanical Solenoid Latch:
+   * Low-frequency mechanical impulse (80 Hz -> 35 Hz) for committing downlink transmission.
+   */
+  public playHeavySolenoidLatch(): void {
+    if (this.volume <= 0) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    try {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const now = ctx.currentTime;
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(95, now);
+      osc.frequency.exponentialRampToValueAtTime(32, now + 0.16);
+
+      gain.gain.setValueAtTime(0.22 * this.volume, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+
+      osc.connect(gain);
+      gain.connect(this.master ?? ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.19);
+      osc.onended = () => {
+        try {
+          osc.disconnect();
+          gain.disconnect();
+        } catch {}
+      };
+    } catch {}
+  }
+
+  /**
+   * Phase 5: Final Ground Handshake Confirmation Chime:
+   * 4-note ascending arpeggio celebrating ground station verification (C5 -> E5 -> G5 -> C6).
+   */
+  public playHandshakeConfirm(): void {
+    if (this.volume <= 0) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    try {
+      const notes = [523.25, 659.25, 783.99, 1046.5];
+      const now = ctx.currentTime;
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const start = now + i * 0.08;
+
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, start);
+
+        gain.gain.setValueAtTime(0.12 * this.volume, start);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.22);
+
+        osc.connect(gain);
+        gain.connect(this.master ?? ctx.destination);
+        osc.start(start);
+        osc.stop(start + 0.24);
+        osc.onended = () => {
+          try {
+            osc.disconnect();
+            gain.disconnect();
+          } catch {}
+        };
+      });
     } catch {}
   }
 

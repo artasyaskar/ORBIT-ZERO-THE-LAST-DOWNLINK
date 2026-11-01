@@ -44,21 +44,13 @@ export function createOrbitalConsoleAsset(): Object3D {
     roughness: 0.38,
     metalness: 0.78,
   });
-  const deskDeckMat = new MeshStandardMaterial({
-    color: 0x0a1422,
-    roughness: 0.28,
-    metalness: 0.70,
-  });
+  const deskDeckMat = hullDarkMat;
   const titaniumRimMat = new MeshStandardMaterial({
     color: 0x1f2e44,
     roughness: 0.18,
     metalness: 0.92,
   });
-  const gunmetalBezelMat = new MeshStandardMaterial({
-    color: 0x131f30,
-    roughness: 0.26,
-    metalness: 0.85,
-  });
+  const gunmetalBezelMat = titaniumRimMat;
   const carbonWellMat = hullDarkMat;
   const cyanAccentMat = new MeshStandardMaterial({
     color: 0x38bdf8,
@@ -365,13 +357,13 @@ export function createOrbitalConsoleAsset(): Object3D {
   cradleGroup.add(rightJaw);
   mergeStaticMeshesByMaterial(cradleGroup, ['CradleClampLeft', 'CradleClampRight']);
 
-  // Discard / Recycle Chute at world [0.49, 0.78, -0.58] -> local [0.49, 0.78, -0.02]
+  // Discard / Recycle Chute at world [0.45, 0.78, -0.44] -> local [0.45, 0.78, 0.12]
   const discardRim = new Mesh(
     new CylinderGeometry(0.052, 0.058, 0.022, 24),
     gunmetalBezelMat,
   );
   discardRim.name = 'DiscardChuteRim';
-  discardRim.position.set(0.49, 0.78, -0.02);
+  discardRim.position.set(0.45, 0.78, 0.12);
   deckGroup.add(discardRim);
 
   const discardCore = new Mesh(
@@ -379,7 +371,7 @@ export function createOrbitalConsoleAsset(): Object3D {
     coralHazardMat,
   );
   discardCore.name = 'DiscardChuteSocket';
-  discardCore.position.set(0.49, 0.781, -0.02);
+  discardCore.position.set(0.45, 0.781, 0.12);
   deckGroup.add(discardCore);
 
   // 3-Slot Downlink Transmission Bay at world [0.29, 0.39, 0.49], z = -0.46 -> local z = +0.10
@@ -547,7 +539,7 @@ export function createOrbitalConsoleAsset(): Object3D {
   const discardHalo = new Mesh(discardHaloGeo, discardHaloMat);
   discardHalo.name = 'DiscardDropHalo';
   discardHalo.rotation.set(Math.PI / 2, 0, 0);
-  discardHalo.position.set(0.49, 0.787, -0.02);
+  discardHalo.position.set(0.45, 0.787, 0.12);
   discardHalo.visible = false;
   downlinkDynamicGroup.add(discardHalo);
   mergeStaticMeshesByMaterial(downlinkDynamicGroup, [

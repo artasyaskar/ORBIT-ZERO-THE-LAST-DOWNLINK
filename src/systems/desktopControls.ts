@@ -56,6 +56,10 @@ export interface DesktopControllerHost {
   rotateGlobe?: (deltaYaw: number, deltaPitch: number) => void;
   zoomGlobe?: (deltaZoom: number) => void;
   syncAll?: () => void;
+  toggleVrHandSimulator?: (active?: boolean) => boolean;
+  setPinching?: (pinching: boolean) => void;
+  setPoking?: (poking: boolean) => void;
+  getInteractionTargetPoint?: () => Vector3 | null;
 }
 
 export type TutorialStep =
@@ -119,6 +123,7 @@ export class DesktopControlsManager {
   private lastCubeClickTime = 0;
   private lastClickedCubePacketId = '';
   private wasNearSnap = false;
+  private lastInteractionWorldPos = new Vector3(0, 0.85, -0.45);
 
   // Phase 1: 3D Gimbal Globe Interactive Rotation & Focal Zoom
   private isGlobeDragging = false;
@@ -151,8 +156,12 @@ export class DesktopControlsManager {
       const zoomDelta = e.deltaY * 0.0006;
       this.host.zoomGlobe?.(zoomDelta);
     };
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+    };
 
     canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('contextmenu', onContextMenu);
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('keydown', onKeyDown);
@@ -160,6 +169,7 @@ export class DesktopControlsManager {
 
     this.cleanupCallbacks.push(() => {
       canvas.removeEventListener('pointerdown', onPointerDown);
+      canvas.removeEventListener('contextmenu', onContextMenu);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('keydown', onKeyDown);
@@ -305,7 +315,14 @@ export class DesktopControlsManager {
 
   private handlePointerDown(e: PointerEvent): void {
     if (this.host.world.renderer.xr.isPresenting) return;
+    if (e.button === 2) {
+      // Right-click: trigger pinch gesture in VR Hand Simulator
+      this.host.setPinching?.(true);
+      return;
+    }
     if (e.button !== 0) return; // Only primary left-click
+    this.host.setPoking?.(true);
+    setTimeout(() => this.host.setPoking?.(false), 140);
     this.updateMouseNdc(e);
     this.raycaster.setFromCamera(this.mouse, this.host.camera);
 
@@ -458,6 +475,9 @@ export class DesktopControlsManager {
 
     // 2. Normal Hover Inspection & 3D Highlighting
     const hits = this.raycaster.intersectObjects([this.host.scene], true);
+    if (hits.length > 0) {
+      this.lastInteractionWorldPos.copy(hits[0].point);
+    }
     let interactiveHit = false;
     let hoverText: string | null = null;
     let hitInteractiveRoot: Object3D | null = null;
@@ -503,6 +523,10 @@ export class DesktopControlsManager {
 
   private handlePointerUp(e: PointerEvent): void {
     if (this.host.world.renderer.xr.isPresenting) return;
+    if (e.button === 2) {
+      this.host.setPinching?.(false);
+      return;
+    }
 
     if (this.isDragging && this.dragCandidate) {
       this.isDragging = false;
@@ -893,7 +917,14 @@ export class DesktopControlsManager {
         break;
       }
       case 'h':
-      case 'H':
+      case 'H': {
+        e.preventDefault();
+        const simActive = this.host.toggleVrHandSimulator?.();
+        if (simActive !== undefined) {
+          this.notifyAction(simActive ? '🖐️ VR HAND & ERGONOMIC REACH SIMULATOR: ACTIVE' : 'VR Hand Simulator Disabled');
+        }
+        break;
+      }
       case '?': {
         e.preventDefault();
         this.toggleHelpModal();
@@ -950,6 +981,10 @@ export class DesktopControlsManager {
       this.advanceTutorial('SCAN_SECTOR');
     }
     this.updateHud();
+  }
+
+  public getInteractionTargetPoint(): Vector3 {
+    return this.lastInteractionWorldPos.clone();
   }
 
   public scanSector(): void {
@@ -2059,7 +2094,8 @@ export class DesktopControlsManager {
       <button id="tb-transmit" style="${this.btnStyle('#34d399', hasQueue)}">TRANSMIT [T]</button>
       <button id="tb-aria-comms" style="${this.btnStyle('#06b6d4')}">🔊 ARIA-7</button>
       <button id="tb-hud-view" style="${this.btnStyle(this.hudMinimized ? '#f59e0b' : '#38bdf8')}">${this.hudMinimized ? 'HUD [FULL]' : 'HUD [MIN]'}</button>
-      <button id="tb-help" style="${this.btnStyle('#94a3b8')}">HELP [H]</button>
+      <button id="tb-vr-sim" style="${this.btnStyle('#0284c7')}">VR SIM [H]</button>
+      <button id="tb-help" style="${this.btnStyle('#94a3b8')}">HELP [?]</button>
       <button id="tb-diag" style="${this.btnStyle('#94a3b8')}">DEV [F1]</button>
     `;
 
@@ -2082,6 +2118,12 @@ export class DesktopControlsManager {
       if (btn) btn.innerText = isMuted ? '🔇 ARIA [MUTE]' : '🔊 ARIA-7';
     });
     this.toolbarEl.querySelector('#tb-hud-view')?.addEventListener('click', () => this.toggleHud());
+    this.toolbarEl.querySelector('#tb-vr-sim')?.addEventListener('click', () => {
+      const simActive = this.host.toggleVrHandSimulator?.();
+      if (simActive !== undefined) {
+        this.notifyAction(simActive ? '🖐️ VR HAND & ERGONOMIC REACH SIMULATOR: ACTIVE' : 'VR Hand Simulator Disabled');
+      }
+    });
     this.toolbarEl.querySelector('#tb-help')?.addEventListener('click', () => this.toggleHelpModal());
     this.toolbarEl.querySelector('#tb-diag')?.addEventListener('click', () => this.toggleDiagnostics());
   }

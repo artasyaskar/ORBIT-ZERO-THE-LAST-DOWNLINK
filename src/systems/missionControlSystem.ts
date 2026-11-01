@@ -63,6 +63,7 @@ import {
   latLonToGlobePoint,
 } from '../scene-assets/earthGlobe.scene-asset';
 import { alignSpan } from '../scene-assets/lib/hardsurface';
+import { VRHandSimulator } from './vrHandSimulator';
 import { OrbitalAudioController, type OrbitalSoundCue } from './orbitalAudio';
 import { VoiceCommander, type VoiceDialogueId } from './voiceCommander';
 import {
@@ -88,7 +89,7 @@ const STANDBY_CUBE_COLORS = [0x38bdf8, 0xf59e0b, 0x10b981];
 const SCANNER_HOME_POSITION = new Vector3(-0.48, 0.79, -0.54);
 const GLOBE_CENTER_WORLD = new Vector3(0, 0.98, -0.58);
 const PROCESS_CRADLE_WORLD = new Vector3(0.24, 0.79, -0.55);
-const DISCARD_CHUTE_WORLD = new Vector3(0.49, 0.79, -0.58);
+const DISCARD_CHUTE_WORLD = new Vector3(0.45, 0.79, -0.44);
 const DOWNLINK_BAY_CENTER_WORLD = new Vector3(0.39, 0.79, -0.46);
 const RAW_TRAY_CENTER_WORLD = new Vector3(-0.37, 0.79, -0.43);
 
@@ -162,6 +163,9 @@ export class MissionControlSystem extends createSystem({
   // Desktop Controls & First-Time Player Experience
   private desktopControls?: DesktopControlsManager;
 
+  // Phase 5: In-Engine VR Hand & Ergonomic Simulator
+  private vrHandSimulator!: VRHandSimulator;
+
   // Phase 2: Commander ARIA-7 Holographic Voice Handler & Radio DSP
   private voiceCommander?: VoiceCommander;
 
@@ -180,12 +184,19 @@ export class MissionControlSystem extends createSystem({
     if (inputSystem) inputSystem.config.maintainScenePointers.value = true;
     this.scene.traverse((object) => {
       if (object instanceof Points || object instanceof Line ||
-        /^(ScannerAimLaser|OrbitalScanSwathCone|DownlinkUplinkBeam|DownlinkPulseRing|.*DropHalo)/.test(object.name)) {
+        /^(ScannerAimLaser|OrbitalScanSwathCone|DownlinkUplinkBeam|DownlinkPulseRing|DownlinkLaserCore|DownlinkLaserSheath|KarachiDishShockwave|.*DropHalo)/.test(object.name)) {
         object.raycast = () => {};
       }
     });
     this.audio.setVolume(this.profile.preferences.audioLevel);
     this.cleanupFuncs.push(() => this.audio.dispose());
+
+    // Phase 5: Initialize In-Engine VR Hand & Seated Ergonomic Simulator
+    this.vrHandSimulator = new VRHandSimulator();
+    this.scene.add(this.vrHandSimulator.root);
+    this.cleanupFuncs.push(() => {
+      this.scene.remove(this.vrHandSimulator.root);
+    });
 
     // Phase 2: Initialize Commander ARIA-7 Tactical Voice Handler & Subtitle Ribbon
     this.voiceCommander = new VoiceCommander({
@@ -357,6 +368,16 @@ export class MissionControlSystem extends createSystem({
       playCue: (cue) => this.playCue(cue as never),
       getSceneObject: (id) => this.world.getSceneObject(id),
       highlightDropZones: (active) => this.highlightDropZones(active),
+      toggleVrHandSimulator: (active?: boolean) => {
+        if (typeof active === 'boolean') {
+          this.vrHandSimulator.setEnabled(active);
+          return active;
+        }
+        return this.vrHandSimulator.toggle();
+      },
+      setPinching: (pinching: boolean) => this.vrHandSimulator.setPinching(pinching),
+      setPoking: (poking: boolean) => this.vrHandSimulator.setPoking(poking),
+      getInteractionTargetPoint: () => this.desktopControls?.getInteractionTargetPoint() ?? null,
       syncAll: () => this.syncAll(),
     });
     this.cleanupFuncs.push(() => this.desktopControls?.dispose());
@@ -483,6 +504,18 @@ export class MissionControlSystem extends createSystem({
           this.camera.updateMatrixWorld(true);
         },
         desktopControls: this.desktopControls,
+        vrHandSimulator: this.vrHandSimulator,
+        verifySeatedReachEnvelope: () =>
+          VRHandSimulator.verifySeatedReachEnvelope(this.scene, (id) => this.world.getSceneObject(id)),
+        toggleVrHandSimulator: (active?: boolean) => {
+          if (typeof active === 'boolean') {
+            this.vrHandSimulator.setEnabled(active);
+            return active;
+          }
+          return this.vrHandSimulator.toggle();
+        },
+        setPinching: (pinching: boolean) => this.vrHandSimulator.setPinching(pinching),
+        setPoking: (poking: boolean) => this.vrHandSimulator.setPoking(poking),
         voiceCommander: this.voiceCommander,
         triggerVoice: (dialogueId: VoiceDialogueId) => this.voiceCommander?.trigger(dialogueId),
         getAvatarMetrics: () => this.voiceCommander?.getAvatarMetrics(0.016),
@@ -510,6 +543,9 @@ export class MissionControlSystem extends createSystem({
     const reducedMotion = this.profile.preferences.reducedMotion;
     if (!reducedMotion && !this.reviewState) this.elapsedTime += delta;
     this.animateCubeTransitions(delta);
+
+    // Phase 5: In-Engine VR Hand & Ergonomic Simulator
+    this.vrHandSimulator.update(delta, this.desktopControls?.getInteractionTargetPoint() ?? null);
 
     // Gaze-assisted target acquisition & hands-free dwell selection
     if (this.profile.preferences.gazeAssist && this.frameSnapshot.phase === 'OPERATIONS' && !this.isAnyObjectGrabbed()) {
@@ -1010,6 +1046,7 @@ export class MissionControlSystem extends createSystem({
           this.playCue('PACKET_RECEIVED');
         }
         if (nextState.phase === 'DEBRIEF') {
+          this.playCue('HANDSHAKE_CONFIRM');
           if (nextState.debrief && nextState.debrief.totalScore >= nextState.debrief.achievableScore) {
             this.playCue('OPTIMAL_VICTORY');
             this.voiceCommander?.trigger('DEBRIEF_VICTORY');
@@ -1070,6 +1107,61 @@ export class MissionControlSystem extends createSystem({
               if (basePos) {
                 obj.position.set(basePos[0], basePos[1] + (reducedMotion ? 0 : 0.018), basePos[2]);
                 obj.rotation.y += reducedMotion ? 0 : delta * 3.5;
+                const particles = obj.getObjectByName('CubeAssemblyParticles');
+                if (particles instanceof Points && particles.material instanceof PointsMaterial) {
+                  particles.visible = !reducedMotion;
+                  particles.rotation.y += delta * 4.0;
+                  particles.material.color.setHex(0xf59e0b);
+                  particles.material.opacity = 0.5 + 0.4 * Math.sin(this.elapsedTime * 12);
+                }
+              }
+            }
+          }
+
+          // Phase 5: Space-to-Ground Volumetric Downlink Laser & Karachi Ground Station Lock
+          const globe = this.world.getSceneObject('earth-globe');
+          const cubesat = this.world.getSceneObject('cubesat-spacecraft');
+          if (globe && cubesat) {
+            const downlinkLaserGroup = globe.getObjectByName('DownlinkLaserBeamGroup');
+            const karachiTerminal = globe.getObjectByName('KarachiGroundStation');
+            if (downlinkLaserGroup && karachiTerminal) {
+              downlinkLaserGroup.visible = true;
+              const satWorld = cubesat.getWorldPosition(new Vector3());
+              const pSatLocal = globe.worldToLocal(satWorld);
+              const pKarachiLocal = karachiTerminal.position;
+
+              const laserCore = downlinkLaserGroup.getObjectByName('DownlinkLaserCore');
+              const laserSheath = downlinkLaserGroup.getObjectByName('DownlinkLaserSheath');
+
+              if (laserCore instanceof Mesh && laserCore.material instanceof MeshBasicMaterial) {
+                laserCore.visible = true;
+                const len = alignSpan(laserCore, pSatLocal, pKarachiLocal);
+                laserCore.scale.set(1, len, 1);
+                laserCore.material.opacity = reducedMotion ? 0.8 : 0.85 + 0.15 * Math.sin(this.elapsedTime * 32);
+              }
+              if (laserSheath instanceof Mesh && laserSheath.material instanceof MeshBasicMaterial) {
+                laserSheath.visible = true;
+                const len = alignSpan(laserSheath, pSatLocal, pKarachiLocal);
+                laserSheath.scale.set(1, len, 1);
+                laserSheath.material.opacity = reducedMotion ? 0.45 : 0.42 + 0.22 * Math.sin(this.elapsedTime * 18);
+              }
+
+              // ADCS Attitude Slew: Point CubeSat optical downlink aperture toward Karachi Ground Station
+              const karachiWorld = karachiTerminal.getWorldPosition(new Vector3());
+              cubesat.lookAt(karachiWorld);
+
+              // Pulsing Karachi demodulation footprint shockwave
+              const shockwave = karachiTerminal.getObjectByName('KarachiDishShockwave');
+              if (shockwave instanceof Mesh && shockwave.material instanceof MeshBasicMaterial) {
+                shockwave.visible = true;
+                const swT = (this.elapsedTime * 3.2) % 1.0;
+                shockwave.scale.set(1.0 + swT * 1.8, 1.0 + swT * 1.8, 1.0);
+                shockwave.material.opacity = (1.0 - swT) * 0.85;
+              }
+
+              // Bell 202 FSK audio bursts every 240ms during transmission
+              if (!reducedMotion && Math.floor(this.elapsedTime * 4.2) !== Math.floor((this.elapsedTime - delta) * 4.2)) {
+                this.audio.playBell202FskBurst();
               }
             }
           }
@@ -1085,6 +1177,20 @@ export class MissionControlSystem extends createSystem({
               ring.visible = false;
               ring.material.opacity = 0.0;
             }
+          }
+          const globe = this.world.getSceneObject('earth-globe');
+          if (globe) {
+            const downlinkLaserGroup = globe.getObjectByName('DownlinkLaserBeamGroup');
+            if (downlinkLaserGroup) {
+              downlinkLaserGroup.visible = false;
+              const laserCore = downlinkLaserGroup.getObjectByName('DownlinkLaserCore');
+              if (laserCore) laserCore.visible = false;
+              const laserSheath = downlinkLaserGroup.getObjectByName('DownlinkLaserSheath');
+              if (laserSheath) laserSheath.visible = false;
+            }
+            const karachiTerminal = globe.getObjectByName('KarachiGroundStation');
+            const shockwave = karachiTerminal?.getObjectByName('KarachiDishShockwave');
+            if (shockwave) shockwave.visible = false;
           }
         }
       }
@@ -1812,6 +1918,7 @@ export class MissionControlSystem extends createSystem({
       this.forceReleaseAllGrabs();
       this.cubeTransitions.clear();
       this.lastDownlinkTickSecond = -1;
+      this.playCue('SOLENOID_LATCH');
       this.playCue('DOWNLINK_COMMIT');
       this.voiceCommander?.trigger('DOWNLINK_TRANSMIT');
 
@@ -1851,6 +1958,11 @@ export class MissionControlSystem extends createSystem({
     const globe = this.world.getSceneObject('earth-globe');
     const swath = globe?.getObjectByName('OrbitalScanSwathCone');
     if (swath) swath.visible = false;
+    const downlinkLaserGroup = globe?.getObjectByName('DownlinkLaserBeamGroup');
+    if (downlinkLaserGroup) downlinkLaserGroup.visible = false;
+    const karachiTerminal = globe?.getObjectByName('KarachiGroundStation');
+    const shockwave = karachiTerminal?.getObjectByName('KarachiDishShockwave');
+    if (shockwave) shockwave.visible = false;
     const consoleObj = this.world.getSceneObject('orbital-console');
     const uplinkBeam = consoleObj?.getObjectByName('DownlinkUplinkBeam');
     if (uplinkBeam) uplinkBeam.visible = false;
