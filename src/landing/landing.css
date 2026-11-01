@@ -1,0 +1,684 @@
+/**
+ * ORBIT ZERO: THE LAST DOWNLINK
+ * Master Aerospace Landing Interface Stylesheet (RC9.2 Polish)
+ *
+ * Grounded in high-precision military/space operations aesthetics:
+ * - Deep space midnight navy (#02050c) with electric cyan (#00f0ff) and stellar gold accents.
+ * - Corner reticles, monospace telemetry timestamps, and tactical protocol headers.
+ * - High-contrast typography with crisp readability.
+ * - 100% reliable navigation and button ergonomics with verified pointer-events.
+ */
+
+:root {
+  --oz-bg-space: #02050c;
+  --oz-navy-900: #060e1d;
+  --oz-navy-800: #0b1a33;
+  --oz-navy-700: #10264d;
+  --oz-cyan: #00f0ff;
+  --oz-cyan-glow: rgba(0, 240, 255, 0.35);
+  --oz-cyan-dim: rgba(0, 240, 255, 0.15);
+  --oz-emerald: #10b981;
+  --oz-emerald-glow: rgba(16, 185, 129, 0.35);
+  --oz-gold: #ffd580;
+  --oz-text-primary: #f8fafc;
+  --oz-text-secondary: #cbd5e1;
+  --oz-text-muted: #94a3b8;
+  --oz-font-mono: 'Consolas', 'Courier New', monospace;
+  --oz-font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* BASE CONTAINER */
+#orbit-landing-root {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 10;
+  overflow: hidden;
+  font-family: var(--oz-font-sans);
+  color: var(--oz-text-primary);
+  user-select: none;
+  pointer-events: none; /* Allows mouse parallax on canvas */
+}
+
+#orbit-landing-root * {
+  box-sizing: border-box;
+}
+
+/* TOP NAVIGATION BAR */
+.oz-landing-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 24px 36px;
+  z-index: 40;
+  pointer-events: auto;
+}
+
+.oz-brand-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(6, 14, 29, 0.85);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  border-radius: 4px;
+  padding: 8px 16px;
+  backdrop-filter: blur(12px);
+  font-family: var(--oz-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--oz-cyan);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+}
+
+.oz-dot-live {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--oz-cyan);
+  box-shadow: 0 0 10px var(--oz-cyan);
+  animation: ozPulse 2s infinite ease-in-out;
+}
+
+@keyframes ozPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+.oz-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.oz-telemetry-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(11, 26, 51, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  padding: 6px 14px;
+  font-family: var(--oz-font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.oz-telemetry-label {
+  color: var(--oz-text-muted);
+}
+
+.oz-telemetry-val {
+  color: var(--oz-emerald);
+  font-weight: 700;
+}
+
+.oz-btn-mute-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(11, 26, 51, 0.85);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  border-radius: 4px;
+  color: var(--oz-text-primary);
+  font-family: var(--oz-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  padding: 8px 16px;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: all 0.2s ease;
+}
+
+.oz-btn-mute-toggle:hover, .oz-btn-mute-toggle:focus-visible {
+  border-color: var(--oz-cyan);
+  background: var(--oz-cyan-dim);
+  box-shadow: 0 0 16px var(--oz-cyan-glow);
+  outline: none;
+}
+
+.oz-mute-icon {
+  font-size: 13px;
+}
+
+/* SCREEN LAYOUTS */
+.oz-screen {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 80px 60px 40px;
+  transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1), transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+}
+
+.oz-screen-active {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.oz-screen-hidden {
+  opacity: 0;
+  transform: translateY(18px);
+  pointer-events: none;
+  visibility: hidden;
+}
+
+/* CORNER RETICLES [ + ] */
+.oz-card-corner {
+  position: absolute;
+  font-family: var(--oz-font-mono);
+  font-size: 12px;
+  line-height: 1;
+  color: var(--oz-cyan);
+  pointer-events: none;
+  user-select: none;
+  opacity: 0.85;
+}
+.oz-corner-tl { top: 6px; left: 8px; }
+.oz-corner-tr { top: 6px; right: 8px; }
+.oz-corner-bl { bottom: 6px; left: 8px; }
+.oz-corner-br { bottom: 6px; right: 8px; }
+
+/* HERO SCREEN CONTENT */
+.oz-hero-content {
+  max-width: 640px;
+  margin-left: 20px;
+  z-index: 20;
+}
+
+.oz-telemetry-stamp {
+  font-family: var(--oz-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--oz-cyan);
+  margin-bottom: 14px;
+  text-transform: uppercase;
+}
+
+.oz-hero-title {
+  margin: 0 0 8px;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.02;
+}
+
+.oz-title-glow {
+  font-size: clamp(52px, 6.5vw, 84px);
+  font-weight: 900;
+  letter-spacing: 4px;
+  color: #ffffff;
+  text-shadow: 0 0 28px var(--oz-cyan-glow), 0 0 70px rgba(0, 240, 255, 0.25);
+}
+
+.oz-hero-subtitle {
+  font-size: clamp(24px, 3.2vw, 42px);
+  font-weight: 800;
+  letter-spacing: 3px;
+  color: var(--oz-cyan);
+  margin-top: 4px;
+}
+
+.oz-supporting-line {
+  font-family: var(--oz-font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 2.5px;
+  color: var(--oz-text-muted);
+  margin: 0 0 24px;
+  text-transform: uppercase;
+}
+
+/* CLASSIFIED DIRECTIVE BRIEF CARD */
+.oz-mission-brief-card {
+  position: relative;
+  background: rgba(6, 14, 29, 0.88);
+  border: 1px solid rgba(0, 240, 255, 0.28);
+  border-radius: 4px;
+  padding: 22px 26px;
+  margin-bottom: 32px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(12px);
+}
+
+.oz-card-stamp {
+  font-family: var(--oz-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.8px;
+  color: var(--oz-gold);
+  margin-bottom: 10px;
+  text-transform: uppercase;
+}
+
+.oz-opening-msg {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0 0 6px;
+  letter-spacing: 0.5px;
+}
+
+.oz-mission-text {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--oz-text-secondary);
+  margin: 0;
+  font-style: italic;
+}
+
+/* PRIMARY CTA BUTTON */
+.oz-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.25), rgba(16, 38, 77, 0.85));
+  border: 1.5px solid var(--oz-cyan);
+  border-radius: 4px;
+  padding: 16px 36px;
+  font-family: var(--oz-font-mono);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: #ffffff;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  box-shadow: 0 0 25px rgba(0, 240, 255, 0.25), inset 0 0 15px rgba(0, 240, 255, 0.15);
+}
+
+.oz-btn-primary:hover, .oz-btn-primary:focus-visible {
+  background: linear-gradient(135deg, var(--oz-cyan), rgba(0, 180, 216, 0.85));
+  color: #02050c;
+  box-shadow: 0 0 40px var(--oz-cyan-glow), inset 0 0 20px rgba(255, 255, 255, 0.4);
+  transform: translateY(-2px);
+  outline: none;
+}
+
+.oz-btn-bracket {
+  color: var(--oz-cyan);
+  font-weight: 900;
+}
+.oz-btn-primary:hover .oz-btn-bracket {
+  color: #02050c;
+}
+
+/* FOOTER STATUS BADGES */
+.oz-hero-footer {
+  position: absolute;
+  bottom: 28px;
+  left: 60px;
+  z-index: 20;
+}
+
+.oz-system-indicator {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.oz-badge-chip {
+  background: rgba(6, 14, 29, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-family: var(--oz-font-mono);
+  font-size: 10px;
+  color: var(--oz-text-muted);
+  letter-spacing: 1.2px;
+}
+
+/* =========================================================================
+   SELECTION SCREEN (SCREEN 2)
+   ========================================================================= */
+
+.oz-selection-content {
+  max-width: 1020px;
+  margin: 0 auto;
+  width: 100%;
+  z-index: 30;
+}
+
+/* DEDICATED NAVIGATION BAR WITH PROMINENT RETURN BUTTON */
+.oz-selection-nav {
+  display: flex;
+  align-items: center;
+  margin-bottom: 20px;
+  position: relative;
+  z-index: 50;
+  pointer-events: auto;
+}
+
+.oz-btn-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(8, 18, 36, 0.9);
+  border: 1px solid rgba(0, 240, 255, 0.4);
+  border-radius: 4px;
+  color: var(--oz-cyan);
+  font-family: var(--oz-font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  padding: 10px 20px;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+}
+
+.oz-btn-back:hover, .oz-btn-back:focus-visible {
+  background: var(--oz-cyan-dim);
+  border-color: var(--oz-cyan);
+  box-shadow: 0 0 20px var(--oz-cyan-glow);
+  transform: translateX(-4px);
+  outline: none;
+}
+
+.oz-nav-arrow {
+  font-size: 11px;
+  color: var(--oz-cyan);
+}
+
+.oz-selection-header {
+  margin-bottom: 28px;
+}
+
+.oz-selection-heading {
+  font-size: clamp(30px, 3.8vw, 44px);
+  font-weight: 900;
+  letter-spacing: 3px;
+  margin: 0 0 6px;
+  color: #ffffff;
+  text-shadow: 0 0 20px rgba(0, 240, 255, 0.3);
+}
+
+.oz-selection-subheading {
+  font-family: var(--oz-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--oz-text-muted);
+  margin: 0;
+}
+
+/* CARDS GRID */
+.oz-cards-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 28px;
+}
+
+/* TACTICAL CONSOLE CARD */
+.oz-card {
+  position: relative;
+  background: rgba(6, 14, 29, 0.92);
+  border: 1.5px solid rgba(0, 240, 255, 0.25);
+  border-radius: 6px;
+  padding: 32px 28px 28px;
+  display: flex;
+  flex-direction: column;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7);
+  transition: all 0.3s ease;
+  pointer-events: auto;
+}
+
+.oz-card:hover, .oz-card:focus-visible {
+  border-color: var(--oz-cyan);
+  box-shadow: 0 0 35px var(--oz-cyan-glow), 0 16px 48px rgba(0, 0, 0, 0.8);
+  transform: translateY(-4px);
+  outline: none;
+}
+
+.oz-card-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--oz-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  margin-bottom: 18px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.oz-card-proto {
+  color: var(--oz-cyan);
+}
+
+.oz-card-stat {
+  color: var(--oz-text-muted);
+}
+
+.oz-card-icon-wrap {
+  width: 52px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 240, 255, 0.08);
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  border-radius: 4px;
+  color: var(--oz-cyan);
+  margin-bottom: 16px;
+}
+
+.oz-card-svg {
+  width: 32px;
+  height: 32px;
+}
+
+.oz-card-title {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  margin: 0 0 10px;
+  color: #ffffff;
+}
+
+.oz-card-desc {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--oz-text-secondary);
+  margin: 0 0 20px;
+  min-height: 42px;
+}
+
+.oz-card-features {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 28px;
+  font-family: var(--oz-font-mono);
+  font-size: 11px;
+  color: var(--oz-text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  flex-grow: 1;
+}
+
+.oz-card-features li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.oz-tick {
+  color: var(--oz-cyan);
+  font-weight: 900;
+}
+
+/* CARD ACTION BUTTONS */
+.oz-btn-card {
+  width: 100%;
+  padding: 14px 24px;
+  font-family: var(--oz-font-mono);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 1.8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  text-align: center;
+  user-select: none;
+}
+
+.oz-btn-desktop {
+  background: linear-gradient(135deg, rgba(0, 150, 255, 0.3), rgba(6, 14, 29, 0.9));
+  border: 1.5px solid #0096ff;
+  color: #ffffff;
+  box-shadow: 0 4px 20px rgba(0, 150, 255, 0.25);
+}
+
+.oz-btn-desktop:hover, .oz-btn-desktop:focus-visible {
+  background: linear-gradient(135deg, #0096ff, #0066cc);
+  color: #ffffff;
+  box-shadow: 0 0 30px rgba(0, 150, 255, 0.6);
+  transform: translateY(-2px);
+  outline: none;
+}
+
+.oz-btn-vr {
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.25), rgba(16, 185, 129, 0.25));
+  border: 1.5px solid var(--oz-cyan);
+  color: #ffffff;
+  box-shadow: 0 4px 20px rgba(0, 240, 255, 0.25);
+}
+
+.oz-btn-vr:hover, .oz-btn-vr:focus-visible {
+  background: linear-gradient(135deg, var(--oz-cyan), var(--oz-emerald));
+  color: #02050c;
+  box-shadow: 0 0 30px var(--oz-cyan-glow);
+  transform: translateY(-2px);
+  outline: none;
+}
+
+/* VR HEADSET STATUS INDICATOR */
+.oz-vr-status {
+  margin-top: 12px;
+  text-align: center;
+  font-family: var(--oz-font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.oz-vr-ready {
+  color: var(--oz-emerald);
+  font-weight: 700;
+}
+
+.oz-vr-fallback {
+  color: var(--oz-text-muted);
+}
+
+/* =========================================================================
+   VR ADVISORY MODAL
+   ========================================================================= */
+
+.oz-advisory {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(2, 5, 12, 0.85);
+  backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  pointer-events: auto;
+}
+
+.oz-advisory.oz-hidden {
+  display: none;
+}
+
+.oz-advisory-content {
+  position: relative;
+  background: rgba(8, 18, 36, 0.95);
+  border: 1.5px solid var(--oz-cyan);
+  border-radius: 6px;
+  max-width: 520px;
+  padding: 36px 32px 30px;
+  box-shadow: 0 0 50px var(--oz-cyan-glow);
+  text-align: center;
+}
+
+.oz-advisory-content h4 {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  color: #ffffff;
+  margin: 0 0 14px;
+}
+
+.oz-advisory-content p {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--oz-text-secondary);
+  margin: 0 0 24px;
+}
+
+.oz-advisory-actions {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+}
+
+.oz-btn-small {
+  padding: 10px 22px;
+  font-size: 11px;
+}
+
+.oz-btn-ghost {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  color: var(--oz-text-muted);
+  font-family: var(--oz-font-mono);
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.oz-btn-ghost:hover {
+  border-color: #ffffff;
+  color: #ffffff;
+}
+
+/* =========================================================================
+   RESPONSIVE DESIGN (Quest Browser, Mobile, Ultrawide)
+   ========================================================================= */
+
+@media (max-width: 900px) {
+  .oz-cards-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .oz-screen {
+    padding: 70px 24px 24px;
+  }
+  .oz-landing-header {
+    padding: 16px 20px;
+  }
+  .oz-telemetry-pill {
+    display: none;
+  }
+}
