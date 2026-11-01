@@ -495,6 +495,206 @@ export class OrbitalAudioController {
     }
   }
 
+  public playSubBassPulse(): void {
+    if (this.volume <= 0) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    try {
+      // Deep sub-bass punch (55Hz-90Hz sweep)
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const now = ctx.currentTime;
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(55, now);
+      osc.frequency.exponentialRampToValueAtTime(90, now + 0.08);
+      osc.frequency.exponentialRampToValueAtTime(55, now + 0.16);
+
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.12 * this.volume, now + 0.04);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+
+      osc.connect(gain);
+      gain.connect(this.master ?? ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.16);
+      osc.onended = () => {
+        try {
+          osc.disconnect();
+          gain.disconnect();
+        } catch {}
+      };
+    } catch {}
+  }
+
+  public playTensionHeartbeat(): void {
+    if (this.volume <= 0) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    try {
+      // Low-end sonar pulse (tense heartbeat on final 3 seconds)
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const now = ctx.currentTime;
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(25, now);
+      osc.frequency.exponentialRampToValueAtTime(35, now + 0.04);
+      osc.frequency.exponentialRampToValueAtTime(25, now + 0.08);
+
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.09 * this.volume, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+
+      osc.connect(gain);
+      gain.connect(this.master ?? ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.08);
+      osc.onended = () => {
+        try {
+          osc.disconnect();
+          gain.disconnect();
+        } catch {}
+      };
+    } catch {}
+  }
+
+  public playLightningCrack(): void {
+    if (this.volume <= 0) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    try {
+      // Bright lightning crack (noise spike)
+      const noise = ctx.createBufferSource();
+      const noiseBuffer = ctx.createBuffer(1, ctx.sampleRate * 0.12, ctx.sampleRate);
+      const noiseData = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < noiseData.length; i++) {
+        noiseData[i] = (Math.random() - 0.5) * 0.8;
+      }
+      noise.buffer = noiseBuffer;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'highpass';
+      filter.frequency.setValueAtTime(6000, ctx.currentTime);
+      filter.Q.setValueAtTime(2, ctx.currentTime);
+
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.02, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.15 * this.volume, ctx.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.12);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.master ?? ctx.destination);
+      noise.start(ctx.currentTime);
+      noise.stop(ctx.currentTime + 0.12);
+      noise.onended = () => {
+        try {
+          noise.disconnect();
+          filter.disconnect();
+          gain.disconnect();
+        } catch {}
+      };
+    } catch {}
+  }
+
+  public playMagneticSnap(): void {
+    if (this.volume <= 0) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    try {
+      // Magnetic snap (rising sine chirp)
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const now = ctx.currentTime;
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(400, now);
+      osc.frequency.exponentialRampToValueAtTime(920, now + 0.06);
+
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.08 * this.volume, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.06);
+
+      osc.connect(gain);
+      gain.connect(this.master ?? ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.06);
+      osc.onended = () => {
+        try {
+          osc.disconnect();
+          gain.disconnect();
+        } catch {}
+      };
+    } catch {}
+  }
+
+  public playLaserCharge(): void {
+    if (this.volume <= 0) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    try {
+      // Rising frequency sweep (laser charge buildup)
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const now = ctx.currentTime;
+
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(200, now);
+      osc.frequency.exponentialRampToValueAtTime(1800, now + 0.4);
+
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.1 * this.volume, now + 0.2);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
+
+      osc.connect(gain);
+      gain.connect(this.master ?? ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.4);
+      osc.onended = () => {
+        try {
+          osc.disconnect();
+          gain.disconnect();
+        } catch {}
+      };
+    } catch {}
+  }
+
+  public playSuccessFanfare(): void {
+    if (this.volume <= 0) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    try {
+      // Tactical success fanfare (3-note chord progression)
+      const notes = [659, 784, 1047]; // E, G, C (major chord)
+      const now = ctx.currentTime;
+      const duration = 0.4;
+
+      notes.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const startTime = now + idx * 0.1;
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, startTime);
+
+        gain.gain.setValueAtTime(0.0001, startTime);
+        gain.gain.exponentialRampToValueAtTime(0.08 * this.volume, startTime + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+
+        osc.connect(gain);
+        gain.connect(this.master ?? ctx.destination);
+        osc.start(startTime);
+        osc.stop(startTime + duration);
+        osc.onended = () => {
+          try {
+            osc.disconnect();
+            gain.disconnect();
+          } catch {}
+        };
+      });
+    } catch {}
+  }
   private tone(
     ctx: AudioContext,
     startHz: number,

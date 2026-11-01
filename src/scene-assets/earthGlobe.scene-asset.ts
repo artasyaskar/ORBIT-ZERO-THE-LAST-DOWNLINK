@@ -432,7 +432,7 @@ function buildOrbitalTelemetryBand(
   ringsGroup.name = `${name}_Rings`;
   for (const [idx, r] of [innerRadius, midRadius, outerRadius].entries()) {
     const tube = idx === 2 ? 0.00085 : 0.0005;
-    const torus = new Mesh(new TorusGeometry(r, tube, 6, 84), ringMat);
+    const torus = new Mesh(new TorusGeometry(r, tube, 6, 64), ringMat); // Reduced from 84 segments
     torus.name = `${name}_Ring_${idx}`;
     ringsGroup.add(torus);
   }
@@ -440,7 +440,7 @@ function buildOrbitalTelemetryBand(
   band.add(ringsGroup);
 
   const spokeVerts: number[] = [];
-  const spokeCount = 48;
+  const spokeCount = 32; // Reduced from 48 for fewer triangles
   for (let i = 0; i < spokeCount; i++) {
     const a = (i / spokeCount) * Math.PI * 2;
     const c = Math.cos(a);
@@ -601,7 +601,6 @@ export function createEarthGlobeAsset(): Object3D {
   root.add(groundTrackLine);
   groundTrackLine.raycast = () => {};
 
-  // Dynamic Sub-Satellite Nadir Pip (glides along ground track in real time)
   const pipMat = new MeshStandardMaterial({
     color: 0x5eead4,
     emissive: 0x14b8a6,

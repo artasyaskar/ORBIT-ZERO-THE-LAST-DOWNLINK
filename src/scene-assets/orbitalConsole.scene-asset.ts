@@ -33,72 +33,73 @@ import {
   mergeStaticMeshesByMaterial,
   taperPlate,
 } from './lib/hardsurface';
+import { TACTICAL_PALETTE, EMISSION_INTENSITIES } from './lib/tacticalPalette';
 
 export function createOrbitalConsoleAsset(): Object3D {
   const root = new Group();
   root.name = 'OrbitalConsole';
 
-  // Aerospace Material Library (distinct metallic/roughness responses)
+  // RC10.0 Tactical Aerospace Material Library (Gen-Z color palette upgrade)
   const hullDarkMat = new MeshStandardMaterial({
-    color: 0x070d18,
+    color: TACTICAL_PALETTE.voidObsidian,
     roughness: 0.38,
     metalness: 0.78,
   });
   const deskDeckMat = hullDarkMat;
   const titaniumRimMat = new MeshStandardMaterial({
-    color: 0x1f2e44,
+    color: TACTICAL_PALETTE.titaniumGray,
     roughness: 0.18,
     metalness: 0.92,
   });
   const gunmetalBezelMat = titaniumRimMat;
   const carbonWellMat = hullDarkMat;
   const cyanAccentMat = new MeshStandardMaterial({
-    color: 0x38bdf8,
-    emissive: 0x0284c7,
-    emissiveIntensity: 0.8,
+    color: TACTICAL_PALETTE.electricCyan,
+    emissive: TACTICAL_PALETTE.electricCyan,
+    emissiveIntensity: EMISSION_INTENSITIES.moderate,
     roughness: 0.25,
     metalness: 0.3,
   });
   const amberInductionMat = new MeshStandardMaterial({
-    color: 0xf59e0b,
-    emissive: 0xb45309,
-    emissiveIntensity: 0.95,
+    color: TACTICAL_PALETTE.tacticalAmber,
+    emissive: TACTICAL_PALETTE.tacticalAmber,
+    emissiveIntensity: EMISSION_INTENSITIES.strong,
     roughness: 0.25,
     metalness: 0.45,
   });
   const copperClampMat = new MeshStandardMaterial({
-    color: 0xd97706,
+    color: TACTICAL_PALETTE.tacticalAmber,
     roughness: 0.28,
     metalness: 0.85,
   });
   const emeraldWaveguideMat = new MeshStandardMaterial({
-    color: 0x10b981,
-    emissive: 0x047857,
-    emissiveIntensity: 0.85,
+    color: TACTICAL_PALETTE.sarEmerald,
+    emissive: TACTICAL_PALETTE.sarEmerald,
+    emissiveIntensity: EMISSION_INTENSITIES.moderate,
     roughness: 0.25,
     metalness: 0.35,
   });
   const coralHazardMat = new MeshStandardMaterial({
-    color: 0xef4444,
-    emissive: 0x991b1b,
-    emissiveIntensity: 0.8,
+    color: TACTICAL_PALETTE.dangerCrimson,
+    emissive: TACTICAL_PALETTE.dangerCrimson,
+    emissiveIntensity: EMISSION_INTENSITIES.moderate,
     roughness: 0.3,
     metalness: 0.3,
   });
   const hazardStripeMat = new MeshStandardMaterial({
-    color: 0xf59e0b,
+    color: TACTICAL_PALETTE.tacticalAmber,
     roughness: 0.42,
     metalness: 0.35,
   });
   const floodLightWarmMat = new MeshStandardMaterial({
     color: 0xffedd5,
-    emissive: 0xf59e0b,
-    emissiveIntensity: 0.95,
+    emissive: TACTICAL_PALETTE.tacticalAmber,
+    emissiveIntensity: EMISSION_INTENSITIES.strong,
     roughness: 0.2,
     metalness: 0.1,
   });
   const conduitMat = new MeshStandardMaterial({
-    color: 0x1e293b,
+    color: TACTICAL_PALETTE.voidObsidian,
     roughness: 0.75,
     metalness: 0.2,
   });
@@ -270,14 +271,14 @@ export function createOrbitalConsoleAsset(): Object3D {
   gimbalGroup.position.set(0, 0.778, -0.02);
 
   const gimbalOuterCollar = new Mesh(
-    new CylinderGeometry(0.215, 0.235, 0.026, 28),
+    new CylinderGeometry(0.215, 0.235, 0.026, 20), // Reduced from 28 segments to 20
     titaniumRimMat,
   );
   gimbalOuterCollar.name = 'GimbalOuterCollar';
   gimbalGroup.add(gimbalOuterCollar);
 
   const gimbalInnerWell = new Mesh(
-    new CylinderGeometry(0.185, 0.175, 0.028, 24),
+    new CylinderGeometry(0.185, 0.175, 0.028, 18), // Reduced from 24 segments to 18
     carbonWellMat,
   );
   gimbalInnerWell.name = 'GimbalInnerWell';

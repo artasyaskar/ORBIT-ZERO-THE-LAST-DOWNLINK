@@ -37,6 +37,7 @@ import {
   Vector2,
   Vector3,
   VisibilityState,
+  Group,
 } from '@iwsdk/core';
 import {
   ConsoleControlNode,
@@ -62,6 +63,7 @@ import {
   SECTOR_GEO_DEFINITIONS,
   latLonToGlobePoint,
 } from '../scene-assets/earthGlobe.scene-asset';
+import { createEarthGlobeEnhancementsOptimized, updateEarthEnhancementsOptimized } from '../scene-assets/earthGlobeEnhancements.optimized';
 import { alignSpan } from '../scene-assets/lib/hardsurface';
 import { VRHandSimulator } from './vrHandSimulator';
 import { OrbitalAudioController, type OrbitalSoundCue } from './orbitalAudio';
@@ -146,6 +148,8 @@ export class MissionControlSystem extends createSystem({
   private readonly beamEnd = new Vector3(0, 1.255, 0.01);
   private readonly worldUp = new Vector3(0, 1, 0);
   private scannerEntity?: Entity;
+  private earthGlobeEnhancements?: Object3D;
+  private enhancementAnimationTime = 0;
   private objectCache = new Map<string, Object3D>();
   private tempDirection = new Vector3();
   private tempTarget = new Vector3();
@@ -220,6 +224,13 @@ export class MissionControlSystem extends createSystem({
     this.cleanupFuncs.push(() => document.removeEventListener('visibilitychange', pauseWhenHidden));
     // 1. Bind NASA Blue Marble 4K textures onto the 3D Earth Globe & Cloud Layer
     this.bindEarthPlanetTextures();
+
+    // 1a. RC10: Mount Tactical Earth Enhancements (storm, lightning, flood over Indus Basin)
+    const globe = this.world.getSceneObject('earth-globe');
+    if (globe) {
+      this.earthGlobeEnhancements = createEarthGlobeEnhancementsOptimized();
+      globe.add(this.earthGlobeEnhancements);
+    }
 
     // 1b. Bind Deep-Space Milky Way Cosmic Skybox Dome
     this.bindCosmicEnvironmentAndTextures();
@@ -398,6 +409,7 @@ export class MissionControlSystem extends createSystem({
         setCameraPreset: (preset: 'HERO' | 'GLOBE' | 'CUBES' | 'CRADLE' | 'DOWNLINK' | 'DEBRIEF') => this.setCameraPreset(preset),
         pause: () => this.togglePause(),
         selectPacket: (id: string) => { this.applyAction({ type: 'SELECT_PACKET', packetId: id }); this.syncAll(); },
+        cycleCube: () => { this.cycleEvidence(); },
         getRuntimeStatus: () => ({ immersive: this.world.renderer.xr.isPresenting, phase: this.engine.getState().phase, caption: this.caption }),
         getControlScreenPosition: (panelId: string, elementId: string) => {
           if (this.world.renderer.xr.isPresenting) return null;
@@ -550,10 +562,20 @@ export class MissionControlSystem extends createSystem({
     delta = Math.min(simulationDelta, 0.1);
     const reducedMotion = this.profile.preferences.reducedMotion;
     if (!reducedMotion && !this.reviewState) this.elapsedTime += delta;
+
+    // RC10: Update Earth Enhancements (storm rotation and lightning pulses)
+    this.enhancementAnimationTime += delta;
+    if (this.earthGlobeEnhancements) {
+      updateEarthEnhancementsOptimized(this.earthGlobeEnhancements as Group, delta, this.enhancementAnimationTime);
+    }
+
     this.animateCubeTransitions(delta);
 
     // Phase 5: In-Engine VR Hand & Ergonomic Simulator
     this.vrHandSimulator.update(delta, this.desktopControls?.getInteractionTargetPoint() ?? null);
+
+    // Desktop Controls frame update (inertial spinning, slerp animations)
+    this.desktopControls?.update(delta);
 
     // Gaze-assisted target acquisition & hands-free dwell selection
     if (this.profile.preferences.gazeAssist && this.frameSnapshot.phase === 'OPERATIONS' && !this.isAnyObjectGrabbed()) {
@@ -625,6 +647,13 @@ export class MissionControlSystem extends createSystem({
           const progress = 1.0 - newTimer / 0.18;
           const depression = reducedMotion ? 0 : Math.sin(progress * Math.PI) * Math.exp(-1.8 * progress);
           cap.position.y = restY - depression * stroke;
+          
+          // Diegetic console vibration pulse during button press (never camera)
+          const consoleObj = this.world.getSceneObject('orbital-console');
+          if (consoleObj && progress < 0.5) {
+            const vibration = Math.sin(progress * Math.PI * 8) * 0.003;
+            consoleObj.position.x += vibration;
+          }
         } else {
           cap.position.y = restY;
           this.padPressTimers.delete(padId);
@@ -632,6 +661,41 @@ export class MissionControlSystem extends createSystem({
         }
       } else if (newTimer <= 0) {
         this.padPressTimers.delete(padId);
+      }
+    }
+
+    // Phase 3 SPRINT 3: Data Cube Internal State Visuals & Compression Animation
+    for (const pkt of this.frameSnapshot.packets) {
+      const cubeEntity = [...this.queries.cubes.entities].find((e) =>
+        e.getValue(EvidenceCubeNode, 'packetId') === pkt.id
+      );
+      if (cubeEntity?.object3D) {
+        const cubeRoot = cubeEntity.object3D;
+        
+        // Update cube internal glow based on confidence state
+        let cubeGlowColor = 0xffffff;
+        if (pkt.confidence === 'CONFIRMED') {
+          cubeGlowColor = 0x00ff66; // Emerald glow
+        } else if (pkt.confidence === 'PROBABLE') {
+          cubeGlowColor = pkt.sensorMode === 'RADAR' ? 0xffb800 : 0xff2a54; // Amber/crimson glitch
+        } else if (pkt.confidence === 'UNVERIFIED') {
+          cubeGlowColor = 0xc0c0c0; // Dimmed gray
+        }
+        
+        const glowCore = cubeRoot.getObjectByName('CubeGlowCore');
+        if (glowCore && glowCore instanceof Mesh && glowCore.material instanceof MeshStandardMaterial) {
+          glowCore.material.emissive.setHex(cubeGlowColor);
+          glowCore.material.emissiveIntensity = pkt.confidence === 'PROBABLE' ? 
+            0.8 + 0.4 * Math.sin(this.elapsedTime * 6) : 1.2; // Pulsing for PROBABLE
+        }
+        
+        // Animate 30% compression shrink when processed in cradle (4.5s → 1.8s transmission)
+        if (pkt.processed && !pkt.queued) {
+          const compressionProgress = Math.min(1, this.elapsedTime * 1.8);
+          cubeRoot.scale.lerp(new Vector3(0.72, 0.72, 0.72), compressionProgress * 0.4);
+        } else {
+          cubeRoot.scale.lerp(new Vector3(1, 1, 1), 0.2);
+        }
       }
     }
 
@@ -1041,6 +1105,11 @@ export class MissionControlSystem extends createSystem({
       if (currentSec !== this.lastDownlinkTickSecond) {
         this.lastDownlinkTickSecond = currentSec;
         this.playCue('DOWNLINK_TICK');
+        // Play tension heartbeat audio during final 3 seconds
+        const remainingSec = nextState.downlinkRemainingSec;
+        if (remainingSec <= 3 && remainingSec > 0) {
+          this.audio.playTensionHeartbeat();
+        }
       }
       const txCount = nextState.packets.filter((p) => p.transmitted).length;
       this.downlinkUiSyncAccumulator += delta;
@@ -1057,6 +1126,13 @@ export class MissionControlSystem extends createSystem({
           this.playCue('HANDSHAKE_CONFIRM');
           if (nextState.debrief && nextState.debrief.totalScore >= nextState.debrief.achievableScore) {
             this.playCue('OPTIMAL_VICTORY');
+            this.audio.playSuccessFanfare();
+            
+            // ZERO PACKET LOSS achievement if all 3 packets transmitted
+            if (nextState.debrief.transmittedPacketIds.length === 3) {
+              this.desktopControls?.triggerAchievement('🛰️ ZERO PACKET LOSS', 'All 3 Verified Packets Delivered', '✨');
+            }
+            
             this.voiceCommander?.trigger('DEBRIEF_VICTORY');
           } else {
             this.playCue('LINK_CUTOFF');
@@ -1804,7 +1880,20 @@ export class MissionControlSystem extends createSystem({
     this.applyAction({ type: 'SELECT_SECTOR', sectorId });
     this.playCue('SELECT_SECTOR');
     this.slerpGlobeToSector(sectorId);
-    this.voiceCommander?.handleSectorSelection(sectorId, this.engine.getState().activeSensorMode);
+    const state = this.engine.getState();
+    this.voiceCommander?.handleSectorSelection(sectorId, state.activeSensorMode);
+    
+    // Tactical coaching: warn if wrong sensor for sector conditions
+    if (sectorId === 'B' && state.activeSensorMode === 'OPTICAL') {
+      this.voiceCommander?.trigger('SECTOR_B_OPTICAL_WARNING');
+    } else if (sectorId === 'B' && state.activeSensorMode === 'RADAR') {
+      this.voiceCommander?.trigger('SECTOR_B_SAR_OPTIMAL');
+    } else if (sectorId === 'C' && state.activeSensorMode === 'RADAR') {
+      this.voiceCommander?.trigger('SECTOR_C_SAR_WARNING');
+    } else if (sectorId === 'C' && state.activeSensorMode === 'OPTICAL') {
+      this.voiceCommander?.trigger('SECTOR_C_OPTICAL_OPTIMAL');
+    }
+    
     this.syncAll();
   }
 
@@ -1833,6 +1922,15 @@ export class MissionControlSystem extends createSystem({
       this.scanBeamSectorId = this.engine.getState().selectedSectorId;
       this.scanBeamMode = mode;
       this.playCue(mode === 'OPTICAL' ? 'SCAN_OPTICAL' : 'SCAN_RADAR');
+      this.audio.playSubBassPulse();
+      
+      // Achievement triggers
+      if (state.selectedSectorId === 'B' && mode === 'RADAR') {
+        this.desktopControls?.triggerAchievement('⚡ CLOUD PIERCER', '5.4 GHz Microwave Backscatter Verified', '🔴');
+      } else if (state.selectedSectorId === 'C' && mode === 'OPTICAL') {
+        this.desktopControls?.triggerAchievement('🔭 SUB-METER LOCK', '0.75m GSD Zero Multipath Glare', '🟢');
+      }
+      
       this.voiceCommander?.trigger('SCAN_ACQUIRED');
 
       // Immediately illuminate 3D observation swath cone
@@ -1856,6 +1954,15 @@ export class MissionControlSystem extends createSystem({
       this.cradlePulseTimer = 0.65;
       this.playCue('PROCESS_SUCCESS');
       this.audio.playCompressionChirp();
+      
+      // Check if all packets fit now (Knapsack Optimizer achievement)
+      const nextState = this.engine.getState();
+      const queuedPackets = nextState.packets.filter((p) => nextState.queuePacketIds.includes(p.id));
+      const totalTx = queuedPackets.reduce((acc, p) => acc + p.transmitSec, 0);
+      if (totalTx <= nextState.downlinkWindowSec && queuedPackets.length === 3) {
+        this.desktopControls?.triggerAchievement('🧠 KNAPSACK OPTIMIZER', `13.0s → ${totalTx.toFixed(1)}s AI Feature Extraction`, '⚙️');
+      }
+      
       this.voiceCommander?.trigger('PROCESS_SUCCESS');
     } else {
       this.playCue('ERROR_REJECT');
@@ -1876,6 +1983,9 @@ export class MissionControlSystem extends createSystem({
         slotIndex: preferredSlotIndex,
       });
       this.playCue(res.ok ? 'QUEUE_SLOT' : 'ERROR_REJECT');
+      if (res.ok) {
+        this.audio.playMagneticSnap(); // Tactile magnetic dock snap
+      }
       const nextState = this.engine.getState();
       if (nextState.downlinkCommittedSec > nextState.downlinkWindowSec + 0.01) {
         this.voiceCommander?.trigger('QUEUE_OVERFLOW');
@@ -1928,6 +2038,7 @@ export class MissionControlSystem extends createSystem({
       this.lastDownlinkTickSecond = -1;
       this.playCue('SOLENOID_LATCH');
       this.playCue('DOWNLINK_COMMIT');
+      this.audio.playLaserCharge(); // High-energy laser charge buildup
       this.voiceCommander?.trigger('DOWNLINK_TRANSMIT');
 
       // Immediately activate live S-Band microwave uplink beam
@@ -2137,8 +2248,14 @@ export class MissionControlSystem extends createSystem({
   private cycleEvidence(): void {
     const state = this.engine.getState();
     if (!state.packets.length) return;
+    
+    // Find the current position in the packets array
     const index = state.packets.findIndex((packet) => packet.id === state.selectedPacketId);
-    this.applyAction({ type: 'SELECT_PACKET', packetId: state.packets[(index + 1) % state.packets.length].id });
+    // If not found (empty selection), start from 0; otherwise move to next
+    const nextIndex = index < 0 ? 0 : (index + 1) % state.packets.length;
+    
+    const nextPacket = state.packets[nextIndex];
+    this.applyAction({ type: 'SELECT_PACKET', packetId: nextPacket.id });
     this.syncAll();
   }
 

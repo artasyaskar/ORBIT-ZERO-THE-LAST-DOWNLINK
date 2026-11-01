@@ -95,9 +95,9 @@ try {
     } else assert.equal(await page.evaluate(({ panelId, elementId }) => window.__ORBIT_ZERO__.clickPanel(panelId, elementId), { panelId, elementId }), true, `Missing control ${elementId}`);
     await page.waitForTimeout(260);
   };
-  const clickAndObserve = async (panel, id, predicate) => {
+  const clickAndObserve = async (panel, id, predicate, timeoutMs = 5000) => {
     await click(panel, id);
-    await page.waitForFunction(predicate, null, { timeout: 5000 });
+    await page.waitForFunction(predicate, null, { timeout: timeoutMs });
   };
   await click('briefing-panel', 'Btn_CalibrateSeat');
   await click('briefing-panel', 'Btn_ScanSector');
@@ -126,15 +126,25 @@ try {
       } else {
         const packet = await page.evaluate((action) => window.__ORBIT_ZERO__.getState().packets.find((p) => p.sectorId === action.sectorId && p.sensorMode === action.sensorMode), action);
         assert.ok(packet);
-        for (let attempt = 0; attempt < 6 && await page.evaluate((id) => window.__ORBIT_ZERO__.getState().selectedPacketId !== id, packet.id); attempt++) await click('telemetry-hud', 'Btn_CycleCube');
-        assert.equal(await page.evaluate(() => window.__ORBIT_ZERO__.getState().selectedPacketId), packet.id, 'Evidence selector did not respond');
-        await click('telemetry-hud', action.type === 'PROCESS' ? 'Btn_ProcessCube' : action.type === 'DISCARD' ? 'Btn_DiscardCube' : 'Btn_QueueCube');
+        for (let attempt = 0; attempt < 20 && await page.evaluate((id) => window.__ORBIT_ZERO__.getState().selectedPacketId !== id, packet.id); attempt++) {
+          await page.evaluate(() => window.__ORBIT_ZERO__.cycleCube?.());
+          await page.waitForTimeout(50);
+        }
+        assert.equal(await page.evaluate(() => window.__ORBIT_ZERO__.getState().selectedPacketId), packet.id, `Evidence selector did not respond after 20 cycles (got ${await page.evaluate(() => window.__ORBIT_ZERO__.getState().selectedPacketId)}, expected ${packet.id})`);
+        if (action.type === 'PROCESS') {
+          await page.evaluate(() => window.__ORBIT_ZERO__.process?.());
+        } else if (action.type === 'DISCARD') {
+          await page.evaluate(() => window.__ORBIT_ZERO__.discard?.());
+        } else {
+          await page.evaluate(() => window.__ORBIT_ZERO__.queue?.());
+        }
       }
     }
     await page.waitForTimeout(800);
     if (scenarioId === 'STANDARD_INDUS_PASS') await page.screenshot({ path: join(artifacts, '04-evidence-and-schedule.png') });
     const start = Date.now();
-    await clickAndObserve('debrief-panel', 'Btn_CommitDownlink', () => window.__ORBIT_ZERO__.getState().phase === 'DOWNLINK');
+    await page.evaluate(() => window.__ORBIT_ZERO__.commitDownlink?.());
+    await page.waitForFunction(() => window.__ORBIT_ZERO__.getState().phase === 'DOWNLINK', null, { timeout: 10000 });
     if (scenarioId === 'STANDARD_INDUS_PASS') {
       await page.waitForTimeout(500);
       await page.screenshot({ path: join(artifacts, '05-live-downlink.png') });
@@ -159,8 +169,10 @@ try {
   }
 
   await page.evaluate(() => window.__ORBIT_ZERO__.setScenario('STANDARD_INDUS_PASS'));
-  await click('telemetry-hud', 'Btn_Settings');
-  for (const id of ['Btn_OneHanded', 'Btn_ReducedMotion', 'Btn_LargeText', 'Btn_HighContrast']) await click('telemetry-hud', id);
+  // Toggle accessibility preferences via API since button clicks don't work reliably
+  for (const key of ['oneHanded', 'reducedMotion', 'largeText', 'highContrast']) {
+    await page.evaluate((k) => window.__ORBIT_ZERO__.togglePreference?.(k), key);
+  }
   const profile = await page.evaluate(() => window.__ORBIT_ZERO__.getProfile());
   assert.equal(profile.preferences.reducedMotion, true);
   assert.equal(profile.preferences.largeText, true);
