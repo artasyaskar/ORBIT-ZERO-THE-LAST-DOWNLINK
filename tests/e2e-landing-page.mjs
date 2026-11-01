@@ -135,7 +135,7 @@ try {
   const supportingLine = await page.locator('.oz-supporting-line').innerText();
   assert.equal(supportingLine.trim(), 'A SATELLITE OPERATIONS EXPERIENCE');
 
-  const missionText = await page.locator('.oz-mission-brief-card').innerText();
+  const missionText = await page.locator('.oz-hero-welcome').innerText();
   assert.ok(missionText.includes('Welcome to ORBIT ZERO.'), 'Mission text must include greeting');
   assert.ok(missionText.includes('every observation matters'), 'Mission text must include observation premise');
   assert.ok(missionText.includes('Every decision has a consequence'), 'Mission text must include consequence premise');

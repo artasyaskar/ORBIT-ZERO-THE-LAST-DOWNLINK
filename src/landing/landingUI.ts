@@ -1,13 +1,12 @@
 /**
  * ORBIT ZERO: THE LAST DOWNLINK
- * Cinematic Landing UI Layer (RC9.2 Polish)
+ * Cinematic Landing UI Layer (RC9.3 Polish)
  *
- * Implements a high-precision military/aerospace tactical operations interface:
- * - Strictly zero generic "vibe-coded" aesthetics (no emojis, no generic SaaS cards).
- * - Vector SVG tactical displays and spatial cockpit HUD glyphs.
- * - Monospace telemetry timestamps, mission coordinates, and classified directive styling.
- * - Ergonomic navigation with high-visibility, 100% reliable Return to Orbit action.
- * - Interactive audio telemetry status toggle.
+ * Grounded in authentic aerospace command ergonomics:
+ * - Clean, non-boxed, elegant floating welcome typography (zero bulky dark containers, zero + marks).
+ * - Compact, centered mode selection cards with modern spatial glassmorphism.
+ * - Prominent, 100% reliable "RETURN TO ORBIT VIEW" navigation.
+ * - High-contrast tactile action buttons.
  */
 
 export interface LandingUIEvents {
@@ -87,14 +86,10 @@ export class LandingUI {
 
           <p class="oz-supporting-line">A SATELLITE OPERATIONS EXPERIENCE</p>
 
-          <div class="oz-mission-brief-card">
-            <div class="oz-card-corner oz-corner-tl">+</div>
-            <div class="oz-card-corner oz-corner-tr">+</div>
-            <div class="oz-card-corner oz-corner-bl">+</div>
-            <div class="oz-card-corner oz-corner-br">+</div>
-            <div class="oz-card-stamp">CLASSIFIED OPERATIONAL DIRECTIVE // ADVISORY-2026</div>
-            <p class="oz-opening-msg">Welcome to ORBIT ZERO.</p>
-            <p class="oz-mission-text">
+          <!-- CLEAN, ELEGANT FLOATING QUOTE (NO BULKY DARK BOX, NO + MARKS) -->
+          <div class="oz-hero-welcome">
+            <p class="oz-welcome-line">Welcome to ORBIT ZERO.</p>
+            <p class="oz-welcome-text">
               Beyond Earth, every observation matters.<br />
               Every decision has a consequence.
             </p>
@@ -102,10 +97,8 @@ export class LandingUI {
 
           <div class="oz-hero-cta-group">
             <button id="btn-enter-experience" class="oz-btn-primary" autofocus>
-              <span class="oz-btn-bracket">[</span>
               <span class="oz-btn-text">ENTER EXPERIENCE</span>
               <span class="oz-btn-arrow">→</span>
-              <span class="oz-btn-bracket">]</span>
             </button>
           </div>
         </div>
@@ -122,9 +115,10 @@ export class LandingUI {
       <!-- SCREEN 2: EXPERIENCE SELECTION -->
       <section id="oz-selection-screen" class="oz-screen oz-screen-hidden" aria-hidden="true">
         <div class="oz-selection-content">
+          <!-- PROMINENT BACK NAVIGATION (ALWAYS VISIBLE & UNBLOCKED) -->
           <div class="oz-selection-nav">
-            <button id="btn-back-orbit" class="oz-btn-back" title="Return to Hero Screen">
-              <span class="oz-nav-arrow">◀</span>
+            <button id="btn-back-orbit" class="oz-btn-back" title="Return to Orbit View">
+              <span class="oz-nav-arrow">←</span>
               <span class="oz-nav-text">RETURN TO ORBIT VIEW</span>
             </button>
           </div>
@@ -135,68 +129,41 @@ export class LandingUI {
           </div>
 
           <div class="oz-cards-grid">
-            <!-- OPTION 1: DESKTOP TACTICAL WORKSTATION -->
+            <!-- OPTION 1: DESKTOP WORKSTATION (COMPACT & SLEEK) -->
             <div class="oz-card oz-card-desktop" id="card-desktop" tabindex="0">
-              <div class="oz-card-corner oz-corner-tl">+</div>
-              <div class="oz-card-corner oz-corner-tr">+</div>
-              <div class="oz-card-corner oz-corner-bl">+</div>
-              <div class="oz-card-corner oz-corner-br">+</div>
-              <div class="oz-card-topbar">
-                <span class="oz-card-proto">PROTOCOL: DESKTOP_WORKSTATION</span>
-                <span class="oz-card-stat">60 FPS // LOW-LATENCY</span>
-              </div>
-              <div class="oz-card-icon-wrap">
-                <svg class="oz-card-svg" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.8">
-                  <rect x="6" y="8" width="36" height="24" rx="2" stroke="currentColor"/>
-                  <line x1="6" y1="26" x2="42" y2="26" stroke="rgba(0,240,255,0.4)"/>
-                  <path d="M12 16h10M12 21h16M32 16h4"/>
-                  <path d="M18 32l-3 8h18l-3-8"/>
-                  <circle cx="34" cy="12" r="1.5" fill="currentColor"/>
-                </svg>
+              <div class="oz-card-header">
+                <span class="oz-card-badge">DESKTOP WORKSTATION</span>
+                <span class="oz-card-fps">60 FPS</span>
               </div>
               <h3 class="oz-card-title">DESKTOP EXPERIENCE</h3>
               <p class="oz-card-desc">
-                High-precision orbital sensor triage via 3D mouse raycasting and physical console instrumentation.
+                Operate the satellite mission using keyboard and mouse with precision 3D raycasting.
               </p>
-              <ul class="oz-card-features">
-                <li><span class="oz-tick">[+]</span> Direct 3D Mouse Raycasting & Pick Controls</li>
-                <li><span class="oz-tick">[+]</span> Magnetic Snap Cradle & Physical Unqueue</li>
-                <li><span class="oz-tick">[+]</span> Real-Time Aerospace Telemetry HUD</li>
-                <li><span class="oz-tick">[+]</span> 100% Playable on Standard Laptops / PCs</li>
-              </ul>
+              <div class="oz-card-pills">
+                <span class="oz-pill">3D RAYCAST</span>
+                <span class="oz-pill">SNAP CRADLE</span>
+                <span class="oz-pill">TELEMETRY HUD</span>
+              </div>
               <button id="btn-play-desktop" class="oz-btn-card oz-btn-desktop">
                 PLAY ON DESKTOP
               </button>
             </div>
 
-            <!-- OPTION 2: VR SPATIAL COCKPIT -->
+            <!-- OPTION 2: VR SPATIAL COCKPIT (COMPACT & SLEEK) -->
             <div class="oz-card oz-card-vr" id="card-vr" tabindex="0">
-              <div class="oz-card-corner oz-corner-tl">+</div>
-              <div class="oz-card-corner oz-corner-tr">+</div>
-              <div class="oz-card-corner oz-corner-bl">+</div>
-              <div class="oz-card-corner oz-corner-br">+</div>
-              <div class="oz-card-topbar">
-                <span class="oz-card-proto">PROTOCOL: SPATIAL_COCKPIT</span>
-                <span class="oz-card-stat">90 FPS // WEBAUDIO DSP</span>
-              </div>
-              <div class="oz-card-icon-wrap">
-                <svg class="oz-card-svg" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.8">
-                  <path d="M8 18c0-3.3 2.7-6 6-6h20c3.3 0 6 2.7 6 6v10c0 4.4-3.6 8-8 8h-4l-4-3-4 3h-4c-4.4 0-8-3.6-8-8V18z"/>
-                  <path d="M10 20c3-2 8-2 11 0M27 20c3-2 8-2 11 0"/>
-                  <circle cx="16" cy="24" r="2.5" fill="currentColor"/>
-                  <circle cx="32" cy="24" r="2.5" fill="currentColor"/>
-                </svg>
+              <div class="oz-card-header">
+                <span class="oz-card-badge">SPATIAL COCKPIT</span>
+                <span class="oz-card-fps">90 FPS</span>
               </div>
               <h3 class="oz-card-title">VR EXPERIENCE</h3>
               <p class="oz-card-desc">
-                Enter the orbital cockpit through an immersive WebXR spatial session on Meta Quest Browser.
+                Immerse yourself inside the orbital command module on Meta Quest Browser.
               </p>
-              <ul class="oz-card-features">
-                <li><span class="oz-tick">[+]</span> Hands-First 1:1 Pinch & Poke Interaction</li>
-                <li><span class="oz-tick">[+]</span> Seated Airplane-Seat Ergonomics (0.35–0.65m)</li>
-                <li><span class="oz-tick">[+]</span> Volumetric 3D Holographic Telemetry</li>
-                <li><span class="oz-tick">[+]</span> Meta Quest Browser & Horizon OS Native</li>
-              </ul>
+              <div class="oz-card-pills">
+                <span class="oz-pill">HAND TRACKING</span>
+                <span class="oz-pill">PINCH & POKE</span>
+                <span class="oz-pill">SEATED COCKPIT</span>
+              </div>
               <button id="btn-enter-vr" class="oz-btn-card oz-btn-vr">
                 ENTER VR
               </button>
@@ -204,13 +171,9 @@ export class LandingUI {
             </div>
           </div>
 
-          <!-- VR ADVISORY MODAL / NOTIFICATION -->
+          <!-- VR ADVISORY MODAL -->
           <div id="oz-vr-advisory" class="oz-advisory oz-hidden">
             <div class="oz-advisory-content">
-              <div class="oz-card-corner oz-corner-tl">+</div>
-              <div class="oz-card-corner oz-corner-tr">+</div>
-              <div class="oz-card-corner oz-corner-bl">+</div>
-              <div class="oz-card-corner oz-corner-br">+</div>
               <h4>📡 WEBXR HEADSET ADVISORY</h4>
               <p id="oz-vr-advisory-text">
                 WebXR Immersive Session is not detected on this browser. To play in VR, please open this link inside the <b>Meta Quest Browser</b> on your Quest 2/3/3S/Pro headset.

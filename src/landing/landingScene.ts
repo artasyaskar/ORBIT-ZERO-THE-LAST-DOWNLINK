@@ -167,9 +167,9 @@ export class LandingScene {
     const skyMat = new MeshBasicMaterial({
       map: skyTex,
       side: BackSide,
-      color: 0x7788aa, // Subtle dimming so it feels distant and mysterious
+      color: 0x223555, // Clean deep celestial indigo-space tint (filters out magenta noise)
       transparent: true,
-      opacity: 0.65,
+      opacity: 0.38,
     });
 
     this.skyboxMesh = new Mesh(skyGeo, skyMat);
