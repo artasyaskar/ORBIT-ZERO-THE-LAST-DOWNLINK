@@ -82,8 +82,8 @@ export class VRHandSimulator {
     this.rightHand.rotation.set(-0.2, -0.25, 0.1);
     this.root.add(this.rightHand);
 
-    this.rightIndexTip = this.rightHand.getObjectByName('IndexTip');
-    this.rightThumbTip = this.rightHand.getObjectByName('ThumbTip');
+    this.rightIndexTip = this.rightHand.getObjectByName('IndexTip') ?? null;
+    this.rightThumbTip = this.rightHand.getObjectByName('ThumbTip') ?? null;
 
     // Never intercept mouse or controller raycasts
     this.root.traverse((o) => {

@@ -464,6 +464,14 @@ export class MissionControlSystem extends createSystem({
           const globe = this.world.getSceneObject('earth-globe');
           return globe ? globe.position.z : -0.58;
         },
+        resetGlobeFocalDistance: () => {
+          this.targetFocalDistance = -0.58;
+          this.globeFocalDistance = -0.58;
+          const globe = this.world.getSceneObject('earth-globe');
+          if (globe) {
+            globe.position.z = -0.58;
+          }
+        },
         getDrawCalls: () => this.world.renderer.info.render.calls,
         getTriangles: () => this.world.renderer.info.render.triangles,
         setScenario: (id: MissionScenarioId) => {

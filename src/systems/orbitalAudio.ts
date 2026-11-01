@@ -76,9 +76,18 @@ export class OrbitalAudioController {
     if (!this.ctx) {
       try {
         this.ctx = new AudioCtx();
+        // Master Dynamics Compressor / Safety Brickwall Limiter prevents digital clipping (0 dBFS)
+        const limiter = this.ctx.createDynamicsCompressor();
+        limiter.threshold.value = -2.5;
+        limiter.knee.value = 4.0;
+        limiter.ratio.value = 16.0;
+        limiter.attack.value = 0.002;
+        limiter.release.value = 0.040;
+        limiter.connect(this.ctx.destination);
+
         this.master = this.ctx.createGain();
         this.master.gain.value = this.volume;
-        this.master.connect(this.ctx.destination);
+        this.master.connect(limiter);
       } catch {
         return null;
       }
