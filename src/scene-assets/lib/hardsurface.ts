@@ -617,6 +617,7 @@ export function mergeStaticMeshesByMaterial(
 
   root.traverse((obj) => {
     if (!(obj instanceof Mesh)) return;
+    if (!obj.visible) return;
     if (keepSet.has(obj.name)) return;
     if (Array.isArray(obj.material)) return;
     const list = byMat.get(obj.material) ?? [];

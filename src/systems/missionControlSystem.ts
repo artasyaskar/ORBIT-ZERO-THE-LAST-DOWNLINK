@@ -75,9 +75,9 @@ import {
 import type { ActionResult, MissionAction, MissionSolution } from '../mission/types';
 
 const RAW_TRAY_POSITIONS: [number, number, number][] = [
-  [-0.46, 0.79, -0.43],
-  [-0.37, 0.79, -0.43],
-  [-0.28, 0.79, -0.43],
+  [-0.10, 0.79, -0.44],
+  [0.00, 0.79, -0.44],
+  [0.10, 0.79, -0.44],
 ];
 
 const DOWNLINK_BAY_POSITIONS: [number, number, number][] = [
@@ -88,15 +88,15 @@ const DOWNLINK_BAY_POSITIONS: [number, number, number][] = [
 
 const STANDBY_CUBE_COLORS = [0x38bdf8, 0xf59e0b, 0x10b981];
 
-const SCANNER_HOME_POSITION = new Vector3(-0.48, 0.79, -0.54);
+const SCANNER_HOME_POSITION = new Vector3(0.66, 0.71, -0.22);
 const GLOBE_CENTER_WORLD = new Vector3(0, 0.98, -0.58);
 const PROCESS_CRADLE_WORLD = new Vector3(0.24, 0.79, -0.55);
 const DISCARD_CHUTE_WORLD = new Vector3(0.45, 0.79, -0.44);
 const DOWNLINK_BAY_CENTER_WORLD = new Vector3(0.39, 0.79, -0.46);
-const RAW_TRAY_CENTER_WORLD = new Vector3(-0.37, 0.79, -0.43);
+const RAW_TRAY_CENTER_WORLD = new Vector3(0.0, 0.79, -0.44);
 
-// Target seated eye position in world space (0.32m back from origin, 1.25m seated eye height)
-const SEATED_TARGET_HEAD_WORLD = new Vector3(0, 1.25, 0.32);
+// Target seated eye position in world space (0.44m back from origin, 1.20m seated eye height)
+const SEATED_TARGET_HEAD_WORLD = new Vector3(0, 1.20, 0.44);
 
 interface CubeCanvasBinding {
   canvas: HTMLCanvasElement;
@@ -163,6 +163,7 @@ export class MissionControlSystem extends createSystem({
   private briefingPanel?: UIKitMLAsset;
   private telemetryPanel?: UIKitMLAsset;
   private debriefPanel?: UIKitMLAsset;
+  public spatialHudVisible = false;
 
   // Desktop Controls & First-Time Player Experience
   private desktopControls?: DesktopControlsManager;
@@ -389,6 +390,7 @@ export class MissionControlSystem extends createSystem({
       setPinching: (pinching: boolean) => this.vrHandSimulator.setPinching(pinching),
       setPoking: (poking: boolean) => this.vrHandSimulator.setPoking(poking),
       getInteractionTargetPoint: () => this.desktopControls?.getInteractionTargetPoint() ?? null,
+      toggleSpatialHud: () => this.toggleSpatialHud(),
       syncAll: () => this.syncAll(),
     });
     this.cleanupFuncs.push(() => this.desktopControls?.dispose());
@@ -460,6 +462,8 @@ export class MissionControlSystem extends createSystem({
           return this.engine.getState();
         },
         restart: () => this.handleRestartMission(),
+        toggleSpatialHud: (active?: boolean) => this.toggleSpatialHud(active),
+        getSpatialHudVisible: () => this.spatialHudVisible,
         calibrateSeatedView: () => this.calibrateSeatedView(),
         getSceneObject: (id: string) => this.world.getSceneObject(id),
         trigger3DNode: (nodeId: string) => this.handleTrigger3DNodeById(nodeId),
@@ -545,6 +549,9 @@ export class MissionControlSystem extends createSystem({
         },
       };
     }
+
+    // Adopt panoramic hero cockpit perspective on startup
+    this.setCameraPreset('HERO');
 
     // Trigger Commander ARIA-7 Opening Tactical Pass Briefing
     window.setTimeout(() => {
@@ -815,6 +822,20 @@ export class MissionControlSystem extends createSystem({
       if (emitter instanceof Mesh && emitter.material instanceof MeshStandardMaterial) {
         emitter.material.emissiveIntensity = 0.9 + (metrics.isSpeaking ? 0.8 * metrics.intensity : 0.12 * Math.sin(this.elapsedTime * 3));
       }
+
+      // Animate 3D Audio Spectrum Waveform bars beside ARIA's head (Concept Image 1 Match)
+      const waveformObj = avatarObj.getObjectByName('AriaWaveform3D');
+      if (waveformObj) {
+        for (let i = 0; i < 18; i++) {
+          const bar = waveformObj.getObjectByName(`AriaWaveBar_${i}`);
+          if (bar) {
+            const wave = metrics.isSpeaking
+              ? 0.4 + 0.6 * Math.abs(Math.sin(this.elapsedTime * 14 + i * 0.85)) * metrics.intensity
+              : 0.2 + 0.12 * Math.sin(this.elapsedTime * 2.5 + i * 0.4);
+            bar.scale.y = Math.max(0.25, wave * 2.4);
+          }
+        }
+      }
     }
 
     const globe = this.world.getSceneObject('earth-globe');
@@ -872,6 +893,28 @@ export class MissionControlSystem extends createSystem({
       ) {
         selectedRibbon.material.emissiveIntensity =
           1.45 + 0.45 * Math.sin(this.elapsedTime * 4.5);
+      }
+
+      // Update & animate cinematic targeting reticle on globe surface (Concept Image 2)
+      const activeReticle = globe.getObjectByName('ActiveSectorReticleGroup');
+      if (activeReticle) {
+        const hasSelected = this.desktopControls?.hasSelectedSector() ?? true;
+        activeReticle.visible = hasSelected;
+        if (hasSelected) {
+        const sectorDef = SECTOR_GEO_DEFINITIONS[selectedId];
+        if (sectorDef) {
+          const reticlePos = latLonToGlobePoint(
+            sectorDef.centerLatLon[0],
+            sectorDef.centerLatLon[1],
+            GLOBE_RADIUS * 1.018,
+          );
+          activeReticle.position.copy(reticlePos);
+          const normal = reticlePos.clone().normalize();
+          activeReticle.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), normal);
+          const pulseScale = 1.0 + 0.06 * Math.sin(this.elapsedTime * 4.0);
+          activeReticle.scale.set(pulseScale, pulseScale, pulseScale);
+          }
+        }
       }
 
       // Animate Sub-Satellite Nadir Pip gliding along ground track over the Indus Basin
@@ -948,12 +991,8 @@ export class MissionControlSystem extends createSystem({
             swathCone.material.opacity = opacity;
             swathCone.visible = true;
           } else {
-            // Ambient observation swath cone gently tracking the active sector
-            const isOptical = this.engine.getState().activeSensorMode === 'OPTICAL';
-            const beamHex = isOptical ? 0x0284c7 : 0xd97706;
-            swathCone.material.color.setHex(beamHex);
-            swathCone.material.opacity = 0.12 + 0.05 * Math.sin(this.elapsedTime * 2.8);
-            swathCone.visible = true;
+            // Swath cone is only visible during active pulse scan
+            swathCone.visible = false;
           }
         } else {
           swathCone.visible = false;
@@ -979,30 +1018,23 @@ export class MissionControlSystem extends createSystem({
         epsHeartbeat.material.emissiveIntensity = 0.5 + 0.3 * Math.sin(this.elapsedTime * 3.14);
       }
 
-      // Continuous 3D Low-Earth-Orbit Trajectory around Tactical Earth Globe (R = 0.285m, ~52° inclination pass)
-      const orbitSpeed = reducedMotion ? 0.03 : 0.12;
-      const orbitAngle = (this.elapsedTime * orbitSpeed) % (Math.PI * 2);
-      const cosA = Math.cos(orbitAngle);
-      const sinA = Math.sin(orbitAngle);
-      const rOrbit = 0.285;
-
-      // Ascending orbital trajectory over Pakistan / Indus Basin theater:
-      const satX = GLOBE_CENTER_WORLD.x + rOrbit * cosA * 0.94;
-      const satY = GLOBE_CENTER_WORLD.y + 0.10 + rOrbit * sinA * 0.45; // [0.95m to 1.23m], clear of desk
-      const satZ = GLOBE_CENTER_WORLD.z + rOrbit * sinA * 0.78;
+      // Starboard (Right) Window Flight Locus (Concept Images 1 & 2):
+      // Satellite cruises comfortably inside the right window without obscuring the central Earth globe
+      const satBaseX = 0.70;
+      const satBaseY = 1.28;
+      const satBaseZ = -0.96;
+      const bobTime = this.elapsedTime * (reducedMotion ? 0.3 : 0.65);
+      const satX = satBaseX + Math.sin(bobTime * 0.5) * 0.04;
+      const satY = satBaseY + Math.cos(bobTime * 0.8) * 0.025;
+      const satZ = satBaseZ + Math.cos(bobTime * 0.5) * 0.035;
       cubesat.position.set(satX, satY, satZ);
 
-      // Active ADCS Attitude: Nadir instruments (+Z bulkhead) target Earth Globe center
-      const awayFromGlobe = this.tempVec.copy(cubesat.position).sub(GLOBE_CENTER_WORLD).multiplyScalar(2).add(cubesat.position);
-      cubesat.lookAt(awayFromGlobe);
-
-      // Add dynamic ADCS slewing bias toward the currently active target sector
-      const sectorCfg = getScenarioSector(this.frameSnapshot.scenarioId, this.frameSnapshot.selectedSectorId);
-      if (sectorCfg) {
-        const [nx, ny] = sectorCfg.globeNormalizedPosition;
-        cubesat.rotation.z += (nx * 0.12);
-        cubesat.rotation.x += (ny * 0.08);
-      }
+      // Attitude: Tilted gracefully displaying gold Kapton foil, solar arrays, and communications antenna
+      cubesat.rotation.set(
+        0.18 + Math.sin(bobTime * 0.4) * 0.05,
+        -0.62 + Math.cos(bobTime * 0.3) * 0.06,
+        -0.12 + Math.sin(bobTime * 0.6) * 0.04,
+      );
     }
 
     // Live Proximity Aiming Laser & Target Reticle Lock when scanner wand is held
@@ -1379,9 +1411,28 @@ export class MissionControlSystem extends createSystem({
         milkyWayTex.colorSpace = SRGBColorSpace;
         milkyWayTex.needsUpdate = true;
         skyDome.material.map = milkyWayTex;
-        skyDome.material.color.setHex(0xffffff);
-        skyDome.material.opacity = 0.92;
+        skyDome.material.color.setHex(0x223555);
+        skyDome.material.opacity = 0.42;
         skyDome.material.needsUpdate = true;
+      }
+    }
+
+    const earthAlbedoTex = AssetManager.getTexture('earth-albedo-tex');
+    const earthNormalTex = AssetManager.getTexture('earth-normal-tex');
+    const earthSpecTex = AssetManager.getTexture('earth-specular-tex');
+    const planetVista = consoleObj.getObjectByName('StarboardPlanetaryHorizonVista');
+    if (planetVista instanceof Mesh && (planetVista.material instanceof MeshStandardMaterial || planetVista.material instanceof MeshBasicMaterial)) {
+      if (earthAlbedoTex) {
+        earthAlbedoTex.colorSpace = SRGBColorSpace;
+        earthAlbedoTex.needsUpdate = true;
+        planetVista.material.map = earthAlbedoTex;
+        if (planetVista.material instanceof MeshStandardMaterial) {
+          if (earthNormalTex) planetVista.material.normalMap = earthNormalTex;
+          if (earthSpecTex) planetVista.material.roughnessMap = earthSpecTex;
+        }
+        planetVista.material.color.setHex(0xffffff);
+        planetVista.material.opacity = 1.0;
+        planetVista.material.needsUpdate = true;
       }
     }
   }
@@ -1835,6 +1886,30 @@ export class MissionControlSystem extends createSystem({
     bindClick(this.debriefPanel, 'Btn_NextMission', () => this.nextMission());
     bindClick(this.debriefPanel, 'Btn_DailyPass', () => this.startDailyPass());
     bindClick(this.debriefPanel, 'Btn_ReplayDecision', () => this.cycleReplay());
+
+    this.syncSpatialPanelsVisibility();
+  }
+
+  public toggleSpatialHud(active?: boolean): boolean {
+    this.spatialHudVisible = typeof active === 'boolean' ? active : !this.spatialHudVisible;
+    this.syncSpatialPanelsVisibility();
+    return this.spatialHudVisible;
+  }
+
+  public syncSpatialPanelsVisibility(): void {
+    const isXRorIWER = Boolean((window as any).__ORBIT_IWER__) || this.world.renderer.xr.isPresenting;
+    const show = isXRorIWER || this.spatialHudVisible;
+    const isDebrief = this.engine.getState().phase === 'DEBRIEF';
+
+    if (this.briefingPanel) {
+      this.briefingPanel.visible = show;
+    }
+    if (this.telemetryPanel) {
+      this.telemetryPanel.visible = show;
+    }
+    if (this.debriefPanel) {
+      this.debriefPanel.visible = show || isDebrief;
+    }
   }
 
   public rotateGlobe(deltaYaw: number, deltaPitch: number): void {
@@ -1877,6 +1952,7 @@ export class MissionControlSystem extends createSystem({
   }
 
   private handleSelectSector(sectorId: SectorId): void {
+    this.desktopControls?.onSectorSelected(sectorId);
     this.applyAction({ type: 'SELECT_SECTOR', sectorId });
     this.playCue('SELECT_SECTOR');
     this.slerpGlobeToSector(sectorId);
@@ -2173,7 +2249,10 @@ export class MissionControlSystem extends createSystem({
       });
     }
     const scanner = this.world.getSceneObject('scanner-tool');
-    SCANNER_HOME_POSITION.x = preferences.dominantHand === 'LEFT' ? -0.48 : 0.12;
+    SCANNER_HOME_POSITION.x = preferences.dominantHand === 'LEFT' ? -0.66 : 0.66;
+    SCANNER_HOME_POSITION.z = -0.22;
+    SCANNER_HOME_POSITION.y = 0.71;
+    SCANNER_HOME_POSITION.z = -0.35;
     const holster = this.world.getSceneObject('orbital-console')?.getObjectByName('ScannerHolster');
     if (holster) holster.position.x = SCANNER_HOME_POSITION.x;
     if (scanner && !this.isAnyObjectGrabbed()) scanner.position.copy(SCANNER_HOME_POSITION);
@@ -2228,7 +2307,7 @@ export class MissionControlSystem extends createSystem({
   public setCameraPreset(preset: 'HERO' | 'GLOBE' | 'CUBES' | 'CRADLE' | 'DOWNLINK' | 'DEBRIEF'): void {
     if (this.world.renderer.xr.isPresenting) return;
     const presets: Record<string, { pos: [number, number, number]; target: [number, number, number]; fov: number }> = {
-      HERO: { pos: [0, 1.25, 0.34], target: [0, 1.04, -0.82], fov: 64 },
+      HERO: { pos: [0, 1.15, 0.48], target: [0, 1.18, -0.76], fov: 75 },
       GLOBE: { pos: [0, 1.12, -0.22], target: [0, 0.99, -0.58], fov: 55 },
       CUBES: { pos: [-0.37, 0.98, -0.18], target: [-0.37, 0.79, -0.43], fov: 50 },
       CRADLE: { pos: [0.24, 0.96, -0.28], target: [0.24, 0.79, -0.55], fov: 50 },
@@ -2815,6 +2894,7 @@ export class MissionControlSystem extends createSystem({
     this.syncBriefingPanel();
     this.syncTelemetryPanel();
     this.syncDebriefPanel();
+    this.syncSpatialPanelsVisibility();
     this.syncSettings();
     this.desktopControls?.updateHud();
   }

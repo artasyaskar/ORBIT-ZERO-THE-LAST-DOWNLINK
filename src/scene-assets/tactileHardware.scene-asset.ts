@@ -161,102 +161,132 @@ export function createDataCubeAsset(accentHex = 0x45c9c0): Object3D {
   const root = new Group();
   root.name = 'EvidenceDataCube';
 
-  // 1. Brushed Silver-Titanium Exoskeleton Frame & Collars (Child 0 uses frameMat)
+  // 1. Sleek Aerospace Gunmetal-Titanium Exoskeleton Chassis
   const frameMat = new MeshStandardMaterial({
-    color: 0x64748b,
+    color: 0x1e293b,
     roughness: 0.24,
-    metalness: 0.85,
+    metalness: 0.82,
+  });
+
+  const titaniumTrimMat = new MeshStandardMaterial({
+    color: 0x64748b,
+    roughness: 0.18,
+    metalness: 0.90,
   });
 
   // Dedicated material for runtime CanvasTexture telemetry display plates
   const displayPlateMat = new MeshStandardMaterial({
     color: 0xffffff,
     emissive: 0xffffff,
-    emissiveIntensity: 0.55,
-    roughness: 0.3,
-    metalness: 0.1,
+    emissiveIntensity: 0.65,
+    roughness: 0.25,
+    metalness: 0.15,
   });
   displayPlateMat.name = 'CubeTelemetryDisplayMat';
 
-  // Bottom & Top Titanium Frame Collars
+  // Bottom Chamfered Docking Base & Top Housing Bezel
   const bottomCollar = new Mesh(
-    bevelBox(0.068, 0.012, 0.068, 0.003, 0.008, 2),
+    bevelBox(0.068, 0.014, 0.068, 0.004, 0.008, 2),
     frameMat,
   );
   bottomCollar.name = 'CubeOuterFrame';
-  bottomCollar.position.set(0, 0.006, 0);
+  bottomCollar.position.set(0, 0.007, 0);
   root.add(bottomCollar);
 
   const topCollar = new Mesh(
-    bevelBox(0.068, 0.01, 0.068, 0.0025, 0.008, 2),
+    bevelBox(0.068, 0.012, 0.068, 0.003, 0.008, 2),
     frameMat,
   );
   topCollar.name = 'CubeTopFrameCollar';
-  topCollar.position.set(0, 0.063, 0);
+  topCollar.position.set(0, 0.064, 0);
   root.add(topCollar);
 
-  // 4 Vertical Titanium Corner Pillars (creates open-frame holocube silhouette)
-  const pillarGeo = bevelBox(0.011, 0.048, 0.011, 0.002, 0.003, 2);
+  // Brushed Titanium Bezel Trim Ribs
+  const topTrim = new Mesh(
+    bevelBox(0.064, 0.004, 0.064, 0.001, 0.003, 1),
+    titaniumTrimMat,
+  );
+  topTrim.name = 'CubeTopTrim';
+  topTrim.position.set(0, 0.071, 0);
+  root.add(topTrim);
+
+  // 4 Chamfered Titanium Corner Pillars (open-bay architecture)
+  const pillarGeo = bevelBox(0.010, 0.050, 0.010, 0.002, 0.003, 2);
   const corners: Array<[number, number]> = [
-    [-0.027, -0.027],
-    [0.027, -0.027],
-    [-0.027, 0.027],
-    [0.027, 0.027],
+    [-0.028, -0.028],
+    [0.028, -0.028],
+    [-0.028, 0.028],
+    [0.028, 0.028],
   ];
   for (let i = 0; i < corners.length; i++) {
     const [cx, cz] = corners[i];
-    const pillar = new Mesh(pillarGeo, frameMat);
+    const pillar = new Mesh(pillarGeo, titaniumTrimMat);
     pillar.name = `CubeCornerPillar_${i + 1}`;
-    pillar.position.set(cx, 0.035, cz);
+    pillar.position.set(cx, 0.036, cz);
     root.add(pillar);
   }
 
-  // 2. Transparent Acrylic Containment Shell (holographic vitrine matching concept art)
-  const acrylicMat = new MeshStandardMaterial({
-    color: 0x93c5fd,
+  // 2. High-Luminance Glowing Optical Crystal Core (Intensely Radiant Neon)
+  const coreMat = new MeshStandardMaterial({
+    color: accentHex,
     emissive: accentHex,
-    emissiveIntensity: 0.18,
+    emissiveIntensity: 2.6,
     roughness: 0.12,
-    metalness: 0.1,
+    metalness: 0.45,
+  });
+  coreMat.name = 'CubeConfidenceCoreMat';
+
+  const terrainCore = new Mesh(
+    bevelBox(0.048, 0.038, 0.048, 0.004, 0.008, 2),
+    coreMat,
+  );
+  terrainCore.name = 'CubeConfidenceCore';
+  terrainCore.position.set(0, 0.036, 0);
+  root.add(terrainCore);
+
+  // Horizontal Glowing Slit Emitter Bar (front and back aperture)
+  const slitMat = new MeshBasicMaterial({
+    color: 0xffffff,
     transparent: true,
-    opacity: 0.24,
+    opacity: 0.95,
+  });
+  const frontSlit = new Mesh(
+    bevelBox(0.036, 0.006, 0.052, 0.001, 0.002, 1),
+    slitMat,
+  );
+  frontSlit.name = 'CubeGlowSlit';
+  frontSlit.position.set(0, 0.036, 0);
+  root.add(frontSlit);
+
+  // 3. Transparent Acrylic / Holographic Containment Vitrine
+  const acrylicMat = new MeshStandardMaterial({
+    color: 0xbae6fd,
+    emissive: accentHex,
+    emissiveIntensity: 0.35,
+    roughness: 0.06,
+    metalness: 0.2,
+    transparent: true,
+    opacity: 0.32,
     depthWrite: false,
   });
   acrylicMat.name = 'CubeAcrylicMat';
   const acrylicShell = new Mesh(
-    bevelBox(0.056, 0.050, 0.056, 0.003, 0.006, 2),
+    bevelBox(0.058, 0.052, 0.058, 0.003, 0.006, 2),
     acrylicMat,
   );
   acrylicShell.name = 'CubeAcrylicShell';
   acrylicShell.renderOrder = 6;
-  acrylicShell.position.set(0, 0.035, 0);
+  acrylicShell.position.set(0, 0.036, 0);
   root.add(acrylicShell);
 
-  // 3. Dark Slate Base Substrate Plinth (geological foundation, shares frameMat to merge static chassis)
+  // 4. Dark Slate Base Substrate Plinth
   const baseSubstrate = new Mesh(
-    bevelBox(0.050, 0.008, 0.050, 0.002, 0.004, 2),
+    bevelBox(0.052, 0.006, 0.052, 0.002, 0.004, 2),
     frameMat,
   );
   baseSubstrate.name = 'CubeBaseSubstrate';
   baseSubstrate.position.set(0, 0.014, 0);
   root.add(baseSubstrate);
-
-  // 4. Sculpted 3D Topographic Relief Core (tinted dynamically by confidence)
-  const coreMat = new MeshStandardMaterial({
-    color: accentHex,
-    emissive: accentHex,
-    emissiveIntensity: 0.92,
-    roughness: 0.28,
-    metalness: 0.25,
-  });
-  coreMat.name = 'CubeConfidenceCoreMat';
-  const terrainCore = new Mesh(
-    bevelBox(0.050, 0.022, 0.050, 0.003, 0.006, 2),
-    coreMat,
-  );
-  terrainCore.name = 'CubeConfidenceCore';
-  terrainCore.position.set(0, 0.026, 0);
-  root.add(terrainCore);
 
   // 5. Glowing Indus Flood River Channel (recessed aquatic ribbon winding through relief)
   const waterMat = new MeshStandardMaterial({
@@ -466,32 +496,32 @@ export function createConsolePadAsset(accentHex = 0x45c9c0): Object3D {
   root.name = 'ConsoleTactilePad';
 
   const bezelMat = new MeshStandardMaterial({
-    color: 0x334155,
-    roughness: 0.3,
-    metalness: 0.78,
+    color: 0x1e293b,
+    roughness: 0.35,
+    metalness: 0.88,
   });
   const capMat = new MeshStandardMaterial({
     color: accentHex,
     emissive: accentHex,
-    emissiveIntensity: 0.85,
+    emissiveIntensity: 0.75,
     roughness: 0.25,
-    metalness: 0.3,
+    metalness: 0.45,
   });
 
   const base = new Mesh(
-    bevelBox(0.068, 0.014, 0.052, 0.003, 0.006, 2),
+    bevelBox(0.052, 0.005, 0.040, 0.002, 0.004, 2),
     bezelMat,
   );
   base.name = 'PadBezelBase';
-  base.position.set(0, 0.007, 0);
+  base.position.set(0, 0.0025, 0);
   root.add(base);
 
   const cap = new Mesh(
-    bevelBox(0.052, 0.012, 0.038, 0.0025, 0.005, 2),
+    bevelBox(0.042, 0.004, 0.030, 0.0015, 0.003, 1),
     capMat,
   );
   cap.name = 'PadIlluminatedCap';
-  cap.position.set(0, 0.016, 0);
+  cap.position.set(0, 0.006, 0);
   root.add(cap);
 
   return root;

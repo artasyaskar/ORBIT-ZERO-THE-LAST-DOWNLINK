@@ -11,6 +11,7 @@
  */
 
 import {
+  AdditiveBlending,
   BackSide,
   BufferGeometry,
   Color,
@@ -182,7 +183,7 @@ function buildSphericalSectorOverlay(
 
   const subStepsPerEdge = 8;
   const ringRadius = GLOBE_RADIUS * 1.0045;
-  const ribbonHalfWidth = 0.00078;
+  const ribbonHalfWidth = 0.00045;
 
   const arcPoints: Vector3[] = [];
   for (let i = 0; i < polygonLatLon.length; i++) {
@@ -377,13 +378,13 @@ function buildSphericalSectorOverlay(
     stormGeo.setIndex(stormIndices);
 
     const stormMat = new MeshStandardMaterial({
-      color: 0xe2e8f0,
-      emissive: 0x93c5fd,
-      emissiveIntensity: 0.16,
-      roughness: 0.92,
-      metalness: 0.02,
+      color: 0x93c5fd,
+      emissive: 0x38bdf8,
+      emissiveIntensity: 0.25,
+      roughness: 0.65,
+      metalness: 0.15,
       transparent: true,
-      opacity: 0.68,
+      opacity: 0.18,
       side: DoubleSide,
       depthWrite: false,
     });
@@ -460,7 +461,7 @@ function buildOrbitalTelemetryBand(
   const spokes = new LineSegments(spokeGeo, spokeMat);
   spokes.name = `${name}_Spokes`;
   band.add(spokes);
-  spokes.raycast = () => {};
+  spokes.raycast = () => { };
 
   return band;
 }
@@ -506,32 +507,94 @@ export function createEarthGlobeAsset(): Object3D {
   cloudSphere.rotation.copy(GLOBE_EULER);
   root.add(cloudSphere);
 
-  // 3. Dual-Shell Atmospheric Limb Fresnel Halo (luminous cyan-white polar/horizon glow)
-  const innerAtmoGeo = new SphereGeometry(GLOBE_RADIUS * 1.022, 32, 22);
+  // 3. Multi-Layer Luminous Atmospheric Limb & Fresnel Corona Halo (Concept Images 1 & 2)
+  const innerAtmoGeo = new SphereGeometry(GLOBE_RADIUS * 1.018, 36, 26);
   const innerAtmoMat = new MeshBasicMaterial({
-    color: 0x7dd3fc,
+    color: 0x38bdf8,
     side: BackSide,
     transparent: true,
-    opacity: 0.26,
+    opacity: 0.88,
     depthWrite: false,
+    blending: AdditiveBlending,
   });
   const innerAtmoShell = new Mesh(innerAtmoGeo, innerAtmoMat);
   innerAtmoShell.name = 'GlobeHorizonHalo';
   innerAtmoShell.renderOrder = 4;
   root.add(innerAtmoShell);
 
-  const outerAtmoGeo = new SphereGeometry(GLOBE_RADIUS * 1.052, 32, 22);
+  const outerAtmoGeo = new SphereGeometry(GLOBE_RADIUS * 1.048, 36, 26);
   const outerAtmoMat = new MeshBasicMaterial({
-    color: 0x38bdf8,
+    color: 0x0ea5e9,
     side: BackSide,
     transparent: true,
-    opacity: 0.18,
+    opacity: 0.58,
     depthWrite: false,
+    blending: AdditiveBlending,
   });
   const outerAtmoShell = new Mesh(outerAtmoGeo, outerAtmoMat);
   outerAtmoShell.name = 'GlobeAtmosphereRim';
   outerAtmoShell.renderOrder = 5;
   root.add(outerAtmoShell);
+
+  const coronaAtmoGeo = new SphereGeometry(GLOBE_RADIUS * 1.082, 32, 24);
+  const coronaAtmoMat = new MeshBasicMaterial({
+    color: 0x0284c7,
+    side: BackSide,
+    transparent: true,
+    opacity: 0.36,
+    depthWrite: false,
+    blending: AdditiveBlending,
+  });
+  const coronaAtmoShell = new Mesh(coronaAtmoGeo, coronaAtmoMat);
+  coronaAtmoShell.name = 'GlobeCoronaGlow';
+  coronaAtmoShell.renderOrder = 6;
+  root.add(coronaAtmoShell);
+
+  // Surface-Tangent Radiant Horizon Limb Ring (Intense electric cyan limb)
+  const horizonLimbRing = new Mesh(
+    new TorusGeometry(GLOBE_RADIUS * 1.014, 0.0036, 12, 72),
+    new MeshBasicMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+      blending: AdditiveBlending,
+    }),
+  );
+  horizonLimbRing.name = 'GlobeHorizonLimbRing';
+  horizonLimbRing.renderOrder = 5;
+  root.add(horizonLimbRing);
+
+  // 3b. Orbital Trajectory Inclination Ring (55° LEO Pass - Concept Images 1 & 2 Match)
+  const orbitalTrackRing = new Mesh(
+    new TorusGeometry(GLOBE_RADIUS * 1.12, 0.0018, 8, 80),
+    new MeshBasicMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: 0.75,
+      depthWrite: false,
+      blending: AdditiveBlending,
+    }),
+  );
+  orbitalTrackRing.name = 'GlobeOrbitalTrackRing55';
+  orbitalTrackRing.rotation.set(Math.PI * 0.31, 0.22, 0);
+  orbitalTrackRing.renderOrder = 6;
+  root.add(orbitalTrackRing);
+
+  const orbitalTrackRingPolar = new Mesh(
+    new TorusGeometry(GLOBE_RADIUS * 1.15, 0.0015, 8, 80),
+    new MeshBasicMaterial({
+      color: 0x22d3ee,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+      blending: AdditiveBlending,
+    }),
+  );
+  orbitalTrackRingPolar.name = 'GlobeOrbitalTrackRingPolar';
+  orbitalTrackRingPolar.rotation.set(0.18, Math.PI * 0.42, 0.35);
+  orbitalTrackRingPolar.renderOrder = 6;
+  root.add(orbitalTrackRingPolar);
 
   // 4. Surface-Conforming Spherical Sector Boundary Polygons (Sectors A-F)
   const sectorOverlayGroup = new Group();
@@ -545,25 +608,27 @@ export function createEarthGlobeAsset(): Object3D {
   }
   root.add(sectorOverlayGroup);
 
-  // 5. Concentric Tilted Orbital Coordinate Grid Bands wrapping the lower hemisphere & flanks
+  // 5. Concentric Tilted Orbital Coordinate Grid Bands (subtle delicate aesthetic matching Concept Images 1 & 2)
   const primaryBand = buildOrbitalTelemetryBand(
     'EquatorTelemetryRing',
+    GLOBE_RADIUS * 1.10,
     GLOBE_RADIUS * 1.16,
-    GLOBE_RADIUS * 1.26,
     [Math.PI / 2 - 0.46, 0.16, -0.28],
     -0.026,
     0x5eead4,
   );
+  primaryBand.visible = false;
   root.add(primaryBand);
 
   const secondaryBand = buildOrbitalTelemetryBand(
     'OuterAzimuthRingGroup',
-    GLOBE_RADIUS * 1.21,
-    GLOBE_RADIUS * 1.32,
+    GLOBE_RADIUS * 1.14,
+    GLOBE_RADIUS * 1.20,
     [Math.PI / 2 - 0.38, -0.18, 0.25],
     -0.022,
     0x38bdf8,
   );
+  secondaryBand.visible = false;
   root.add(secondaryBand);
 
   // 6. 3D Orbital Pass Ground-Track Meridian Arc & Sub-Satellite Nadir Pip
@@ -599,7 +664,7 @@ export function createEarthGlobeAsset(): Object3D {
   const groundTrackLine = new LineSegments(trackGeo, trackMat);
   groundTrackLine.name = 'OrbitalGroundTrackArc';
   root.add(groundTrackLine);
-  groundTrackLine.raycast = () => {};
+  groundTrackLine.raycast = () => { };
 
   const pipMat = new MeshStandardMaterial({
     color: 0x5eead4,
@@ -710,6 +775,86 @@ export function createEarthGlobeAsset(): Object3D {
 
   laserGroup.visible = false;
   root.add(laserGroup);
+
+  // 10. Cinematic Glowing 3D Target Reticle & Indus Basin Callout (Concept Image 2 Match)
+  const activeReticleGroup = new Group();
+  activeReticleGroup.name = 'ActiveSectorReticleGroup';
+
+  const reticleRingMat = new MeshBasicMaterial({
+    color: 0x22d3ee,
+    transparent: true,
+    opacity: 0.95,
+    side: DoubleSide,
+    depthWrite: false,
+  });
+  reticleRingMat.name = 'ActiveReticleRingMat';
+
+  // Outer primary targeting ring (r = 46mm, tube = 1.0mm)
+  const outerReticleRing = new Mesh(
+    new TorusGeometry(0.046, 0.0010, 8, 48),
+    reticleRingMat,
+  );
+  outerReticleRing.name = 'ActiveReticleOuterRing';
+  activeReticleGroup.add(outerReticleRing);
+
+  // Inner precision targeting ring (r = 0.024mm, tube = 0.7mm)
+  const innerReticleRing = new Mesh(
+    new TorusGeometry(0.024, 0.0007, 8, 36),
+    reticleRingMat,
+  );
+  innerReticleRing.name = 'ActiveReticleInnerRing';
+  activeReticleGroup.add(innerReticleRing);
+
+  // Center focal reticle dot
+  const focalDot = new Mesh(
+    new CylinderGeometry(0.0018, 0.0018, 0.001, 8),
+    reticleRingMat,
+  );
+  focalDot.name = 'ActiveReticleFocalDot';
+  focalDot.rotation.set(Math.PI / 2, 0, 0);
+  activeReticleGroup.add(focalDot);
+
+  // 4 Crosshairs extending across outer ring
+  const crosshairMat = new LineBasicMaterial({
+    color: 0x38bdf8,
+    transparent: true,
+    opacity: 0.90,
+  });
+  crosshairMat.name = 'ActiveReticleCrosshairMat';
+
+  const chGeo = new BufferGeometry();
+  const chPos = new Float32Array([
+    0, 0.012, 0, 0, 0.052, 0,
+    0, -0.012, 0, 0, -0.052, 0,
+    0.012, 0, 0, 0.052, 0, 0,
+    -0.012, 0, 0, -0.052, 0, 0,
+  ]);
+  chGeo.setAttribute('position', new Float32BufferAttribute(chPos, 3));
+  const crosshairLines = new LineSegments(chGeo, crosshairMat);
+  crosshairLines.name = 'ActiveReticleCrosshairs';
+  activeReticleGroup.add(crosshairLines);
+
+  // 4 Corner Brackets
+  const cornerMat = new MeshBasicMaterial({
+    color: 0x38bdf8,
+    transparent: true,
+    opacity: 0.95,
+    depthWrite: false,
+  });
+  cornerMat.name = 'ActiveReticleCornerMat';
+  for (let c = 0; c < 4; c++) {
+    const bracketAngle = (c * Math.PI) / 2 + Math.PI / 4;
+    const bracketMesh = new Mesh(
+      new TorusGeometry(0.050, 0.0008, 6, 16, Math.PI * 0.28),
+      cornerMat,
+    );
+    bracketMesh.name = `ActiveReticleBracket_${c}`;
+    bracketMesh.rotation.set(0, 0, bracketAngle - Math.PI * 0.14);
+    activeReticleGroup.add(bracketMesh);
+  }
+
+  activeReticleGroup.visible = true;
+  root.add(activeReticleGroup);
 
   return root;
 }

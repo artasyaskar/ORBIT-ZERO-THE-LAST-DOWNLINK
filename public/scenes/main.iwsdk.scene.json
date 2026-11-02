@@ -54,15 +54,15 @@
         "projection": "perspective",
         "position": [
           0,
-          1.25,
-          0.34
+          1.15,
+          0.48
         ],
         "target": [
           0,
-          1.04,
-          -0.82
+          1.18,
+          -0.76
         ],
-        "fov": 64
+        "fov": 75
       }
     ]
   },
@@ -72,9 +72,9 @@
       "name": "Orbital Solar Key Light",
       "transform": {
         "position": [
-          2.6,
-          2.8,
-          -3.2
+          3.2,
+          3.2,
+          -4.5
         ],
         "rotationDeg": [
           -25,
@@ -90,7 +90,7 @@
             0.88,
             1
           ],
-          "intensity": 3.4,
+          "intensity": 2.2,
           "castShadow": false
         }
       }
@@ -145,16 +145,16 @@
       },
       "transform": {
         "position": [
-          -0.42,
-          1.15,
-          -0.48
+          -0.68,
+          1.32,
+          -0.74
         ],
         "rotationDeg": [
           0,
-          26,
+          18,
           0
         ],
-        "scale": 1.0
+        "scale": 1.45
       },
       "components": {}
     },
@@ -396,9 +396,9 @@
       },
       "transform": {
         "position": [
-          -0.46,
+          -0.10,
           0.79,
-          -0.43
+          -0.44
         ]
       },
       "components": {
@@ -416,14 +416,14 @@
       "name": "Evidence Cube 2",
       "content": {
         "type": "asset",
-        "asset": "evidence-cube-amber",
+        "asset": "evidence-cube-cyan",
         "castShadow": false
       },
       "transform": {
         "position": [
-          -0.37,
+          0.00,
           0.79,
-          -0.43
+          -0.44
         ]
       },
       "components": {
@@ -441,14 +441,14 @@
       "name": "Evidence Cube 3",
       "content": {
         "type": "asset",
-        "asset": "evidence-cube-emerald",
+        "asset": "evidence-cube-amber",
         "castShadow": false
       },
       "transform": {
         "position": [
-          -0.28,
+          0.10,
           0.79,
-          -0.43
+          -0.44
         ]
       },
       "components": {
@@ -491,9 +491,10 @@
       "transform": {
         "position": [
           0,
-          0.788,
-          -0.38
-        ]
+          -10.0,
+          0
+        ],
+        "scale": 0.001
       },
       "components": {
         "RayInteractable": {},
@@ -512,10 +513,11 @@
       },
       "transform": {
         "position": [
-          -0.35,
-          0.788,
-          -0.54
-        ]
+          0,
+          -10.0,
+          0
+        ],
+        "scale": 0.001
       },
       "components": {
         "RayInteractable": {},
@@ -534,10 +536,11 @@
       },
       "transform": {
         "position": [
-          0.24,
-          0.786,
-          -0.51
-        ]
+          0,
+          -10.0,
+          0
+        ],
+        "scale": 0.001
       },
       "components": {
         "RayInteractable": {},
@@ -556,10 +559,11 @@
       },
       "transform": {
         "position": [
-          0.32,
-          0.786,
-          -0.37
-        ]
+          0,
+          -10.0,
+          0
+        ],
+        "scale": 0.001
       },
       "components": {
         "RayInteractable": {},
@@ -578,10 +582,11 @@
       },
       "transform": {
         "position": [
-          0.46,
-          0.786,
-          -0.37
-        ]
+          0,
+          -10.0,
+          0
+        ],
+        "scale": 0.001
       },
       "components": {
         "RayInteractable": {},
@@ -600,10 +605,11 @@
       },
       "transform": {
         "position": [
-          0.45,
-          0.785,
-          -0.44
-        ]
+          0,
+          -10.0,
+          0
+        ],
+        "scale": 0.001
       },
       "components": {
         "RayInteractable": {},

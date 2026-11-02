@@ -461,95 +461,64 @@ export class VoiceCommander {
 
   private ensureSubtitleBar(): void {
     if (typeof document === 'undefined') return;
-    const existing = document.getElementById('aria-subtitle-bar') as HTMLDivElement | null;
-    if (existing) {
-      this.subtitleBarEl = existing;
-      this.subtitleBadgeEl = existing.querySelector('#aria-subtitle-badge');
-      this.subtitleTextEl = existing.querySelector('#aria-subtitle-text');
+
+    // Check if aria-subtitle-bar already exists inside orbit-zero-aria-hud
+    const hudBar = document.querySelector('#orbit-zero-aria-hud #aria-subtitle-bar') as HTMLDivElement | null;
+    if (hudBar) {
+      if (this.subtitleBarEl && this.subtitleBarEl !== hudBar && this.subtitleBarEl.parentElement) {
+        this.subtitleBarEl.parentElement.removeChild(this.subtitleBarEl);
+      }
+      this.subtitleBarEl = hudBar;
+      this.subtitleBadgeEl = hudBar.querySelector('#aria-subtitle-badge');
+      this.subtitleTextEl = hudBar.querySelector('#aria-subtitle-text');
       return;
     }
 
-    this.subtitleBarEl = document.createElement('div');
-    this.subtitleBarEl.id = 'aria-subtitle-bar';
-    this.subtitleBarEl.style.cssText = `
-      position: fixed;
-      bottom: 68px;
-      left: 50%;
-      transform: translateX(-50%) translateY(8px);
-      background: rgba(6, 12, 24, 0.88);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1px solid rgba(6, 182, 212, 0.45);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.75), 0 0 20px rgba(6, 182, 212, 0.2);
-      border-radius: 9999px;
-      padding: 7px 18px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      color: #f8fafc;
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      font-size: 13px;
-      font-weight: 500;
-      letter-spacing: 0.25px;
-      line-height: 1.4;
-      pointer-events: none;
-      z-index: 10002;
-      opacity: 0;
-      transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
-      max-width: 85vw;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    `;
-
-    // Holographic Comms Badge
-    this.subtitleBadgeEl = document.createElement('span');
-    this.subtitleBadgeEl.id = 'aria-subtitle-badge';
-    this.subtitleBadgeEl.style.cssText = `
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      color: #22d3ee;
-      font-weight: 700;
-      font-size: 11px;
-      letter-spacing: 0.6px;
-      text-transform: uppercase;
-      background: rgba(8, 145, 178, 0.2);
-      border: 1px solid rgba(34, 211, 238, 0.4);
-      padding: 2px 8px;
-      border-radius: 9999px;
-    `;
-    this.subtitleBadgeEl.innerHTML = `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#22d3ee;box-shadow:0 0 6px #22d3ee;animation:ariaPulse 1.2s infinite ease-in-out;"></span>ARIA-7`;
-
-    // Subtitle Text Content
-    this.subtitleTextEl = document.createElement('span');
-    this.subtitleTextEl.id = 'aria-subtitle-text';
-    this.subtitleTextEl.style.cssText = `
-      color: #e2e8f0;
-      font-size: 13px;
-      font-weight: 500;
-    `;
-
-    this.subtitleBarEl.appendChild(this.subtitleBadgeEl);
-    this.subtitleBarEl.appendChild(this.subtitleTextEl);
-    document.body.appendChild(this.subtitleBarEl);
-
-    // Inject pulse keyframe if not present
-    if (!document.getElementById('aria-keyframes')) {
-      const style = document.createElement('style');
-      style.id = 'aria-keyframes';
-      style.textContent = `
-        @keyframes ariaPulse {
-          0%, 100% { opacity: 0.4; transform: scale(0.9); }
-          50% { opacity: 1; transform: scale(1.2); }
-        }
+    const ariaHud = document.getElementById('orbit-zero-aria-hud');
+    if (ariaHud) {
+      this.subtitleBarEl = document.createElement('div');
+      this.subtitleBarEl.id = 'aria-subtitle-bar';
+      this.subtitleBarEl.style.cssText = `
+        background: rgba(6, 12, 24, 0.75);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(34, 211, 238, 0.4);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6), 0 0 10px rgba(34, 211, 238, 0.15);
+        border-radius: 6px;
+        padding: 6px 14px;
+        font-size: 11px;
+        color: #e2e8f0;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        pointer-events: none;
       `;
-      document.head.appendChild(style);
+
+      this.subtitleBadgeEl = document.createElement('span');
+      this.subtitleBadgeEl.id = 'aria-subtitle-badge';
+      this.subtitleBadgeEl.style.cssText = `color: #22d3ee; font-weight: 700; font-size: 10px; letter-spacing: 0.5px;`;
+      this.subtitleBadgeEl.innerText = '[ ARIA-7 ]';
+
+      this.subtitleTextEl = document.createElement('span');
+      this.subtitleTextEl.id = 'aria-subtitle-text';
+      this.subtitleTextEl.style.cssText = `color: #cbd5e1;`;
+
+      this.subtitleBarEl.appendChild(this.subtitleBadgeEl);
+      this.subtitleBarEl.appendChild(this.subtitleTextEl);
+      ariaHud.appendChild(this.subtitleBarEl);
     }
   }
 
   private displaySubtitle(text: string, priority: VoicePriority): void {
+    if (typeof document === 'undefined') return;
     this.ensureSubtitleBar();
+    const inHud = document.querySelector('#orbit-zero-aria-hud #aria-subtitle-bar') as HTMLDivElement | null;
+    if (inHud) {
+      this.subtitleBarEl = inHud;
+      this.subtitleBadgeEl = inHud.querySelector('#aria-subtitle-badge');
+      this.subtitleTextEl = inHud.querySelector('#aria-subtitle-text');
+    }
     if (!this.subtitleBarEl || !this.subtitleTextEl) return;
 
     // Clean up '[ARIA-7]' tag if present in raw string
@@ -584,13 +553,13 @@ export class VoiceCommander {
     }
 
     this.subtitleBarEl.style.opacity = '1';
-    this.subtitleBarEl.style.transform = 'translateX(-50%) translateY(0)';
   }
 
   private hideSubtitle(): void {
     if (this.subtitleBarEl) {
+      const isInsideHud = Boolean(this.subtitleBarEl.closest('#orbit-zero-aria-hud'));
       this.subtitleBarEl.style.opacity = '0';
-      this.subtitleBarEl.style.transform = 'translateX(-50%) translateY(8px)';
+      this.subtitleBarEl.style.transform = isInsideHud ? 'none' : 'translateX(-50%) translateY(8px)';
     }
   }
 }

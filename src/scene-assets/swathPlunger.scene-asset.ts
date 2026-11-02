@@ -31,19 +31,17 @@ export function createSwathPlungerAsset(): Object3D {
   });
 
   const safetyRingMat = new MeshStandardMaterial({
-    color: 0xf59e0b,
-    emissive: 0xb45309,
-    emissiveIntensity: 0.85,
-    roughness: 0.25,
-    metalness: 0.45,
+    color: 0x334155,
+    roughness: 0.28,
+    metalness: 0.85,
   });
 
   const plungerCapMat = new MeshStandardMaterial({
-    color: 0x38bdf8,
-    emissive: 0x0284c7,
-    emissiveIntensity: 1.15,
-    roughness: 0.2,
-    metalness: 0.4,
+    color: 0x0284c7,
+    emissive: 0x06b6d4,
+    emissiveIntensity: 0.95,
+    roughness: 0.25,
+    metalness: 0.5,
   });
 
   // 1. Recessed Bezel Mounting Base
