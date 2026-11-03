@@ -1,7 +1,8 @@
 import {
+  CONFIDENCE_BADGES,
+  getScenarioRequests,
   getScenarioSector,
   GROUND_REQUEST_ORDER,
-  GROUND_REQUESTS,
   MAX_EVIDENCE_CUBES,
   MISSION_SCENARIOS,
 } from './missionConfig';
@@ -12,6 +13,7 @@ import type {
   MissionSolution,
   MissionState,
   QueueScheduleEntry,
+  SensorMode,
 } from './types';
 
 const confidenceRank = { UNVERIFIED: 0, PROBABLE: 1, CONFIRMED: 2 };
@@ -35,12 +37,16 @@ export function getQueueSchedule(state: MissionState): QueueScheduleEntry[] {
   });
 }
 
-export function scoreEvidence(packets: DataPacket[]): { score: number; verified: number; partial: number } {
+export function scoreEvidence(
+  packets: DataPacket[],
+  scenarioId: MissionScenarioId = 'STANDARD_INDUS_PASS',
+): { score: number; verified: number; partial: number } {
+  const requests = getScenarioRequests(scenarioId);
   let points = 0;
   let verified = 0;
   let partial = 0;
   for (const id of GROUND_REQUEST_ORDER) {
-    const request = GROUND_REQUESTS[id];
+    const request = requests[id];
     const rank = packets.reduce((best, packet) =>
       packet.satisfiesRequestId === id ? Math.max(best, confidenceRank[packet.confidence]) : best, 0);
     if (rank >= confidenceRank[request.minimumConfidence]) {
@@ -54,14 +60,22 @@ export function scoreEvidence(packets: DataPacket[]): { score: number; verified:
   return { score: points + (verified === 3 ? 10 : verified >= 2 ? 5 : 0), verified, partial };
 }
 
-function better(candidate: MissionSolution, best: MissionSolution): boolean {
-  return candidate.score > best.score ||
-    (candidate.score === best.score && (candidate.powerUsed < best.powerUsed ||
-      (candidate.powerUsed === best.powerUsed && candidate.transmitSec < best.transmitSec - 1e-6)));
+function better(candidate: MissionSolution, best: MissionSolution, downlinkWindowSec: number): boolean {
+  if (candidate.score !== best.score) return candidate.score > best.score;
+  const candSafe = candidate.transmitSec <= downlinkWindowSec - 0.35 + 1e-6;
+  const bestSafe = best.transmitSec > 0 && best.transmitSec <= downlinkWindowSec - 0.35 + 1e-6;
+  if (candSafe !== bestSafe) return candSafe;
+  return (
+    candidate.powerUsed < best.powerUsed ||
+    (candidate.powerUsed === best.powerUsed && candidate.transmitSec < best.transmitSec - 1e-6)
+  );
 }
 
 export function solveMission(state: Pick<MissionState, 'scenarioId' | 'power' | 'maxPower' | 'maxStorage' | 'downlinkWindowSec' | 'packets'>): MissionSolution {
-  const budget = MISSION_SCENARIOS[state.scenarioId].budget;
+  const scenario = MISSION_SCENARIOS[state.scenarioId] ?? MISSION_SCENARIOS.STANDARD_INDUS_PASS;
+  const budget = scenario.budget;
+  const availableSensors: SensorMode[] = scenario.availableSensors ?? ['RADAR', 'OPTICAL'];
+  const requests = getScenarioRequests(state.scenarioId);
   let best: MissionSolution = {
     score: 0, verifiedRequests: 0, partialRequests: 0,
     powerUsed: state.maxPower - state.power, powerRemaining: state.power,
@@ -70,7 +84,7 @@ export function solveMission(state: Pick<MissionState, 'scenarioId' | 'power' | 
   const visited = new Set<string>();
 
   const search = (packets: DataPacket[], power: number, actions: MissionPlanAction[]) => {
-    const signature = `${power}:${packets.map((p) => `${p.sectorId}/${p.sensorMode}/${p.processed}`).sort().join(',')}`;
+    const signature = `${power}:${packets.map((p) => `${p.sectorId}/${p.sensorMode}/${p.processed}/${p.confidence}`).sort().join(',')}`;
     if (visited.has(signature)) return;
     visited.add(signature);
     const storage = packets.reduce((sum, p) => sum + p.storageCost, 0);
@@ -80,7 +94,7 @@ export function solveMission(state: Pick<MissionState, 'scenarioId' | 'power' | 
       const transmitted = useful.filter((_, index) => mask & (1 << index));
       const duration = Number(transmitted.reduce((sum, p) => sum + p.transmitSec, 0).toFixed(6));
       if (transmitted.length > budget.maxQueueSlots || duration > state.downlinkWindowSec + 1e-6) continue;
-      const result = scoreEvidence(transmitted);
+      const result = scoreEvidence(transmitted, state.scenarioId);
       const candidate: MissionSolution = {
         score: result.score, verifiedRequests: result.verified, partialRequests: result.partial,
         powerUsed: state.maxPower - power, powerRemaining: power, transmitSec: duration,
@@ -92,25 +106,41 @@ export function solveMission(state: Pick<MissionState, 'scenarioId' | 'power' | 
           })),
         ],
       };
-      if (better(candidate, best)) best = candidate;
+      if (better(candidate, best, state.downlinkWindowSec)) best = candidate;
     }
 
     for (const packet of packets) {
       if (!packet.processed && packet.confidence !== 'UNVERIFIED' && power >= budget.onboardProcess.powerCost) {
+        const upgradedConfidence =
+          scenario.performsChangeDetection &&
+          packet.sensorMode === 'RADAR' &&
+          packet.confidence === 'PROBABLE' &&
+          packet.satisfiesRequestId
+            ? 'CONFIRMED'
+            : packet.confidence;
         const processed = packets.map((p) => p.id === packet.id ? {
-          ...p, processed: true, storageCost: budget.onboardProcess.compressedStorageCost,
+          ...p,
+          processed: true,
+          confidence: upgradedConfidence,
+          confidenceBadge: CONFIDENCE_BADGES[upgradedConfidence],
+          storageCost: budget.onboardProcess.compressedStorageCost,
           transmitSec: budget.onboardProcess.compressedTransmitSec,
         } : p);
         search(processed, power - budget.onboardProcess.powerCost, [...actions, {
           type: 'PROCESS', packetId: packet.id, sectorId: packet.sectorId, sensorMode: packet.sensorMode,
         }]);
       }
+      const sectorOutcomes = getScenarioSector(state.scenarioId, packet.sectorId).outcomes;
       const betterObservationAvailable = packet.satisfiesRequestId &&
-        Object.values(getScenarioSector(state.scenarioId, packet.sectorId).outcomes)
+        availableSensors
+          .map((m) => sectorOutcomes[m])
+          .filter((o): o is NonNullable<typeof o> => Boolean(o))
           .some((outcome) => confidenceRank[outcome.confidence] > confidenceRank[packet.confidence]);
-      if (!packet.satisfiesRequestId || packet.confidence === 'UNVERIFIED' || betterObservationAvailable ||
+      if (!packet.id.startsWith('PLAN-') && (
+        !packet.satisfiesRequestId || packet.confidence === 'UNVERIFIED' || betterObservationAvailable ||
         packets.some((p) => p.id !== packet.id && p.satisfiesRequestId === packet.satisfiesRequestId &&
-          confidenceRank[p.confidence] >= confidenceRank[packet.confidence])) {
+          confidenceRank[p.confidence] >= confidenceRank[packet.confidence])
+      )) {
         search(packets.filter((p) => p.id !== packet.id), power, [...actions, {
           type: 'DISCARD', packetId: packet.id, sectorId: packet.sectorId, sensorMode: packet.sensorMode,
         }]);
@@ -119,15 +149,20 @@ export function solveMission(state: Pick<MissionState, 'scenarioId' | 'power' | 
 
     if (packets.length >= MAX_EVIDENCE_CUBES) return;
     for (const requestId of GROUND_REQUEST_ORDER) {
-      const request = GROUND_REQUESTS[requestId];
+      const request = requests[requestId];
       const sector = getScenarioSector(state.scenarioId, request.targetSectorId);
-      for (const sensorMode of ['RADAR', 'OPTICAL'] as const) {
-        const outcome = sector.outcomes[sensorMode];
-        const cost = sensorMode === 'RADAR' ? budget.radarScan : budget.opticalScan;
+      for (const sensorMode of availableSensors) {
+        const outcome = sector.outcomes[sensorMode] ?? sector.outcomes.OPTICAL;
+        const cost =
+          sensorMode === 'RADAR'
+            ? budget.radarScan
+            : sensorMode === 'THERMAL'
+              ? (budget.thermalScan ?? { powerCost: 11, storageCost: 3, transmitSec: 4.2 })
+              : budget.opticalScan;
         if (outcome.satisfiesRequestId !== requestId || outcome.confidence === 'UNVERIFIED' ||
           power < cost.powerCost || storage + cost.storageCost > state.maxStorage ||
           packets.some((p) => p.satisfiesRequestId === requestId &&
-            confidenceRank[p.confidence] >= confidenceRank[outcome.confidence])) continue;
+            (p.id.startsWith('PLAN-') || confidenceRank[p.confidence] >= confidenceRank[outcome.confidence]))) continue;
         const packet: DataPacket = {
           ...outcome, id: `PLAN-${actions.length}-${request.targetSectorId}-${sensorMode}`,
           sectorId: sector.id, sectorCode: sector.code, sectorName: sector.name, sensorMode,
@@ -152,7 +187,7 @@ export function solveMission(state: Pick<MissionState, 'scenarioId' | 'power' | 
 export function getMissionBenchmark(scenarioId: MissionScenarioId): MissionSolution {
   let solution = solutionCache.get(scenarioId);
   if (!solution) {
-    const budget = MISSION_SCENARIOS[scenarioId].budget;
+    const budget = (MISSION_SCENARIOS[scenarioId] ?? MISSION_SCENARIOS.STANDARD_INDUS_PASS).budget;
     solution = solveMission({
       scenarioId, power: budget.initialPower, maxPower: budget.initialPower,
       maxStorage: budget.maxStorage, downlinkWindowSec: budget.downlinkDurationSec, packets: [],
