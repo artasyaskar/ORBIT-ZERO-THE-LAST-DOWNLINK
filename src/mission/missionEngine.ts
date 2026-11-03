@@ -5,11 +5,17 @@
  */
 
 import {
+  CAMPAIGN_OPERATIONS,
+  computeTransmissionSeconds,
+  CONFIDENCE_BADGES,
+  DOWNLINK_THROUGHPUT_MBPS,
   getScenarioSector,
   MAX_EVIDENCE_CUBES,
   MISSION_SCENARIOS,
+  PROTOCOL_OVERHEAD_SEC,
   SECTOR_ORDER,
 } from './missionConfig';
+import { generateProceduralCrisis, type ThreatVector } from './proceduralCrisis';
 import { buildDebriefReport } from './scoring';
 import type {
   ActionResult,
@@ -29,7 +35,7 @@ function isValidSectorId(value: unknown): value is SectorId {
 }
 
 function isValidSensorMode(value: unknown): value is SensorMode {
-  return value === 'OPTICAL' || value === 'RADAR';
+  return value === 'OPTICAL' || value === 'RADAR' || value === 'THERMAL';
 }
 
 export class MissionEngine {
@@ -37,18 +43,39 @@ export class MissionEngine {
   private nextPacketNumber = 1;
   private currentScenarioId: MissionScenarioId = 'STANDARD_INDUS_PASS';
   private journal: MissionJournalEntry[] = [];
+  private activeCustomScenario?: ReturnType<typeof generateProceduralCrisis>['config'];
+  private activeThreat?: ThreatVector;
 
   constructor(initialScenarioId: MissionScenarioId = 'STANDARD_INDUS_PASS') {
     this.currentScenarioId = initialScenarioId;
     this.state = this.createInitialState();
   }
 
+  public getActiveScenario() {
+    return (
+      this.activeCustomScenario ??
+      MISSION_SCENARIOS[this.currentScenarioId] ??
+      MISSION_SCENARIOS.STANDARD_INDUS_PASS
+    );
+  }
+
+  public startProceduralCrisis(seedInput?: string | number): MissionState {
+    const crisis = generateProceduralCrisis(seedInput ?? Date.now());
+    this.activeCustomScenario = crisis.config;
+    this.activeThreat = crisis.threat;
+    this.currentScenarioId = crisis.config.id;
+    this.state = this.createInitialState();
+    return this.getState();
+  }
+
+  public getActiveThreat(): ThreatVector | null {
+    return this.activeThreat ?? null;
+  }
+
   private createInitialState(): MissionState {
     this.nextPacketNumber = 1;
     this.journal = [];
-    const scenario =
-      MISSION_SCENARIOS[this.currentScenarioId] ??
-      MISSION_SCENARIOS.STANDARD_INDUS_PASS;
+    const scenario = this.getActiveScenario();
     const budget = scenario.budget;
     return {
       scenarioId: this.currentScenarioId,
@@ -82,12 +109,17 @@ export class MissionEngine {
       this.state.lastActionOk = false;
       return this.getState();
     }
+    this.activeCustomScenario = undefined;
+    this.activeThreat = undefined;
     this.currentScenarioId = scenarioId;
     this.state = this.createInitialState();
     return this.getState();
   }
 
   public cycleScenario(): MissionState {
+    if (this.currentScenarioId === 'ORBITAL_ACADEMY') {
+      return this.setScenario('FIRELINE_PASS');
+    }
     const scenarioKeys: MissionScenarioId[] = [
       'STANDARD_INDUS_PASS',
       'MONSOON_SUPERCELL_PASS',
@@ -95,6 +127,18 @@ export class MissionEngine {
     ];
     const curIdx = scenarioKeys.indexOf(this.currentScenarioId);
     const nextScenario = scenarioKeys[(curIdx + 1) % scenarioKeys.length];
+    return this.setScenario(nextScenario);
+  }
+
+  public cycleCampaignOperation(): MissionState {
+    const campaignKeys: MissionScenarioId[] = [
+      'FIRELINE_PASS',
+      'STANDARD_INDUS_PASS',
+      'AFTERSHOCK_PASS',
+    ];
+    const curIdx = campaignKeys.indexOf(this.currentScenarioId);
+    const nextScenario =
+      curIdx === -1 ? campaignKeys[0] : campaignKeys[(curIdx + 1) % campaignKeys.length];
     return this.setScenario(nextScenario);
   }
 
@@ -130,13 +174,19 @@ export class MissionEngine {
       this.state.lastActionOk = false;
       return this.getState();
     }
-    const sector = getScenarioSector(this.currentScenarioId, sectorId);
+    const sector = getScenarioSector(this.currentScenarioId, sectorId, this.activeCustomScenario);
     this.state.selectedSectorId = sectorId;
     this.state.stepCounter += 1;
     const cloudTag =
-      sector.cloudCover === 'DENSE_STORM'
+      sector.cloudCover === 'DENSE_STORM' || sector.cloudCover === 'CONVECTIVE_CLOUD'
         ? 'DENSE STORM CLOUDS (RADAR rec.)'
-        : 'CLEAR SKY (OPTICAL rec.)';
+        : sector.cloudCover === 'MODERATE_SMOKE' ||
+            sector.cloudCover === 'DENSE_SMOKE' ||
+            sector.cloudCover === 'THIN_SMOKE'
+          ? 'BIOMASS SMOKE PLUME (THERMAL IR rec.)'
+          : sector.cloudCover === 'SEISMIC_DUST'
+            ? 'SEISMIC DUST PLUME (RADAR / THERMAL rec.)'
+            : 'CLEAR SKY (OPTICAL rec.)';
     this.state.lastStatusMessage = `Selected ${sector.code} ${sector.name} - ${cloudTag}.`;
     this.state.lastActionOk = true;
     return this.getState();
@@ -148,25 +198,37 @@ export class MissionEngine {
       return this.getState();
     }
     if (!isValidSensorMode(mode)) {
-      this.state.lastStatusMessage = `Invalid sensor mode "${String(mode)}". Choose OPTICAL or RADAR.`;
+      this.state.lastStatusMessage = `Invalid sensor mode "${String(mode)}". Choose OPTICAL, THERMAL, or RADAR.`;
       this.state.lastActionOk = false;
       return this.getState();
     }
     this.state.activeSensorMode = mode;
     this.state.stepCounter += 1;
-    const budget = MISSION_SCENARIOS[this.currentScenarioId].budget;
-    const cost = mode === 'OPTICAL' ? budget.opticalScan : budget.radarScan;
+    const budget = this.getActiveScenario().budget;
+    const cost =
+      mode === 'OPTICAL'
+        ? budget.opticalScan
+        : mode === 'THERMAL'
+          ? (budget.thermalScan ?? { powerCost: 11, storageCost: 3, payloadMb: 42.0, transmitSec: 4.2 })
+          : budget.radarScan;
+    const mb = cost.payloadMb ?? Number((cost.transmitSec * DOWNLINK_THROUGHPUT_MBPS).toFixed(1));
     this.state.lastStatusMessage =
       mode === 'OPTICAL'
-        ? `Sensor switched to OPTICAL (${cost.powerCost} PWR, ${cost.storageCost} STR, ${cost.transmitSec.toFixed(1)}s Tx) - High detail in clear skies; blocked by dense clouds.`
-        : `Sensor switched to RADAR / SAR (${cost.powerCost} PWR, ${cost.storageCost} STR, ${cost.transmitSec.toFixed(1)}s Tx) - Images through storm clouds; subject to metal/slope glare.`;
+        ? `Sensor switched to OPTICAL (${cost.powerCost} Wh, ${cost.storageCost} STR, ${mb} MB / ${cost.transmitSec.toFixed(1)}s Tx @ 10 MB/s) - High detail in clear skies; blocked by dense clouds and smoke.`
+        : mode === 'THERMAL'
+          ? `Sensor switched to THERMAL IR (${cost.powerCost} Wh, ${cost.storageCost} STR, ${mb} MB / ${cost.transmitSec.toFixed(1)}s Tx @ 10 MB/s) - Penetrates thin smoke to detect heat anomalies; blocked by thick clouds; coarse 20m resolution.`
+          : `Sensor switched to RADAR / SAR (${cost.powerCost} Wh, ${cost.storageCost} STR, ${mb} MB / ${cost.transmitSec.toFixed(1)}s Tx @ 10 MB/s) - Penetrates clouds; subject to specular dark water vs double-bounce vegetation/metal glare.`;
     this.state.lastActionOk = true;
     return this.getState();
   }
 
-  public toggleSensorMode(): MissionState {
+  public toggleSensorMode(forceThreeWay = false): MissionState {
+    const available: SensorMode[] = forceThreeWay
+      ? ['RADAR', 'OPTICAL', 'THERMAL']
+      : (this.getActiveScenario().availableSensors ?? ['RADAR', 'OPTICAL']);
+    const curIdx = available.indexOf(this.state.activeSensorMode);
     const nextMode: SensorMode =
-      this.state.activeSensorMode === 'OPTICAL' ? 'RADAR' : 'OPTICAL';
+      curIdx === -1 ? available[0] : available[(curIdx + 1) % available.length];
     return this.setSensorMode(nextMode);
   }
 
@@ -213,25 +275,27 @@ export class MissionEngine {
     if (!isValidSensorMode(sensorMode)) {
       return this.fail(
         'INVALID_SENSOR',
-        `Invalid sensor mode "${String(sensorMode)}". Choose OPTICAL or RADAR.`,
+        `Invalid sensor mode "${String(sensorMode)}". Choose OPTICAL, THERMAL, or RADAR.`,
       );
     }
 
     this.state.selectedSectorId = sectorId;
     this.state.activeSensorMode = sensorMode;
 
-    const scenario =
-      MISSION_SCENARIOS[this.currentScenarioId] ??
-      MISSION_SCENARIOS.STANDARD_INDUS_PASS;
+    const scenario = this.getActiveScenario();
     const budget = scenario.budget;
 
     const scanCost =
-      sensorMode === 'OPTICAL' ? budget.opticalScan : budget.radarScan;
+      sensorMode === 'OPTICAL'
+        ? budget.opticalScan
+        : sensorMode === 'THERMAL'
+          ? (budget.thermalScan ?? { powerCost: 11, storageCost: 3, payloadMb: 42.0, transmitSec: 4.2 })
+          : budget.radarScan;
 
     if (this.state.power < scanCost.powerCost) {
       return this.fail(
         'INSUFFICIENT_POWER',
-        `Insufficient Power for ${sensorMode} scan: requires ${scanCost.powerCost} PWR, only ${this.state.power} PWR remaining.`,
+        `Insufficient Power for ${sensorMode} scan: requires ${scanCost.powerCost} Wh, only ${this.state.power} Wh remaining.`,
       );
     }
 
@@ -250,13 +314,18 @@ export class MissionEngine {
     }
 
 
-    const sector = getScenarioSector(this.currentScenarioId, sectorId);
-    const outcome = sector.outcomes[sensorMode];
+    const sector = getScenarioSector(this.currentScenarioId, sectorId, this.activeCustomScenario);
+    const outcome = sector.outcomes[sensorMode] ?? sector.outcomes.OPTICAL;
     const packetId = `PKT-${this.nextPacketNumber++}`;
 
     this.state.power -= scanCost.powerCost;
     this.state.storageUsed += scanCost.storageCost;
     this.state.stepCounter += 1;
+
+    const throughputMbps = budget.downlinkThroughputMbps ?? DOWNLINK_THROUGHPUT_MBPS;
+    const protocolOverheadSec = budget.protocolOverheadSec ?? PROTOCOL_OVERHEAD_SEC;
+    const payloadMb = scanCost.payloadMb ?? Number((scanCost.transmitSec * throughputMbps).toFixed(1));
+    const computedTxSec = computeTransmissionSeconds(payloadMb, throughputMbps, protocolOverheadSec);
 
     const packet: DataPacket = {
       id: packetId,
@@ -274,10 +343,16 @@ export class MissionEngine {
       swathWidthKm: outcome.swathWidthKm,
       resolutionMeters: outcome.resolutionMeters,
       phenomenologyTag: outcome.phenomenologyTag,
+      observationConfidencePct: outcome.observationConfidencePct,
+      scientificCaveat: outcome.scientificCaveat,
       storageCost: scanCost.storageCost,
-      transmitSec: scanCost.transmitSec,
+      transmitSec: computedTxSec,
       rawStorageCost: scanCost.storageCost,
-      rawTransmitSec: scanCost.transmitSec,
+      rawTransmitSec: computedTxSec,
+      payloadMb,
+      rawPayloadMb: payloadMb,
+      throughputMbps,
+      protocolOverheadSec,
       compressionRatio: 1.0,
       ambiguityReason:
         outcome.confidence === 'UNVERIFIED'
@@ -290,7 +365,18 @@ export class MissionEngine {
       observationId: `OBS-${this.currentScenarioId.slice(0, 3)}-${this.state.stepCounter}`,
       parentEvidenceId: null,
       observationTimestampSec: this.state.downlinkElapsedSec,
-      observationCondition: sector.cloudCover === 'DENSE_STORM' ? 'DENSE_MONSOON_CLOUD_COVER' : 'CLEAR_SKY_DAYLIGHT',
+      observationCondition:
+        sector.cloudCover === 'DENSE_STORM' || sector.cloudCover === 'CONVECTIVE_CLOUD'
+          ? 'DENSE_MONSOON_CLOUD_COVER'
+          : sector.cloudCover === 'DENSE_SMOKE'
+            ? 'DENSE_PYROCONVECTIVE_SMOKE'
+            : sector.cloudCover === 'MODERATE_SMOKE'
+              ? 'MODERATE_LAMINAR_SMOKE'
+              : sector.cloudCover === 'THIN_SMOKE'
+                ? 'THIN_DRIFT_SMOKE_HAZE'
+                : sector.cloudCover === 'SEISMIC_DUST'
+                  ? 'SEISMIC_SILICATE_DUST_PLUME'
+                  : 'CLEAR_SKY_DAYLIGHT',
       processingState: 'RAW',
       processingOperation: null,
       interpretationCategory:
@@ -329,7 +415,7 @@ export class MissionEngine {
     this.state.packets.push(packet);
     this.state.selectedPacketId = packet.id;
 
-    const msg = `Scanned ${sector.code} (${sensorMode}): ${outcome.confidenceBadge} - ${outcome.headline} (-${scanCost.powerCost} PWR, +${scanCost.storageCost} STR).`;
+    const msg = `Scanned ${sector.code} (${sensorMode}): ${outcome.confidenceBadge} - ${outcome.headline} (-${scanCost.powerCost} Wh, +${scanCost.storageCost} STR, ${payloadMb} MB / ${computedTxSec.toFixed(1)}s Tx).`;
     this.state.lastStatusMessage = msg;
     this.state.lastActionOk = true;
 
@@ -373,33 +459,53 @@ export class MissionEngine {
       );
     }
 
-    const scenario =
-      MISSION_SCENARIOS[this.currentScenarioId] ??
-      MISSION_SCENARIOS.STANDARD_INDUS_PASS;
+    const scenario = this.getActiveScenario();
     const procCost = scenario.budget.onboardProcess;
     if (this.state.power < procCost.powerCost) {
       return this.fail(
         'INSUFFICIENT_POWER',
-        `Insufficient Power for onboard processing: requires ${procCost.powerCost} PWR, only ${this.state.power} PWR remaining.`,
+        `Insufficient Power for onboard processing: requires ${procCost.powerCost} Wh, only ${this.state.power} Wh remaining.`,
       );
     }
 
     const storageDelta = pkt.storageCost - procCost.compressedStorageCost;
     this.state.power -= procCost.powerCost;
     this.state.storageUsed = Math.max(0, this.state.storageUsed - storageDelta);
+    const compressedPayloadMb = procCost.compressedPayloadMb ?? 18.0;
+    const throughputMbps = pkt.throughputMbps ?? scenario.budget.downlinkThroughputMbps ?? DOWNLINK_THROUGHPUT_MBPS;
+    const protocolOverheadSec = pkt.protocolOverheadSec ?? scenario.budget.protocolOverheadSec ?? PROTOCOL_OVERHEAD_SEC;
     pkt.storageCost = procCost.compressedStorageCost;
-    pkt.transmitSec = procCost.compressedTransmitSec;
+    pkt.payloadMb = compressedPayloadMb;
+    pkt.transmitSec = computeTransmissionSeconds(compressedPayloadMb, throughputMbps, protocolOverheadSec);
     pkt.compressionRatio = 3.0;
     pkt.processed = true;
     pkt.processingState = 'PROCESSED';
-    pkt.compressionAlgorithm =
-      pkt.sensorMode === 'OPTICAL'
+    const upgradedByChangeDetection = Boolean(
+      scenario.performsChangeDetection &&
+      pkt.sensorMode === 'RADAR' &&
+      pkt.confidence === 'PROBABLE' &&
+      pkt.satisfiesRequestId,
+    );
+    if (upgradedByChangeDetection) {
+      pkt.confidence = 'CONFIRMED';
+      pkt.confidenceBadge = CONFIDENCE_BADGES.CONFIRMED;
+      pkt.interpretationCategory = 'CONFIRMED';
+      pkt.observationConfidencePct = 90;
+      pkt.snrDb = Number((pkt.snrDb + 6.5).toFixed(1));
+      pkt.scientificCaveat =
+        'Potential surface-change evidence detected through pre-event and post-event SAR backscatter comparison (simulated gameplay heuristic: +6.5 dB static-clutter rejection contrast gain; 68% -> 90% simulated gameplay confidence estimate; does not independently measure exact ground displacement without interferometric phase).';
+    }
+    pkt.compressionAlgorithm = upgradedByChangeDetection
+      ? 'MULTI_TEMPORAL_CHANGE_DETECTION'
+      : pkt.sensorMode === 'OPTICAL'
         ? pkt.sectorId === 'C'
           ? 'OPTICAL_ROAD_EDGE_ENCODING'
           : 'OPTICAL_EVIDENCE_COMPRESSION'
-        : pkt.sectorId === 'C'
-          ? 'SAR_AMBIGUITY_METADATA_ENCODING'
-          : 'SAR_BACKSCATTER_EVIDENCE_COMPRESSION';
+        : pkt.sensorMode === 'THERMAL'
+          ? 'THERMAL_RADIOMETRIC_ENCODING'
+          : pkt.sectorId === 'C'
+            ? 'SAR_AMBIGUITY_METADATA_ENCODING'
+            : 'SAR_BACKSCATTER_EVIDENCE_COMPRESSION';
     pkt.processingOperation = pkt.compressionAlgorithm;
     pkt.provenanceLineage = `${pkt.provenanceLineage} -> CRADLE[${pkt.compressionAlgorithm}]`;
     if (!pkt.provenanceChain) pkt.provenanceChain = [];
@@ -408,14 +514,14 @@ export class MissionEngine {
       timestampSec: this.state.downlinkElapsedSec,
       step: this.state.stepCounter,
       operation: pkt.compressionAlgorithm,
-      details: `Compressed 3 STR -> 1 STR, ${pkt.rawTransmitSec.toFixed(1)}s -> ${pkt.transmitSec.toFixed(1)}s Tx`,
+      details: `Compressed 3 STR -> 1 STR (${(pkt.rawPayloadMb ?? 45).toFixed(0)} MB -> ${compressedPayloadMb.toFixed(0)} MB), ${pkt.rawTransmitSec.toFixed(1)}s -> ${pkt.transmitSec.toFixed(1)}s Tx @ ${throughputMbps.toFixed(1)} MB/s`,
     });
     this.state.selectedPacketId = pkt.id;
     this.state.stepCounter += 1;
 
     this.recalculateQueueTiming();
 
-    const msg = `Processed ${pkt.id} (${pkt.sectorCode} ${pkt.sensorMode} [${pkt.compressionAlgorithm}]): compressed to 1 STR and 1.8s Tx (-${procCost.powerCost} PWR, freed ${storageDelta} STR).`;
+    const msg = `Processed ${pkt.id} (${pkt.sectorCode} ${pkt.sensorMode} [${pkt.compressionAlgorithm}]): compressed to 1 STR (${compressedPayloadMb.toFixed(0)} MB / 1.8s Tx @ 10 MB/s, -${procCost.powerCost} Wh, freed ${storageDelta} STR).`;
     this.state.lastStatusMessage = msg;
     this.state.lastActionOk = true;
 
@@ -499,7 +605,7 @@ export class MissionEngine {
       };
     }
 
-    const maxSlots = Math.min(MAX_EVIDENCE_CUBES, MISSION_SCENARIOS[this.currentScenarioId].budget.maxQueueSlots);
+    const maxSlots = Math.min(MAX_EVIDENCE_CUBES, this.getActiveScenario().budget.maxQueueSlots);
     if (this.state.queuePacketIds.length >= maxSlots) {
       return this.fail('QUEUE_FULL', `Downlink Bay full (${maxSlots} slots max). Unqueue or discard a slot cube first.`);
     }
@@ -783,9 +889,7 @@ export class MissionEngine {
     this.state.downlinkElapsedSec = usedSec;
     this.state.activeDownlinkPacketId = null;
 
-    const scenario =
-      MISSION_SCENARIOS[this.currentScenarioId] ??
-      MISSION_SCENARIOS.STANDARD_INDUS_PASS;
+    const scenario = this.getActiveScenario();
 
     const debrief = buildDebriefReport({
       allPackets: this.state.packets,
@@ -797,6 +901,7 @@ export class MissionEngine {
       initialPower: scenario.budget.initialPower,
       downlinkWindowSec: scenario.budget.downlinkDurationSec,
       scenarioId: this.currentScenarioId,
+      customScenario: this.activeCustomScenario,
     });
 
     this.state.phase = 'DEBRIEF';
