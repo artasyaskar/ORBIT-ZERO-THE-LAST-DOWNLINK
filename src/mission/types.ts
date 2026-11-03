@@ -5,7 +5,7 @@
 
 export type SectorId = 'A' | 'B' | 'C' | 'D' | 'E' | 'F';
 
-export type SensorMode = 'OPTICAL' | 'RADAR';
+export type SensorMode = 'OPTICAL' | 'RADAR' | 'THERMAL';
 
 export type ConfidenceLevel = 'CONFIRMED' | 'PROBABLE' | 'UNVERIFIED';
 
@@ -38,6 +38,8 @@ export interface SensorScanOutcome {
   swathWidthKm: number;
   resolutionMeters: number;
   phenomenologyTag: string;
+  observationConfidencePct?: number;
+  scientificCaveat?: string;
 }
 
 export interface SectorConfig {
@@ -45,10 +47,21 @@ export interface SectorConfig {
   code: string;
   name: string;
   terrainSummary: string;
-  cloudCover: 'CLEAR' | 'DENSE_STORM';
+  cloudCover:
+    | 'CLEAR'
+    | 'DENSE_STORM'
+    | 'CONVECTIVE_CLOUD'
+    | 'THIN_SMOKE'
+    | 'MODERATE_SMOKE'
+    | 'DENSE_SMOKE'
+    | 'SEISMIC_DUST';
   globeNormalizedPosition: [number, number, number];
   outcomes: Record<SensorMode, SensorScanOutcome>;
 }
+
+export type SectorOverrideConfig = Omit<Partial<SectorConfig>, 'outcomes'> & {
+  outcomes?: Partial<Record<SensorMode, SensorScanOutcome>>;
+};
 
 export interface GroundRequest {
   id: GroundRequestId;
@@ -69,7 +82,10 @@ export type CompressionAlgorithm =
   | 'OPTICAL_EVIDENCE_COMPRESSION'
   | 'OPTICAL_ROAD_EDGE_ENCODING'
   | 'SAR_BACKSCATTER_EVIDENCE_COMPRESSION'
-  | 'SAR_AMBIGUITY_METADATA_ENCODING';
+  | 'SAR_AMBIGUITY_METADATA_ENCODING'
+  | 'THERMAL_RADIOMETRIC_ENCODING'
+  | 'MULTI_TEMPORAL_CHANGE_DETECTION'
+  | 'INTERFEROMETRIC_CHANGE_DETECTION';
 
 export interface DataPacket {
   id: string;
@@ -92,6 +108,12 @@ export interface DataPacket {
   transmitSec: number;
   rawStorageCost: number;
   rawTransmitSec: number;
+  payloadMb?: number;
+  rawPayloadMb?: number;
+  throughputMbps?: number;
+  protocolOverheadSec?: number;
+  observationConfidencePct?: number;
+  scientificCaveat?: string;
   compressionRatio: number;
   ambiguityReason: string;
   provenanceLineage: string;
@@ -119,20 +141,31 @@ export interface ResourceBudgetConfig {
   initialPower: number;
   maxStorage: number;
   downlinkDurationSec: number;
+  downlinkThroughputMbps?: number;
+  protocolOverheadSec?: number;
   maxQueueSlots: number;
   opticalScan: {
     powerCost: number;
     storageCost: number;
+    payloadMb?: number;
     transmitSec: number;
   };
   radarScan: {
     powerCost: number;
     storageCost: number;
+    payloadMb?: number;
+    transmitSec: number;
+  };
+  thermalScan?: {
+    powerCost: number;
+    storageCost: number;
+    payloadMb?: number;
     transmitSec: number;
   };
   onboardProcess: {
     powerCost: number;
     compressedStorageCost: number;
+    compressedPayloadMb?: number;
     compressedTransmitSec: number;
   };
 }
@@ -177,18 +210,37 @@ export interface RequestEvaluation {
 
 export type EfficiencyGrade = 'S' | 'A' | 'B' | 'C';
 
+export type MissionOutcome = 'SUCCESS' | 'PARTIAL_SUCCESS' | 'FAILED';
+
+export type FailureReasonCode =
+  | 'NONE'
+  | 'WRONG_SENSOR_FOR_WEATHER'
+  | 'WINDOW_CUTOFF_DROPPED_PACKETS'
+  | 'UNPROCESSED_STORAGE_BOTTLENECK'
+  | 'INSUFFICIENT_VERIFIED_EVIDENCE';
+
+export type MissionCertification = 'GOLD' | 'SILVER' | 'BRONZE' | 'NONE';
+
 export type MissionScenarioId =
+  | 'ORBITAL_ACADEMY'
   | 'STANDARD_INDUS_PASS'
   | 'MONSOON_SUPERCELL_PASS'
-  | 'SOLAR_BROWNOUT_PASS';
+  | 'SOLAR_BROWNOUT_PASS'
+  | 'FIRELINE_PASS'
+  | 'AFTERSHOCK_PASS'
+  | 'DEFENSE_SHIELD_PASS';
 
 export interface MissionScenarioConfig {
   id: MissionScenarioId;
+  operationCode?: string;
   name: string;
   subtitle: string;
   briefing: string;
   budget: ResourceBudgetConfig;
-  sectorOverrides?: Partial<Record<SectorId, Partial<SectorConfig>>>;
+  availableSensors?: SensorMode[];
+  performsChangeDetection?: boolean;
+  requests?: Record<GroundRequestId, GroundRequest>;
+  sectorOverrides?: Partial<Record<SectorId, SectorOverrideConfig>>;
 }
 
 export interface EvidenceProvenanceRecord {
@@ -210,7 +262,19 @@ export interface EvidenceProvenanceRecord {
 }
 
 export interface DebriefReport {
-  missionRank: 'OPTIMAL TRIAGE' | 'BEST POSSIBLE TRIAGE' | 'PARTIAL DOWNLINK' | 'CRITICAL GAP';
+  missionRank:
+    | 'OPTIMAL TRIAGE'
+    | 'BEST POSSIBLE TRIAGE'
+    | 'PARTIAL DOWNLINK'
+    | 'CRITICAL GAP'
+    | 'TRAINING COMPLETE'
+    | 'TRAINING COMPLETE — ORBITAL OPERATOR QUALIFIED';
+  outcome?: MissionOutcome;
+  certification?: MissionCertification;
+  failureReasonCode?: FailureReasonCode;
+  failureExplanation?: string;
+  transmittedPayloadMb?: number;
+  downlinkThroughputMbps?: number;
   efficiencyGrade: EfficiencyGrade;
   totalScore: number;
   maxScore: number;
