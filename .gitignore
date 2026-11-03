@@ -84,6 +84,12 @@
 /.gravitas/
 /design-system/
 
+# Local Design Exploration, Visual Concept Images & Strategy Plans
+/design/
+
+# Local Audit, Verification & Defect Resolution Markdown Reports
+/verification/
+
 # ============================================================================
 # 3. Standard Node.js, Vite, TypeScript, Playwright & OS Build Artifacts
 # ============================================================================
