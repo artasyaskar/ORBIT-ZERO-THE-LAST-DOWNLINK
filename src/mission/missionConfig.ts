@@ -26,36 +26,129 @@ export const CONFIDENCE_BADGES: Record<ConfidenceLevel, string> = {
 };
 
 /**
- * Verified gameplay resource arithmetic:
- * - Required optimal scans:
- *   - Sector B (RADAR): 14 Power, 3 Storage, 4.5s Tx -> [OK] CONFIRMED (Request 1)
- *   - Sector C (OPTICAL): 8 Power, 3 Storage, 4.0s Tx -> [OK] CONFIRMED (Request 2)
- *   - Sector E (RADAR): 14 Power, 3 Storage, 4.5s Tx -> [?] PROBABLE (Request 3)
- *   Total scan cost = 14 + 8 + 14 = 36 Power, 9/9 Storage, 13.0s raw Tx (> 10.0s window!).
- * - Onboard Processing (6 Power each):
- *   - Process 2 packets (6 + 6 = 12 Power): compresses each from 3 Storage -> 1 Storage and 4.5s -> 1.8s Tx.
- *   - Total Power used = 36 + 12 = 48 / 55 Power (7 Power margin for 1 exploratory scan or 3rd compression).
- *   - Total Tx time = 1.8s + 4.0s + 1.8s = 7.6s <= 10.0s downlink window!
+ * Physical Downlink Channel & Solid-State Storage Model (Karachi Ground Station S-Band Link):
+ *   t_transmission = (payloadMb / throughputMbps) + protocolOverheadSec
+ *   Authoritative Solid-State Storage Unit: 1 STR = 18.0 MB (physical flash block allocation: Math.ceil(payloadMb / 18))
+ * - Optical Raw:   40.0 MB @ 10.0 MB/s = 4.0s Tx (8 Wh capacitor energy, 3 STR buffer)
+ * - Thermal IR:    42.0 MB @ 10.0 MB/s = 4.2s Tx (11 Wh capacitor energy, 3 STR buffer)
+ * - SAR Radar Raw: 45.0 MB @ 10.0 MB/s = 4.5s Tx (14 Wh capacitor energy, 3 STR buffer)
+ * - Compressed:    18.0 MB @ 10.0 MB/s = 1.8s Tx (6 Wh compute cost, 1 STR buffer)
  */
+export const STORAGE_UNIT_MB = 18.0;
+export const DOWNLINK_THROUGHPUT_MBPS = 10.0;
+export const PROTOCOL_OVERHEAD_SEC = 0.0;
+
+export function computeTransmissionSeconds(
+  payloadMb: number,
+  throughputMbps: number = DOWNLINK_THROUGHPUT_MBPS,
+  overheadSec: number = PROTOCOL_OVERHEAD_SEC,
+): number {
+  const safeThroughput = throughputMbps > 0 ? throughputMbps : DOWNLINK_THROUGHPUT_MBPS;
+  return Number((payloadMb / safeThroughput + overheadSec).toFixed(2));
+}
+
+export function deriveSensorScientificCaveat(
+  sensorMode: SensorMode,
+  confidence: ConfidenceLevel,
+  phenomenologyTag: string,
+): { observationConfidencePct: number; scientificCaveat: string } {
+  if (sensorMode === 'RADAR') {
+    if (confidence === 'CONFIRMED') {
+      return {
+        observationConfidencePct: 91,
+        scientificCaveat:
+          'NASA SAR Note: Smooth open water acts as a specular reflector (dark low-backscatter return), whereas flooded vegetation or embankments produce strong double-bounce returns. Single-pass SAR amplitude cannot measure water depth directly.',
+      };
+    }
+    if (confidence === 'PROBABLE') {
+      return {
+        observationConfidencePct: 68,
+        scientificCaveat: phenomenologyTag.includes('DIHEDRAL')
+          ? 'NASA SAR Note (Sim. Obs. Conf. 68%): Steel bridge trusses and water surfaces form dihedral corner reflectors that create bright multipath glare, masking fine deck inundation.'
+          : 'NASA SAR Note (Sim. Obs. Conf. 68%): Side-looking radar geometry over steep terrain introduces foreshortening, layover, and shadow; pre/post-event multi-temporal baseline differencing or optical verification reduces ambiguity.',
+      };
+    }
+    return {
+      observationConfidencePct: 18,
+      scientificCaveat:
+        'NASA SAR Note: Microwave radar measures surface dielectric roughness and geometry rather than radiative temperature, so it cannot isolate sub-canopy thermal hotspots.',
+    };
+  }
+
+  if (sensorMode === 'THERMAL') {
+    if (confidence === 'CONFIRMED') {
+      return {
+        observationConfidencePct: 89,
+        scientificCaveat:
+          'NASA FIRMS Note: Mid-wave/long-wave IR (3.9–11 um) penetrates thin biomass smoke aerosols to detect radiative heat anomalies, though sub-canopy smoldering and coarse pixel footprints remain bounded.',
+      };
+    }
+    if (confidence === 'PROBABLE') {
+      return {
+        observationConfidencePct: 64,
+        scientificCaveat:
+          'NASA FIRMS Note: Spaceborne thermal IR has coarser diffraction-limited spatial resolution (20 m) than visible optical sensors (0.75 m), blending narrow structural features with background temperatures.',
+      };
+    }
+    return {
+      observationConfidencePct: 14,
+      scientificCaveat:
+        'NASA FIRMS Note: While thermal IR penetrates thin smoke haze, optically thick water-droplet storm clouds and dense mineral dust plumes absorb terrestrial IR emission.',
+    };
+  }
+
+  // OPTICAL
+  if (confidence === 'CONFIRMED') {
+    return {
+      observationConfidencePct: 95,
+      scientificCaveat:
+        'Optical Remote Sensing Note: 0.75 m Ground Sample Distance (GSD) visible/near-IR imagery detects major road blockages, substantial visible structural changes, and large bridge damage indicators under clear skies (effective spatial resolution is bounded by optical MTF blur and SNR, and cannot resolve fine cracks or subsurface load capacity).',
+    };
+  }
+  if (confidence === 'PROBABLE') {
+    return {
+      observationConfidencePct: 65,
+      scientificCaveat:
+        'Optical Remote Sensing Note: Partial atmospheric haze or oblique viewing geometry reduces surface contrast.',
+    };
+  }
+  return {
+    observationConfidencePct: 10,
+    scientificCaveat:
+      'Optical Remote Sensing Note: Passive visible/near-IR wavelengths (0.4–0.9 um) suffer severe Mie scattering from cloud water droplets and dense smoke aerosols.',
+  };
+}
+
 export const MISSION_BUDGET: ResourceBudgetConfig = {
   initialPower: 55,
   maxStorage: 9,
   downlinkDurationSec: 10.0,
+  downlinkThroughputMbps: DOWNLINK_THROUGHPUT_MBPS,
+  protocolOverheadSec: PROTOCOL_OVERHEAD_SEC,
   maxQueueSlots: 3,
   opticalScan: {
     powerCost: 8,
     storageCost: 3,
-    transmitSec: 4.0,
+    payloadMb: 40.0,
+    transmitSec: computeTransmissionSeconds(40.0),
   },
   radarScan: {
     powerCost: 14,
     storageCost: 3,
-    transmitSec: 4.5,
+    payloadMb: 45.0,
+    transmitSec: computeTransmissionSeconds(45.0),
+  },
+  thermalScan: {
+    powerCost: 11,
+    storageCost: 3,
+    payloadMb: 42.0,
+    transmitSec: computeTransmissionSeconds(42.0),
   },
   onboardProcess: {
     powerCost: 6,
     compressedStorageCost: 1,
-    compressedTransmitSec: 1.8,
+    compressedPayloadMb: 18.0,
+    compressedTransmitSec: computeTransmissionSeconds(18.0),
   },
 };
 
@@ -94,6 +187,18 @@ export const SECTORS: Record<SectorId, SectorConfig> = {
         resolutionMeters: 2.2,
         phenomenologyTag: 'SPECULAR_RESERVOIR_BACKSCATTER',
       },
+      THERMAL: {
+        confidence: 'CONFIRMED',
+        confidenceBadge: CONFIDENCE_BADGES.CONFIRMED,
+        headline: 'Cool Reservoir Thermal Signature - No Convoy Route',
+        finding: 'Thermal IR measures uniform 287 K reservoir water surface; no emergency transport corridor in Sector A.',
+        scientificReason: 'Long-wave thermal infrared distinguishes cool deep water from sun-warmed concrete headworks, but does not address the 3 priority ground requests.',
+        satisfiesRequestId: null,
+        snrDb: 22.4,
+        swathWidthKm: 20.0,
+        resolutionMeters: 20.0,
+        phenomenologyTag: 'THERMAL_INERTIA_WATER_BOUNDARY',
+      },
     },
   },
   B: {
@@ -127,6 +232,18 @@ export const SECTORS: Record<SectorId, SectorConfig> = {
         swathWidthKm: 24.0,
         resolutionMeters: 2.2,
         phenomenologyTag: 'SPECULAR_WATER_DOUBLE_BOUNCE_SAR',
+      },
+      THERMAL: {
+        confidence: 'UNVERIFIED',
+        confidenceBadge: CONFIDENCE_BADGES.UNVERIFIED,
+        headline: 'Cold Convective Cloud Tops - Surface Blocked',
+        finding: 'Thermal IR records 225 K upper-tropospheric cloud tops; dense water-droplet clouds absorb surface thermal emission.',
+        scientificReason: 'While mid-wave IR can penetrate thin smoke aerosols, optically thick water-droplet storm clouds are opaque to thermal infrared wavelengths. Use active SAR Radar.',
+        satisfiesRequestId: null,
+        snrDb: 4.5,
+        swathWidthKm: 20.0,
+        resolutionMeters: 20.0,
+        phenomenologyTag: 'CLOUD_TOP_THERMAL_ABSORPTION',
       },
     },
   },
@@ -162,6 +279,18 @@ export const SECTORS: Record<SectorId, SectorConfig> = {
         resolutionMeters: 2.2,
         phenomenologyTag: 'METALLIC_DIHEDRAL_MULTIPATH_RADAR',
       },
+      THERMAL: {
+        confidence: 'PROBABLE',
+        confidenceBadge: CONFIDENCE_BADGES.PROBABLE,
+        headline: 'Warm Bridge Corridor - Coarse 20m Pixel Blur',
+        finding: 'Thermal IR detects warm dry asphalt on approach embankments, but 20m spatial resolution blends bridge deck with river channel.',
+        scientificReason: 'Spaceborne thermal IR sensors have coarser diffraction-limited spatial resolution (20 m) than visible optical cameras (0.75 m), leaving narrow bridge deck clearance only [?] PROBABLE.',
+        satisfiesRequestId: 'REQ_2',
+        snrDb: 17.4,
+        swathWidthKm: 20.0,
+        resolutionMeters: 20.0,
+        phenomenologyTag: 'COARSE_THERMAL_MIXED_PIXEL_BLUR',
+      },
     },
   },
   D: {
@@ -195,6 +324,18 @@ export const SECTORS: Record<SectorId, SectorConfig> = {
         swathWidthKm: 24.0,
         resolutionMeters: 2.2,
         phenomenologyTag: 'BRAGG_TURBULENT_WATER_SCATTERING',
+      },
+      THERMAL: {
+        confidence: 'PROBABLE',
+        confidenceBadge: CONFIDENCE_BADGES.PROBABLE,
+        headline: 'Cool River Plume Over Submerged Causeway',
+        finding: 'Thermal band shows unbroken cool river plume across the masonry causeway alignment.',
+        scientificReason: 'Absence of warm exposed roadway confirms water overtopping, though Sector D is not a requested evacuation target.',
+        satisfiesRequestId: null,
+        snrDb: 16.2,
+        swathWidthKm: 20.0,
+        resolutionMeters: 20.0,
+        phenomenologyTag: 'THERMAL_PLUME_OVERTOPPING',
       },
     },
   },
@@ -230,6 +371,18 @@ export const SECTORS: Record<SectorId, SectorConfig> = {
         resolutionMeters: 2.2,
         phenomenologyTag: 'OROGRAPHIC_PENETRATION_TERRAIN_LAYOVER',
       },
+      THERMAL: {
+        confidence: 'UNVERIFIED',
+        confidenceBadge: CONFIDENCE_BADGES.UNVERIFIED,
+        headline: 'Orographic Cloud Opacity - Thermal Blocked',
+        finding: 'Dense water-droplet ridge clouds block surface thermal emission from Shelter Ridge Spur.',
+        scientificReason: 'Optically thick orographic cloud banks absorb terrestrial infrared radiation. Active microwave SAR is required to image through storm clouds.',
+        satisfiesRequestId: null,
+        snrDb: 4.2,
+        swathWidthKm: 20.0,
+        resolutionMeters: 20.0,
+        phenomenologyTag: 'CLOUD_TOP_THERMAL_ABSORPTION',
+      },
     },
   },
   F: {
@@ -263,6 +416,18 @@ export const SECTORS: Record<SectorId, SectorConfig> = {
         swathWidthKm: 24.0,
         resolutionMeters: 2.2,
         phenomenologyTag: 'INUNDATED_VEGETATION_BACKSCATTER',
+      },
+      THERMAL: {
+        confidence: 'CONFIRMED',
+        confidenceBadge: CONFIDENCE_BADGES.CONFIRMED,
+        headline: 'Evaporative Cooling Across Retention Basin',
+        finding: 'Thermal IR confirms uniform cool water sheet across unmanned southern retention fields.',
+        scientificReason: 'High thermal inertia of shallow sheet water confirms basin inundation outside primary evacuation corridors.',
+        satisfiesRequestId: null,
+        snrDb: 21.8,
+        swathWidthKm: 20.0,
+        resolutionMeters: 20.0,
+        phenomenologyTag: 'THERMAL_INERTIA_WATER_BOUNDARY',
       },
     },
   },
@@ -324,25 +489,139 @@ export const GROUND_REQUESTS: Record<GroundRequestId, GroundRequest> = {
 
 export const GROUND_REQUEST_ORDER: GroundRequestId[] = ['REQ_1', 'REQ_2', 'REQ_3'];
 
+export const FIRELINE_REQUESTS: Record<GroundRequestId, GroundRequest> = {
+  REQ_1: {
+    id: 'REQ_1',
+    shortLabel: 'REQ 1 | CANYON FIRELINE',
+    title: 'Locate Active Crown-Fire Front Along Canyon Highway',
+    question: 'Where has the active 860 K wildfire front encroached on the Sector B evacuation highway?',
+    targetDescription: 'Sector B (Bolan Canyon Highway) - Smoke-obscured; requires Mid-Wave THERMAL IR for [OK] CONFIRMED.',
+    minimumConfidence: 'CONFIRMED',
+    requiredBadge: '[OK] CONFIRMED',
+    targetSectorId: 'B',
+    recommendedSensor: 'THERMAL',
+    consequenceOnSuccess:
+      'Thermal IR radiative hotspot telemetry pinpointed the active flame boundary across Sector B; forestry convoys diverted ahead of canyon pinch-point.',
+    consequenceOnPartial:
+      'SAR terrain return mapped canyon geometry without thermal fire-line intensity; ground crews proceeded under precautionary speed restriction.',
+    consequenceOnFailure:
+      'Opaque smoke plume left Sector B fire front unmapped; evacuation transport held at upper valley staging point.',
+  },
+  REQ_2: {
+    id: 'REQ_2',
+    shortLabel: 'REQ 2 | VIADUCT FIREBREAK',
+    title: 'Verify Upwind Viaduct Deck & Firebreak Clearance',
+    question: 'Does the clear-sky Sector C viaduct show unobstructed roadway and cleared firebreak buffer?',
+    targetDescription: 'Sector C (Bolan Viaduct) - Clear upwind slot; requires high-res 0.75m OPTICAL for [OK] CONFIRMED.',
+    minimumConfidence: 'CONFIRMED',
+    requiredBadge: '[OK] CONFIRMED',
+    targetSectorId: 'C',
+    recommendedSensor: 'OPTICAL',
+    consequenceOnSuccess:
+      'High-resolution 0.75m Optical imagery verified intact viaduct roadway and cleared 40m mineral-soil firebreak in Sector C.',
+    consequenceOnPartial:
+      'Coarse 20m Thermal or multipath SAR return could not resolve fine-scale viaduct deck debris; engineers dispatched for visual check.',
+    consequenceOnFailure:
+      'No viaduct clearance telemetry received before horizon cutoff; heavy tanker units delayed.',
+  },
+  REQ_3: {
+    id: 'REQ_3',
+    shortLabel: 'REQ 3 | RIDGE DEPOT',
+    title: 'Assess Smoke-Locked Juniper Ridge Fuel Depot Perimeter',
+    question: 'Has the wind-driven spot-fire perimeter reached the Sector E highland fuel and medical depot?',
+    targetDescription: 'Sector E (Juniper Ridge Depot) - Dense smoke plume; requires THERMAL IR for [OK] CONFIRMED.',
+    minimumConfidence: 'CONFIRMED',
+    requiredBadge: '[OK] CONFIRMED',
+    targetSectorId: 'E',
+    recommendedSensor: 'THERMAL',
+    consequenceOnSuccess:
+      'Mid-Wave Thermal IR penetrated dense smoke aerosol in Sector E, confirming a 600m buffer between spot fires and the ridge depot.',
+    consequenceOnPartial:
+      'Partial smoke attenuation left spot-fire perimeter resolution degraded; aerial retardant drop scheduled defensively.',
+    consequenceOnFailure:
+      'No smoke-penetrating thermal telemetry downlinked for Sector E; ridge depot evacuated preemptively.',
+  },
+};
+
+export const AFTERSHOCK_REQUESTS: Record<GroundRequestId, GroundRequest> = {
+  REQ_1: {
+    id: 'REQ_1',
+    shortLabel: 'REQ 1 | LANDSLIDE DAM',
+    title: 'Map Seismic Landslide Scarp & Valley Impoundment',
+    question: 'Has post-earthquake slope failure blocked the Sector B valley spillway channel?',
+    targetDescription: 'Sector B (Hanna Valley Gorge) - Dust-obscured; requires active SAR RADAR for [OK] CONFIRMED.',
+    minimumConfidence: 'CONFIRMED',
+    requiredBadge: '[OK] CONFIRMED',
+    targetSectorId: 'B',
+    recommendedSensor: 'RADAR',
+    consequenceOnSuccess:
+      'SAR backscatter penetrated the suspended dust veil and mapped the 4.2m landslide toe across Sector B; hydro-engineers mobilized.',
+    consequenceOnPartial:
+      'Unprocessed or low-contrast return left landslide crest height uncertain; drone survey requested.',
+    consequenceOnFailure:
+      'No verified radar survey downlinked for Sector B; downstream valley settlements placed on precautionary alert.',
+  },
+  REQ_2: {
+    id: 'REQ_2',
+    shortLabel: 'REQ 2 | HOSPITAL VIADUCT',
+    title: 'Inspect Clear-Sky Hospital Viaduct Span Alignment',
+    question: 'Are the Sector C hospital access viaduct expansion joints aligned without visible span offset?',
+    targetDescription: 'Sector C (Quetta Medical Viaduct) - Clear sky slot; requires 0.75m OPTICAL for [OK] CONFIRMED.',
+    minimumConfidence: 'CONFIRMED',
+    requiredBadge: '[OK] CONFIRMED',
+    targetSectorId: 'C',
+    recommendedSensor: 'OPTICAL',
+    consequenceOnSuccess:
+      'Sub-meter Optical pass confirmed continuous roadway alignment across Sector C viaduct; surgical supply units cleared to cross.',
+    consequenceOnPartial:
+      'Coarse resolution or radar corner-reflector glare masked expansion-joint alignment; bridge structural team dispatched.',
+    consequenceOnFailure:
+      'Viaduct inspection frame missed downlink window; emergency medical units routed via long mountain bypass.',
+  },
+  REQ_3: {
+    id: 'REQ_3',
+    shortLabel: 'REQ 3 | FAULT SUBSTATION',
+    title: 'Detect Substation Thermal Rupture & Fault Offset',
+    question: 'Does the dust-shrouded Sector E fault corridor show active transformer overheating or liquefaction?',
+    targetDescription: 'Sector E (Chaman Fault Substation) - Dust haze; requires THERMAL IR or Cradle Change-Detection SAR.',
+    minimumConfidence: 'CONFIRMED',
+    requiredBadge: '[OK] CONFIRMED',
+    targetSectorId: 'E',
+    recommendedSensor: 'THERMAL',
+    consequenceOnSuccess:
+      'Multi-sensor change detection isolated the 740 K transformer anomaly in Sector E; grid engineers isolated the faulted busbar.',
+    consequenceOnPartial:
+      'Raw unprocessed radar return detected fault-scarp roughness without isolating the thermal transformer anomaly.',
+    consequenceOnFailure:
+      'Sector E telemetry omitted from downlink pass; regional grid restoration held pending ground reconnaissance.',
+  },
+};
+
 export const MISSION_SCENARIOS: Record<MissionScenarioId, MissionScenarioConfig> = {
   STANDARD_INDUS_PASS: {
     id: 'STANDARD_INDUS_PASS',
-    name: 'Indus Basin Daylight Pass',
-    subtitle: 'Standard sun-synchronous pass over Sindh & Punjab headworks.',
-    briefing: 'Optimal pass window: 55 PWR, 9 STR, 10.0s window. Sectors B & E under monsoon storm clouds; Sector C in clear slot.',
+    operationCode: 'OP 02: MONSOON SHIELD',
+    name: 'Monsoon Shield',
+    subtitle: 'Indus Basin Flood Triage — SAR Cloud Penetration vs. Optical Resolution [SIMULATED]',
+    briefing: '[SIMULATED SCENARIO TELEMETRY] Optimal pass window: 55 Wh Power, 9 STR Buffer, 10.0s Downlink (10.0 MB/s). Sectors B & E under monsoon storm clouds; Sector C in clear slot.',
     budget: MISSION_BUDGET,
+    availableSensors: ['RADAR', 'OPTICAL'],
+    requests: GROUND_REQUESTS,
   },
   MONSOON_SUPERCELL_PASS: {
     id: 'MONSOON_SUPERCELL_PASS',
+    operationCode: 'OP 02B: SUPERCELL SURGE',
     name: 'Monsoon Supercell Penetration',
-    subtitle: 'Severe convective cloud wall spanning Sectors B, C, and E.',
-    briefing: 'Damage-limitation mission: 54 power units, 9 storage units, 9.0s window. Radar sees through all three storm targets, but bridge glare prevents full certainty. Preserve the strongest evidence; 100/100 is not achievable on this pass.',
+    subtitle: 'Severe convective cloud wall spanning Sectors B, C, and E [SIMULATED].',
+    briefing: '[SIMULATED SCENARIO TELEMETRY] Damage-limitation mission: 54 Wh Power, 9 STR Buffer, 9.0s Downlink (10.0 MB/s). Radar sees through all three storm targets, but bridge glare prevents full certainty. Preserve the strongest evidence; 100/100 is not achievable on this pass.',
     budget: {
       ...MISSION_BUDGET,
       initialPower: 54,
       maxStorage: 9,
       downlinkDurationSec: 9.0,
     },
+    availableSensors: ['RADAR', 'OPTICAL'],
+    requests: GROUND_REQUESTS,
     sectorOverrides: {
       C: {
         cloudCover: 'DENSE_STORM',
@@ -371,41 +650,609 @@ export const MISSION_SCENARIOS: Record<MissionScenarioId, MissionScenarioConfig>
             resolutionMeters: 2.2,
             phenomenologyTag: 'METALLIC_DIHEDRAL_MULTIPATH_RADAR',
           },
+          THERMAL: {
+            confidence: 'UNVERIFIED',
+            confidenceBadge: CONFIDENCE_BADGES.UNVERIFIED,
+            headline: 'Convective Cloud Top Opacity',
+            finding: 'Thick convective cloud wall blocks surface thermal emission over Sector C.',
+            scientificReason: 'Optically thick water-droplet cloud cover absorbs terrestrial thermal radiation.',
+            satisfiesRequestId: null,
+            snrDb: 4.0,
+            swathWidthKm: 20.0,
+            resolutionMeters: 20.0,
+            phenomenologyTag: 'CLOUD_TOP_THERMAL_ABSORPTION',
+          },
         },
       },
     },
   },
   SOLAR_BROWNOUT_PASS: {
     id: 'SOLAR_BROWNOUT_PASS',
+    operationCode: 'OP 02C: ECLIPSE BROWNOUT',
     name: 'Eclipse Orbit Solar Brownout',
-    subtitle: 'Battery drain & degraded solid-state storage partition.',
-    briefing: 'Sequence puzzle: 50 power units, 6 storage units, 8.0s window. Tight 6-unit storage partition requires mid-pass cradle compression between scans to avoid memory exhaustion. Razor-thin 2 PWR margin. Evidence order matters as much as downlink order.',
+    subtitle: 'Battery drain & degraded solid-state storage partition [SIMULATED].',
+    briefing: '[SIMULATED SCENARIO TELEMETRY] Sequence puzzle: 50 Wh Power, 6 STR Partition, 8.0s Downlink (10.0 MB/s). Tight 6-unit storage partition requires mid-pass cradle compression between scans to avoid memory exhaustion. Razor-thin 2 Wh margin. Evidence order matters as much as downlink order.',
     budget: {
       ...MISSION_BUDGET,
       initialPower: 50,
       maxStorage: 6,
       downlinkDurationSec: 8.0,
     },
+    availableSensors: ['RADAR', 'OPTICAL'],
+    requests: GROUND_REQUESTS,
+  },
+  ORBITAL_ACADEMY: {
+    id: 'ORBITAL_ACADEMY',
+    operationCode: 'OP 00: ORBITAL ACADEMY',
+    name: 'Orbital Academy: Workstation Qualification',
+    subtitle: 'Guided 9-Step Hand Gesture & Satellite Triage Training Pass [SIMULATED]',
+    briefing:
+      '[SIMULATED TRAINING TELEMETRY] Complete the 9-step Orbital Academy qualification pass: target Sector B, arm Thermal IR (3.9 um), fire scan, grab and inspect the 3D Data Cube, compress in the Amber Processing Cradle (3 STR -> 1 STR), dock into Downlink Bay Slot #1, and commit transmission.',
+    budget: {
+      ...MISSION_BUDGET,
+      initialPower: 52,
+      maxStorage: 9,
+      downlinkDurationSec: 10.0,
+    },
+    availableSensors: ['RADAR', 'OPTICAL', 'THERMAL'],
+    requests: FIRELINE_REQUESTS,
+  },
+  FIRELINE_PASS: {
+    id: 'FIRELINE_PASS',
+    operationCode: 'OP 01: FIRELINE',
+    name: 'Fireline Pass',
+    subtitle: 'Bolan Fireline Emergency Zone — Thermal IR Smoke Penetration & Optical Triage [SIMULATED]',
+    briefing: '[SIMULATED SCENARIO TELEMETRY] Campaign Op 01 (Bolan Fireline Emergency Zone): 52 Wh Power, 9 STR Buffer (18 MB/STR), 10.0s Downlink. Heavy biomass smoke obscures Sector B (Bolan Canyon Highway) & Sector E (Juniper Ridge Fuel Depot) where passive Optical fails; use Mid-Wave Thermal IR (11 Wh) to pinpoint 860 K active flame fronts, and use 0.75m GSD Optical (8 Wh) on clear-sky Sector C (Bolan Viaduct & Firebreak). Pre-scan clue: a thermal anomaly is reported in Sector D (Sibi Basalt & Kiln Flats), where industrial surface heating is a possible alternative explanation to active vegetation combustion.',
+    budget: {
+      ...MISSION_BUDGET,
+      initialPower: 52,
+      maxStorage: 9,
+      downlinkDurationSec: 10.0,
+    },
+    availableSensors: ['RADAR', 'OPTICAL', 'THERMAL'],
+    requests: FIRELINE_REQUESTS,
+    sectorOverrides: {
+      A: {
+        name: 'Ziarat Upper Watershed',
+        terrainSummary: 'Upwind limestone plateau beneath optically thick meteorological cloud cover.',
+        cloudCover: 'CONVECTIVE_CLOUD',
+        outcomes: {
+          OPTICAL: {
+            confidence: 'UNVERIFIED',
+            confidenceBadge: CONFIDENCE_BADGES.UNVERIFIED,
+            headline: 'Optically Thick Cloud Deck - Watershed Obscured',
+            finding: 'Meteorological water/ice cloud cover (tau > 12) blocks visible reflectance over Sector A.',
+            scientificReason: 'Simulated gameplay value (11% confidence): Passive visible/near-IR sensors cannot penetrate optically thick meteorological clouds.',
+            satisfiesRequestId: null,
+            snrDb: 3.9,
+            swathWidthKm: 18.5,
+            resolutionMeters: 0.75,
+            phenomenologyTag: 'CLOUD_TOP_MIE_SCATTERING_OCCLUSION',
+            observationConfidencePct: 11,
+            scientificCaveat: 'Optical Remote Sensing Note (Sim. Obs. Conf. 11%): Thick water/ice cloud decks scatter visible light completely.',
+          },
+          RADAR: {
+            confidence: 'CONFIRMED',
+            confidenceBadge: CONFIDENCE_BADGES.CONFIRMED,
+            headline: 'Watershed Slopes Stable - No Evacuation Corridor Here',
+            finding: '5.4 GHz SAR penetrates cloud deck and confirms stable upland terrain with no priority road request.',
+            scientificReason: 'Simulated gameplay value (74% confidence): Microwave SAR penetrates meteorological clouds to map terrain geometry, though it cannot sense fire temperature.',
+            satisfiesRequestId: null,
+            snrDb: 21.4,
+            swathWidthKm: 24.0,
+            resolutionMeters: 5.0,
+            phenomenologyTag: 'SAR_CLOUD_PENETRATION_NO_THERMAL',
+            observationConfidencePct: 74,
+            scientificCaveat: 'NASA SAR Note (Sim. Obs. Conf. 74%): C-band SAR penetrates thick cloud cover for terrain geometry but is insensitive to radiative temperature.',
+          },
+          THERMAL: {
+            confidence: 'UNVERIFIED',
+            confidenceBadge: CONFIDENCE_BADGES.UNVERIFIED,
+            headline: 'Optically Thick Meteorological Cloud Deck - Thermal IR Blocked',
+            finding: 'Dense water/ice cloud cover (230 K cloud tops) absorbs surface 3.9 um thermal emission over Sector A.',
+            scientificReason: 'Simulated gameplay value (18% confidence): Per NASA FIRMS and NOAA OSPO physical limits, while 3.9 um thermal IR penetrates thin biomass smoke, optically thick meteorological water/ice clouds (tau_3.9 > 4.0) block thermal fire detections.',
+            satisfiesRequestId: null,
+            snrDb: 4.4,
+            swathWidthKm: 20.0,
+            resolutionMeters: 12.0,
+            phenomenologyTag: 'CLOUD_TOP_THERMAL_ABSORPTION',
+            observationConfidencePct: 18,
+            scientificCaveat: 'NASA FIRMS Caveat (Sim. Obs. Conf. 18%): Optically thick meteorological cloud cover blocks both visible and mid-wave infrared fire detection from orbit.',
+          },
+        },
+      },
+      B: {
+        name: 'Bolan Canyon Highway',
+        terrainSummary: 'Primary mountain evacuation route beneath dense pyroconvective biomass smoke plume.',
+        cloudCover: 'DENSE_SMOKE',
+        outcomes: {
+          OPTICAL: {
+            confidence: 'UNVERIFIED',
+            confidenceBadge: CONFIDENCE_BADGES.UNVERIFIED,
+            headline: 'Smoke Plume Mie Scattering - Highway Obscured',
+            finding: 'Thick grey-brown biomass smoke reflects visible wavelengths (0.4-0.9 um); highway flame line invisible.',
+            scientificReason: 'Simulated gameplay value (12% confidence): Sub-micron smoke aerosols scatter visible light strongly via Mie scattering (tau_0.55 = 3.8). Switch to Mid-Wave Thermal Infrared (3.9 um) to penetrate smoke and detect fire radiative power.',
+            satisfiesRequestId: null,
+            snrDb: 4.8,
+            swathWidthKm: 18.5,
+            resolutionMeters: 0.75,
+            phenomenologyTag: 'BIOMASS_SMOKE_MIE_SCATTERING',
+            observationConfidencePct: 12,
+            scientificCaveat: 'Optical Remote Sensing Note (Sim. Obs. Conf. 12%): Dense pyroconvective smoke plumes scatter visible photons, masking the underlying flame front.',
+          },
+          RADAR: {
+            confidence: 'PROBABLE',
+            confidenceBadge: CONFIDENCE_BADGES.PROBABLE,
+            headline: 'Canyon Road Geometry Intact - Blind to Thermal Flame Front',
+            finding: 'SAR maps canyon highway topography through smoke, but microwave backscatter cannot measure active fire temperature.',
+            scientificReason: 'Simulated gameplay value (68% confidence): C-band SAR (5.0 m GSD) is sensitive to surface dielectric roughness rather than thermal emission, leaving active flame boundary only [?] PROBABLE.',
+            satisfiesRequestId: 'REQ_1',
+            snrDb: 15.8,
+            swathWidthKm: 24.0,
+            resolutionMeters: 5.0,
+            phenomenologyTag: 'SAR_TOPOGRAPHY_THERMAL_BLINDNESS',
+            observationConfidencePct: 68,
+            scientificCaveat: 'NASA SAR Note (Sim. Obs. Conf. 68%): SAR penetrates smoke unimpeded but cannot measure combustion temperature.',
+          },
+          THERMAL: {
+            confidence: 'CONFIRMED',
+            confidenceBadge: CONFIDENCE_BADGES.CONFIRMED,
+            headline: '860 K Active Flame Front Flanking Km 14 Switchback',
+            finding: 'Mid-Wave Thermal IR penetrates dense canyon smoke plume (tau_3.9 = 0.48) and isolates a 1.8 km active crown-fire front approaching the highway.',
+            scientificReason: 'Simulated gameplay value (84% confidence): Longer mid-wave infrared wavelengths (3.9 um, 12.0 m GSD) penetrate biomass smoke far better than visible light, though thick vertically developed pyroconvective plumes (tau_3.9 = 0.48) partially attenuate mid-IR radiance (84% simulated confidence vs. 92% in moderate laminar smoke).',
+            satisfiesRequestId: 'REQ_1',
+            snrDb: 15.8,
+            swathWidthKm: 20.0,
+            resolutionMeters: 12.0,
+            phenomenologyTag: 'MWIR_THERMAL_RADIANCE_HOTSPOT',
+            observationConfidencePct: 84,
+            scientificCaveat: 'NOAA OSPO / NASA FIRMS Note (Sim. Obs. Conf. 84%): 3.9 um MWIR penetrates smoke to detect intense 860 K sub-plume combustion, though thick vertically developed pyroconvective plumes partially attenuate mid-IR radiance.',
+          },
+        },
+      },
+      C: {
+        name: 'Bolan Viaduct & Firebreak',
+        terrainSummary: 'Upwind concrete viaduct and 40m mineral-soil firebreak in clear air.',
+        cloudCover: 'CLEAR',
+        outcomes: {
+          OPTICAL: {
+            confidence: 'CONFIRMED',
+            confidenceBadge: CONFIDENCE_BADGES.CONFIRMED,
+            headline: 'Viaduct Deck Clear & 40m Firebreak Intact',
+            finding: '0.75m GSD optical pass detects no major road blockages and confirms cleared 40m mineral-soil firebreak and unobstructed viaduct lanes.',
+            scientificReason: 'Simulated gameplay value (94% confidence): Clear upwind visibility (tau_0.55 = 0.08) allows 0.75 m GSD optical imagery to detect major road blockages and firebreak boundaries that 12.0 m thermal pixels blur together.',
+            satisfiesRequestId: 'REQ_2',
+            snrDb: 29.5,
+            swathWidthKm: 18.5,
+            resolutionMeters: 0.75,
+            phenomenologyTag: 'VISIBLE_NEAR_INFRARED_REFLECTANCE',
+            observationConfidencePct: 94,
+            scientificCaveat: 'Optical Remote Sensing Note (Sim. Obs. Conf. 94%): 0.75 m GSD visible/near-IR reflectance detects major road blockages and cleared 40 m firebreak boundaries under clear skies (GSD is pixel sample spacing rather than fine crack resolving power).',
+          },
+          RADAR: {
+            confidence: 'PROBABLE',
+            confidenceBadge: CONFIDENCE_BADGES.PROBABLE,
+            headline: 'Viaduct Girder Multipath Glare',
+            finding: 'SAR corner-reflector glare along viaduct piers obscures fine firebreak clearance.',
+            scientificReason: 'Simulated gameplay value (66% confidence): Metallic bridge railings produce dihedral multipath returns at 5.0 m SAR resolution that mask roadway surface clearance.',
+            satisfiesRequestId: 'REQ_2',
+            snrDb: 18.1,
+            swathWidthKm: 24.0,
+            resolutionMeters: 5.0,
+            phenomenologyTag: 'METALLIC_DIHEDRAL_MULTIPATH_RADAR',
+            observationConfidencePct: 66,
+            scientificCaveat: 'NASA SAR Note (Sim. Obs. Conf. 66%): Steel viaduct trusses create dihedral corner-reflector glare.',
+          },
+          THERMAL: {
+            confidence: 'PROBABLE',
+            confidenceBadge: CONFIDENCE_BADGES.PROBABLE,
+            headline: 'Ambient Background Temperature - Coarse 12m Resolution',
+            finding: 'Thermal IR shows no active flame on the viaduct (301 K), but 12.0 m pixel footprint cannot resolve narrow deck barriers.',
+            scientificReason: 'Simulated gameplay value (34% structural-clearance confidence): Thermal infrared confirms absence of high-temperature combustion, but coarse 12.0 m spatial resolution cannot verify physical roadway or expansion-joint clearance at ambient temperature.',
+            satisfiesRequestId: 'REQ_2',
+            snrDb: 17.6,
+            swathWidthKm: 20.0,
+            resolutionMeters: 12.0,
+            phenomenologyTag: 'COARSE_THERMAL_MIXED_PIXEL_BLUR',
+            observationConfidencePct: 34,
+            scientificCaveat: 'NASA FIRMS / Sensor Resolution Note (Sim. Obs. Conf. 34%): Spaceborne thermal IR (12.0 m GSD) is far coarser than visible optical imagery (0.75 m GSD) and cannot resolve unheated structural bridge detail.',
+          },
+        },
+      },
+      D: {
+        name: 'Sibi Basalt & Kiln Flats',
+        terrainSummary: 'Thermal anomaly detected (~345 K) near brick kilns & dark basalt; surface signature resembles industrial surface heating rather than active vegetation combustion.',
+        cloudCover: 'CLEAR',
+        outcomes: {
+          OPTICAL: {
+            confidence: 'CONFIRMED',
+            confidenceBadge: CONFIDENCE_BADGES.CONFIRMED,
+            headline: 'Industrial Kilns & Dark Basalt - No Wildfire Front',
+            finding: '0.75m visible frame confirms stationary industrial brick kilns and bare basalt; no vegetation fire here.',
+            scientificReason: 'Simulated gameplay value (93% confidence): High-resolution 0.75 m optical imagery distinguishes industrial smokestacks and dark solar-heated rock from spreading biomass wildfire.',
+            satisfiesRequestId: null,
+            snrDb: 28.0,
+            swathWidthKm: 18.5,
+            resolutionMeters: 0.75,
+            phenomenologyTag: 'VISIBLE_FALSE_POSITIVE_REJECTION',
+            observationConfidencePct: 93,
+            scientificCaveat: 'Optical Remote Sensing Note (Sim. Obs. Conf. 93%): Sub-meter visible context rejects static industrial thermal false positives.',
+          },
+          RADAR: {
+            confidence: 'CONFIRMED',
+            confidenceBadge: CONFIDENCE_BADGES.CONFIRMED,
+            headline: 'Static Industrial Compounds - No Evacuation Route',
+            finding: 'SAR maps permanent kiln masonry outside the Bolan evacuation corridor.',
+            scientificReason: 'Simulated gameplay value (86% confidence): Corner-reflector returns correspond to fixed industrial compounds unrelated to the 3 priority wildfire requests.',
+            satisfiesRequestId: null,
+            snrDb: 22.0,
+            swathWidthKm: 24.0,
+            resolutionMeters: 5.0,
+            phenomenologyTag: 'STATIC_INDUSTRIAL_BACKSCATTER',
+            observationConfidencePct: 86,
+            scientificCaveat: 'NASA SAR Note (Sim. Obs. Conf. 86%): High-backscatter masonry compounds remain static across passes.',
+          },
+          THERMAL: {
+            confidence: 'UNVERIFIED',
+            confidenceBadge: CONFIDENCE_BADGES.UNVERIFIED,
+            headline: 'Static Industrial Kiln & Solar Basalt False-Positive Anomaly (345 K)',
+            finding: 'Thermal IR detects a 345 K surface anomaly over dark basalt and industrial brick kilns — non-wildfire false positive.',
+            scientificReason: 'Simulated gameplay value (15% wildfire confidence): Per NASA FIRMS interpretation caveats, thermal anomalies are not necessarily wildfires; sun-baked dark basalt outcrops and static industrial brick kilns emit elevated thermal radiance that causes false positives without optical context.',
+            satisfiesRequestId: null,
+            snrDb: 16.2,
+            swathWidthKm: 20.0,
+            resolutionMeters: 12.0,
+            phenomenologyTag: 'THERMAL_SOLAR_KILN_FALSE_POSITIVE',
+            observationConfidencePct: 15,
+            scientificCaveat: 'NASA FIRMS False-Positive Caveat (Sim. Obs. Conf. 15%): Static industrial heat sources and solar-heated dark rock trigger thermal false positives that do not represent active wildfires.',
+          },
+        },
+      },
+      E: {
+        name: 'Juniper Ridge Fuel Depot',
+        terrainSummary: 'Highland emergency fuel & medical depot beneath moderate laminar downwind smoke plume.',
+        cloudCover: 'MODERATE_SMOKE',
+        outcomes: {
+          OPTICAL: {
+            confidence: 'UNVERIFIED',
+            confidenceBadge: CONFIDENCE_BADGES.UNVERIFIED,
+            headline: 'Moderate Smoke Plume - Optical Contrast Degraded',
+            finding: 'Advected laminar smoke plume obscures Juniper Ridge Depot perimeter in visible bands.',
+            scientificReason: 'Simulated gameplay value (24% confidence): Moderate smoke aerosol optical depth (tau_0.55 = 1.95) scatters visible reflectance, leaving spot-fire distance unverified.',
+            satisfiesRequestId: null,
+            snrDb: 6.2,
+            swathWidthKm: 18.5,
+            resolutionMeters: 0.75,
+            phenomenologyTag: 'BIOMASS_SMOKE_MIE_SCATTERING',
+            observationConfidencePct: 24,
+            scientificCaveat: 'Optical Remote Sensing Note (Sim. Obs. Conf. 24%): Moderate smoke haze reduces visible surface contrast below operational verification thresholds.',
+          },
+          RADAR: {
+            confidence: 'UNVERIFIED',
+            confidenceBadge: CONFIDENCE_BADGES.UNVERIFIED,
+            headline: 'Canopy Backscatter Masks Ground Ember Perimeter',
+            finding: 'C-band radar scatters off pine canopy needles and cannot detect sub-canopy thermal spot fires.',
+            scientificReason: 'Simulated gameplay value (22% confidence): Microwave radar (5.0 m GSD) measures structural geometry rather than temperature, failing to detect advancing ground embers.',
+            satisfiesRequestId: null,
+            snrDb: 7.4,
+            swathWidthKm: 24.0,
+            resolutionMeters: 5.0,
+            phenomenologyTag: 'CANOPY_VOLUME_SCATTERING_MASK',
+            observationConfidencePct: 22,
+            scientificCaveat: 'NASA SAR Note (Sim. Obs. Conf. 22%): Forest canopy volume scattering masks ground-level thermal spot fires.',
+          },
+          THERMAL: {
+            confidence: 'CONFIRMED',
+            confidenceBadge: CONFIDENCE_BADGES.CONFIRMED,
+            headline: 'Spot-Fire Perimeter Mapped 600m South of Depot',
+            finding: 'Thermal IR penetrates moderate laminar ridge smoke (tau_3.9 = 0.18) and maps 790 K spot-fire hotspots 600m south of the intact depot perimeter.',
+            scientificReason: 'Simulated gameplay value (92% confidence): Moderate laminar downwind smoke (PM2.5 particle radius << 3.9 um, tau_3.9 = 0.18) is highly transparent in mid-wave IR (12.0 m GSD), yielding 92% simulated confidence (higher than the 84% confidence through Sector B dense pyroconvective smoke).',
+            satisfiesRequestId: 'REQ_3',
+            snrDb: 18.6,
+            swathWidthKm: 20.0,
+            resolutionMeters: 12.0,
+            phenomenologyTag: 'MWIR_SMOKE_PENETRATION_ANOMALY',
+            observationConfidencePct: 92,
+            scientificCaveat: 'NOAA OSPO / NASA FIRMS Note (Sim. Obs. Conf. 92%): Moderate laminar smoke plumes have low optical depth at 3.9 um (tau_3.9 = 0.18), allowing high-confidence thermal hotspot localization.',
+          },
+        },
+      },
+      F: {
+        name: 'Kachhi Agricultural Plain',
+        terrainSummary: 'Downwind irrigated agricultural plain under thin peripheral drift smoke.',
+        cloudCover: 'THIN_SMOKE',
+        outcomes: {
+          OPTICAL: {
+            confidence: 'PROBABLE',
+            confidenceBadge: CONFIDENCE_BADGES.PROBABLE,
+            headline: 'Thin Drift Smoke Over Irrigated Fields - No Evacuation Target',
+            finding: '0.75m optical pass sees through thin drift haze (tau_0.55 = 0.55) showing unburned agricultural plots.',
+            scientificReason: 'Simulated gameplay value (58% confidence): Thin drift smoke partially reduces visible contrast, and Sector F contains no requested evacuation routes.',
+            satisfiesRequestId: null,
+            snrDb: 14.5,
+            swathWidthKm: 18.5,
+            resolutionMeters: 0.75,
+            phenomenologyTag: 'THIN_SMOKE_PARTIAL_TRANSMISSION',
+            observationConfidencePct: 58,
+            scientificCaveat: 'Optical Remote Sensing Note (Sim. Obs. Conf. 58%): Thin drift smoke allows partial visible surface observation with reduced contrast.',
+          },
+          RADAR: {
+            confidence: 'CONFIRMED',
+            confidenceBadge: CONFIDENCE_BADGES.CONFIRMED,
+            headline: 'Irrigated Polders Intact - Outside Fire Corridor',
+            finding: 'SAR confirms undisturbed agricultural fields south of the canyon.',
+            scientificReason: 'Simulated gameplay value (88% confidence): C-band SAR penetrates thin smoke haze, confirming normal agricultural terrain unrelated to priority requests.',
+            satisfiesRequestId: null,
+            snrDb: 23.0,
+            swathWidthKm: 24.0,
+            resolutionMeters: 5.0,
+            phenomenologyTag: 'AGRICULTURAL_SURFACE_BACKSCATTER',
+            observationConfidencePct: 88,
+            scientificCaveat: 'NASA SAR Note (Sim. Obs. Conf. 88%): Radar backscatter confirms normal soil moisture and crop structure.',
+          },
+          THERMAL: {
+            confidence: 'CONFIRMED',
+            confidenceBadge: CONFIDENCE_BADGES.CONFIRMED,
+            headline: 'Thin Drift Smoke Penetrated - Ambient 301 K Plain (No Fire)',
+            finding: '3.9 um Thermal IR penetrates thin drift haze (tau_3.9 = 0.10) and measures uniform 301 K irrigated fields with no active wildfire front.',
+            scientificReason: 'Simulated gameplay value (28% wildfire-relevance confidence): Thin peripheral smoke haze is transparent to mid-wave IR, confirming ambient 301 K background terrain with no active combustion in Sector F.',
+            satisfiesRequestId: null,
+            snrDb: 19.8,
+            swathWidthKm: 20.0,
+            resolutionMeters: 12.0,
+            phenomenologyTag: 'AMBIENT_BACKGROUND_UNDER_DRIFT_SMOKE',
+            observationConfidencePct: 28,
+            scientificCaveat: 'NOAA OSPO Note (Sim. Obs. Conf. 28%): Thin drift smoke travels tens of kilometers downwind over cool unburned terrain.',
+          },
+        },
+      },
+    },
+  },
+  AFTERSHOCK_PASS: {
+    id: 'AFTERSHOCK_PASS',
+    operationCode: 'OP 03: AFTERSHOCK',
+    name: 'Aftershock Pass',
+    subtitle: 'Quetta Fault Seismic Crisis — Multi-Sensor Change Detection & 6-STR Buffer [SIMULATED]',
+    briefing: '[SIMULATED SCENARIO TELEMETRY] Campaign Op 03: 50 Wh Power, tight 6 STR Partition, 9.0s Downlink. Suspended seismic dust obscures Sectors B & E. Use SAR Radar on Sector B (landslide dam), Optical on clear-sky Sector C (hospital viaduct), and Thermal IR or Cradle Change-Detection on Sector E (fault substation) while compressing mid-pass to stay within 6 STR.',
+    budget: {
+      ...MISSION_BUDGET,
+      initialPower: 50,
+      maxStorage: 6,
+      downlinkDurationSec: 9.0,
+    },
+    availableSensors: ['RADAR', 'OPTICAL', 'THERMAL'],
+    performsChangeDetection: true,
+    requests: AFTERSHOCK_REQUESTS,
+    sectorOverrides: {
+      B: {
+        name: 'Hanna Valley Gorge',
+        terrainSummary: 'Steep limestone gorge obscured by post-seismic dust plume.',
+        cloudCover: 'SEISMIC_DUST',
+        outcomes: {
+          OPTICAL: {
+            confidence: 'UNVERIFIED',
+            confidenceBadge: CONFIDENCE_BADGES.UNVERIFIED,
+            headline: 'Suspended Silicate Dust Plume - Gorge Obscured',
+            finding: 'Post-tremor rockfall dust veil blocks visible observation of the Hanna Valley spillway.',
+            scientificReason: 'Dense suspended mineral dust scatters visible light. Use active microwave SAR Radar to penetrate the dust veil.',
+            satisfiesRequestId: null,
+            snrDb: 4.3,
+            swathWidthKm: 18.5,
+            resolutionMeters: 0.75,
+            phenomenologyTag: 'SILICATE_DUST_MIE_OCCLUSION',
+          },
+          RADAR: {
+            confidence: 'CONFIRMED',
+            confidenceBadge: CONFIDENCE_BADGES.CONFIRMED,
+            headline: '4.2m Landslide Toe Blocking Valley Spillway',
+            finding: 'C-band SAR penetrates seismic dust plume and resolves a high-backscatter rubble dam across the gorge.',
+            scientificReason: 'Centimeter-scale radar wavelengths pass unimpeded through mineral dust aerosols and produce strong rough-surface backscatter off angular landslide debris.',
+            satisfiesRequestId: 'REQ_1',
+            snrDb: 23.4,
+            swathWidthKm: 24.0,
+            resolutionMeters: 2.2,
+            phenomenologyTag: 'SAR_DEBRIS_ROUGHNESS_BACKSCATTER',
+          },
+          THERMAL: {
+            confidence: 'UNVERIFIED',
+            confidenceBadge: CONFIDENCE_BADGES.UNVERIFIED,
+            headline: 'Isothermal Rockfall Debris - No Thermal Contrast',
+            finding: 'Ambient-temperature limestone rubble blends thermally with valley walls under silicate dust haze.',
+            scientificReason: 'Silicate dust absorbs 8-12 um thermal bands and rockfall debris shares ambient ground temperature.',
+            satisfiesRequestId: null,
+            snrDb: 6.1,
+            swathWidthKm: 20.0,
+            resolutionMeters: 20.0,
+            phenomenologyTag: 'SILICATE_DUST_THERMAL_ATTENUATION',
+          },
+        },
+      },
+      C: {
+        name: 'Quetta Medical Viaduct',
+        terrainSummary: 'Reinforced concrete hospital access bridge in clear upwind air.',
+        cloudCover: 'CLEAR',
+        outcomes: {
+          OPTICAL: {
+            confidence: 'CONFIRMED',
+            confidenceBadge: CONFIDENCE_BADGES.CONFIRMED,
+            headline: 'Viaduct Span Alignment Intact - No Major Road Blockage',
+            finding: '0.75m GSD nadir optical pass detects no major span misalignment, collapsed approaches, or surface debris blockage across all 6 piers.',
+            scientificReason: '0.75 m GSD optical imagery detects substantial visible structural changes and major bridge damage indicators under clear skies (effective spatial resolution depends on sensor MTF and SNR, and cannot resolve fine surface cracks).',
+            satisfiesRequestId: 'REQ_2',
+            snrDb: 29.1,
+            swathWidthKm: 18.5,
+            resolutionMeters: 0.75,
+            phenomenologyTag: 'VISIBLE_NEAR_INFRARED_REFLECTANCE',
+          },
+          RADAR: {
+            confidence: 'PROBABLE',
+            confidenceBadge: CONFIDENCE_BADGES.PROBABLE,
+            headline: 'Reinforced Concrete Corner-Reflector Glare',
+            finding: 'SAR detects standing viaduct piers, but multipath glare masks deck alignment (upgradeable via Cradle pre/post-event SAR backscatter comparison).',
+            scientificReason: 'Single-pass radar intensity suffers from corner-reflector glare; pre-event and post-event SAR backscatter comparison in the Processing Cradle subtracts static clutter to identify potential surface-change evidence.',
+            satisfiesRequestId: 'REQ_2',
+            snrDb: 18.3,
+            swathWidthKm: 24.0,
+            resolutionMeters: 2.2,
+            phenomenologyTag: 'METALLIC_DIHEDRAL_MULTIPATH_RADAR',
+          },
+          THERMAL: {
+            confidence: 'PROBABLE',
+            confidenceBadge: CONFIDENCE_BADGES.PROBABLE,
+            headline: 'Intact Thermal Deck Profile - Coarse 20m Pixel',
+            finding: 'Thermal band shows continuous warm asphalt ribbon, but coarse 20m pixels cannot resolve viaduct span alignment or surface debris blockages.',
+            scientificReason: 'Coarse thermal spatial resolution requires baseline change-detection or optical sub-meter verification.',
+            satisfiesRequestId: 'REQ_2',
+            snrDb: 17.0,
+            swathWidthKm: 20.0,
+            resolutionMeters: 20.0,
+            phenomenologyTag: 'COARSE_THERMAL_MIXED_PIXEL_BLUR',
+          },
+        },
+      },
+      E: {
+        name: 'Chaman Fault Substation',
+        terrainSummary: 'Regional high-voltage grid substation along dust-shrouded fault trace.',
+        cloudCover: 'SEISMIC_DUST',
+        outcomes: {
+          OPTICAL: {
+            confidence: 'UNVERIFIED',
+            confidenceBadge: CONFIDENCE_BADGES.UNVERIFIED,
+            headline: 'Fault-Zone Dust Veil Blocks Optical Camera',
+            finding: 'Suspended fault-rupture dust plume obscures substation transformers in visible bands.',
+            scientificReason: 'Visible wavelengths scatter off suspended fault-scarp dust particles.',
+            satisfiesRequestId: null,
+            snrDb: 4.0,
+            swathWidthKm: 18.5,
+            resolutionMeters: 0.75,
+            phenomenologyTag: 'SILICATE_DUST_MIE_OCCLUSION',
+          },
+          RADAR: {
+            confidence: 'PROBABLE',
+            confidenceBadge: CONFIDENCE_BADGES.PROBABLE,
+            headline: 'Surface Fault Scarp Candidate - Pre/Post Baseline Needed',
+            finding: 'Raw single-pass SAR detects fault-trace roughness near substation; process in Cradle for Multi-Temporal Change Detection to confirm potential surface-change evidence.',
+            scientificReason: 'Single-pass SAR backscatter is ambiguous around steel transformer yards; pre-event and post-event SAR backscatter comparison against the onboard archive subtracts static clutter to highlight potential surface-change evidence (does not independently measure exact displacement without interferometric phase).',
+            satisfiesRequestId: 'REQ_3',
+            snrDb: 16.8,
+            swathWidthKm: 24.0,
+            resolutionMeters: 2.2,
+            phenomenologyTag: 'MULTI_TEMPORAL_BASELINE_CANDIDATE',
+          },
+          THERMAL: {
+            confidence: 'CONFIRMED',
+            confidenceBadge: CONFIDENCE_BADGES.CONFIRMED,
+            headline: '740 K Transformer Oil Fire & Cool Liquefaction Seepage',
+            finding: 'Mid-Wave Thermal IR pierces fault dust haze, isolating an overheating north transformer bank and cool groundwater liquefaction.',
+            scientificReason: 'Intense 3.9 um thermal radiance from the 740 K transformer fault easily penetrates thin mineral dust haze.',
+            satisfiesRequestId: 'REQ_3',
+            snrDb: 25.1,
+            swathWidthKm: 20.0,
+            resolutionMeters: 20.0,
+            phenomenologyTag: 'MWIR_SUBSTATION_THERMAL_ANOMALY',
+          },
+        },
+      },
+    },
+  },
+  DEFENSE_SHIELD_PASS: {
+    id: 'DEFENSE_SHIELD_PASS',
+    operationCode: 'OP 03: AFTERSHOCK',
+    name: 'Operation 03: Aftershock (Seismic Archive)',
+    subtitle: 'Quetta Fault Seismic Crisis — Multi-Sensor Change Detection & 6-STR Buffer [SIMULATED]',
+    briefing: '[SIMULATED SCENARIO TELEMETRY] Humanitarian seismic change-detection pass: 50 Wh Power, 6 STR Partition, 9.0s Downlink.',
+    budget: {
+      ...MISSION_BUDGET,
+      initialPower: 50,
+      maxStorage: 6,
+      downlinkDurationSec: 9.0,
+    },
+    availableSensors: ['RADAR', 'OPTICAL', 'THERMAL'],
+    performsChangeDetection: true,
+    requests: AFTERSHOCK_REQUESTS,
   },
 };
 
+// Ensure ORBITAL_ACADEMY and DEFENSE_SHIELD_PASS share their target sectorOverrides
+MISSION_SCENARIOS.ORBITAL_ACADEMY.sectorOverrides = MISSION_SCENARIOS.FIRELINE_PASS.sectorOverrides;
+MISSION_SCENARIOS.DEFENSE_SHIELD_PASS.sectorOverrides = MISSION_SCENARIOS.AFTERSHOCK_PASS.sectorOverrides;
+
+export const CAMPAIGN_OPERATIONS: readonly MissionScenarioId[] = [
+  'FIRELINE_PASS',
+  'STANDARD_INDUS_PASS',
+  'AFTERSHOCK_PASS',
+  'MONSOON_SUPERCELL_PASS',
+  'SOLAR_BROWNOUT_PASS',
+] as const;
+
 export const MAX_EVIDENCE_CUBES = 3;
 
-export function getScenarioSector(scenarioId: MissionScenarioId, sectorId: SectorId): SectorConfig {
+export function getScenarioSector(
+  scenarioId: MissionScenarioId,
+  sectorId: SectorId,
+  customScenario?: MissionScenarioConfig | null,
+): SectorConfig {
   const base = SECTORS[sectorId];
-  const override = MISSION_SCENARIOS[scenarioId].sectorOverrides?.[sectorId];
-  return override
+  const scenario = customScenario ?? MISSION_SCENARIOS[scenarioId];
+  const override = scenario?.sectorOverrides?.[sectorId];
+  const merged: SectorConfig = override
     ? { ...base, ...override, outcomes: { ...base.outcomes, ...override.outcomes } }
     : base;
+  const enrichOutcome = (mode: SensorMode) => {
+    const raw = merged.outcomes[mode] ?? merged.outcomes.OPTICAL;
+    const derived = deriveSensorScientificCaveat(mode, raw.confidence, raw.phenomenologyTag);
+    return {
+      ...raw,
+      observationConfidencePct: raw.observationConfidencePct ?? derived.observationConfidencePct,
+      scientificCaveat: raw.scientificCaveat ?? derived.scientificCaveat,
+    };
+  };
+  return {
+    ...merged,
+    outcomes: {
+      OPTICAL: enrichOutcome('OPTICAL'),
+      RADAR: enrichOutcome('RADAR'),
+      THERMAL: enrichOutcome('THERMAL'),
+    },
+  };
 }
 
-export function getRecommendedSensor(scenarioId: MissionScenarioId, sectorId: SectorId): SensorMode {
-  const sector = getScenarioSector(scenarioId, sectorId);
+export function getScenarioRequests(
+  scenarioId: MissionScenarioId,
+  customScenario?: MissionScenarioConfig | null,
+): Record<GroundRequestId, GroundRequest> {
+  const scenario = customScenario ?? MISSION_SCENARIOS[scenarioId];
+  return scenario?.requests ?? GROUND_REQUESTS;
+}
+
+export function getRecommendedSensor(
+  scenarioId: MissionScenarioId,
+  sectorId: SectorId,
+  customScenario?: MissionScenarioConfig | null,
+): SensorMode {
+  const sector = getScenarioSector(scenarioId, sectorId, customScenario);
+  const scenario = customScenario ?? MISSION_SCENARIOS[scenarioId];
+  const available = scenario?.availableSensors ?? ['RADAR', 'OPTICAL'];
   const rank = { UNVERIFIED: 0, PROBABLE: 1, CONFIRMED: 2 };
-  const optical = sector.outcomes.OPTICAL;
-  const radar = sector.outcomes.RADAR;
-  if (rank[optical.confidence] !== rank[radar.confidence]) {
-    return rank[optical.confidence] > rank[radar.confidence] ? 'OPTICAL' : 'RADAR';
+  const cost = {
+    OPTICAL: scenario?.budget.opticalScan.powerCost ?? 8,
+    THERMAL: scenario?.budget.thermalScan?.powerCost ?? 11,
+    RADAR: scenario?.budget.radarScan.powerCost ?? 14,
+  };
+
+  let bestMode: SensorMode = available[0] ?? 'RADAR';
+  let bestRank = -1;
+  let bestCost = Infinity;
+
+  for (const mode of available) {
+    const outcome = sector.outcomes[mode] ?? sector.outcomes.OPTICAL;
+    const r = rank[outcome.confidence];
+    const c = cost[mode];
+    if (r > bestRank || (r === bestRank && c < bestCost)) {
+      bestRank = r;
+      bestCost = c;
+      bestMode = mode;
+    }
   }
-  return sector.cloudCover === 'DENSE_STORM' ? 'RADAR' : 'OPTICAL';
+  return bestMode;
 }
