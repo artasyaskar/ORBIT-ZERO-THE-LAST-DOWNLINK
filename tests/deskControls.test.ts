@@ -9,7 +9,7 @@ import { DesktopControlsManager, type DesktopControllerHost } from '../src/syste
 import { createDeskGaugesAsset } from '../src/scene-assets/deskGauges.scene-asset';
 import { createSwathPlungerAsset } from '../src/scene-assets/swathPlunger.scene-asset';
 import { OrbitalAudioController } from '../src/systems/orbitalAudio';
-import { Mesh, Object3D } from '@iwsdk/core';
+import { InstancedMesh, Mesh, Object3D } from '@iwsdk/core';
 
 describe('Phase 3: Diegetic Desk Physical Controls & Arc Gauges', () => {
   describe('Asset Generation & Semantic Hierarchy', () => {
@@ -57,7 +57,21 @@ describe('Phase 3: Diegetic Desk Physical Controls & Arc Gauges', () => {
         expect(seg instanceof Mesh).toBe(true);
       }
 
-      // Preallocated shared materials on userData
+      // Stage 2: Controlled InstancedMesh nodes for zero draw-call bloat
+      const battInst = gauges.getObjectByName('BatteryGaugeInstanced');
+      expect(battInst instanceof InstancedMesh).toBe(true);
+      expect((battInst as InstancedMesh).count).toBe(10);
+
+      const storageInst = gauges.getObjectByName('StorageGaugeInstanced');
+      expect(storageInst instanceof InstancedMesh).toBe(true);
+      expect((storageInst as InstancedMesh).count).toBe(9);
+
+      const winInst = gauges.getObjectByName('WindowGaugeInstanced');
+      expect(winInst instanceof InstancedMesh).toBe(true);
+      expect((winInst as InstancedMesh).count).toBe(10);
+
+      // Preallocated shared materials and colors on userData
+      expect(gauges.userData.colors).toBeDefined();
       expect(gauges.userData.materials).toBeDefined();
       expect(gauges.userData.materials.unlit).toBeDefined();
       expect(gauges.userData.materials.cyan).toBeDefined();

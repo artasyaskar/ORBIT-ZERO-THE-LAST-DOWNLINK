@@ -14,9 +14,13 @@
  */
 
 import {
+  Color,
   CylinderGeometry,
+  DynamicDrawUsage,
   Group,
+  InstancedMesh,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   Object3D,
 } from '@iwsdk/core';
@@ -33,7 +37,13 @@ export function createDeskGaugesAsset(): Object3D {
     metalness: 0.85,
   });
 
-  // Dynamic Segment Materials
+  // Dynamic Segment Palette Colors (used for InstancedMesh.setColorAt)
+  const COLOR_UNLIT = new Color(0x1e293b);
+  const COLOR_CYAN = new Color(0x38bdf8);
+  const COLOR_AMBER = new Color(0xf59e0b);
+  const COLOR_RED = new Color(0xef4444);
+
+  // Dynamic Segment Materials (retained for backward compatibility on userData)
   const unlitMat = new MeshStandardMaterial({
     color: 0x1e293b,
     emissive: 0x0f172a,
@@ -75,50 +85,102 @@ export function createDeskGaugesAsset(): Object3D {
   bezelPlate.position.set(0, 0.006, 0);
   root.add(bezelPlate);
 
-  // 2. Battery Meter: Left Segmented Arc (10 segments, 55 Wh)
+  const segGeo = new CylinderGeometry(0.0022, 0.0022, 0.018, 6);
+  const gaugeSharedMat = new MeshBasicMaterial({ color: 0xffffff });
+  const dummy = new Object3D();
+
+  // 2. Battery Meter: Left Segmented Arc (10 segments into 1 InstancedMesh)
   const battGroup = new Group();
   battGroup.name = 'BatteryGaugeGroup';
   battGroup.position.set(-0.11, 0.013, 0);
 
-  const segGeo = new CylinderGeometry(0.0022, 0.0022, 0.018, 6);
+  const battInstanced = new InstancedMesh(segGeo, gaugeSharedMat, 10);
+  battInstanced.name = 'BatteryGaugeInstanced';
+  battInstanced.instanceMatrix.setUsage(DynamicDrawUsage);
+
   for (let i = 0; i < 10; i++) {
-    const seg = new Mesh(segGeo, i < 10 ? cyanLitMat : unlitMat);
-    seg.name = `GaugeBattSeg_${i}`;
-    seg.rotation.set(Math.PI / 2, 0, 0);
-    seg.position.set((i - 4.5) * 0.0065, 0, 0);
-    battGroup.add(seg);
+    dummy.position.set((i - 4.5) * 0.0065, 0, 0);
+    dummy.rotation.set(Math.PI / 2, 0, 0);
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    battInstanced.setMatrixAt(i, dummy.matrix);
+    battInstanced.setColorAt(i, COLOR_CYAN);
+
+    // Backward-compatible query proxy (hidden from rendering, 0 draw calls)
+    const segProxy = new Mesh(segGeo, cyanLitMat);
+    segProxy.name = `GaugeBattSeg_${i}`;
+    segProxy.visible = false;
+    battGroup.add(segProxy);
   }
+  battInstanced.instanceMatrix.needsUpdate = true;
+  if (battInstanced.instanceColor) battInstanced.instanceColor.needsUpdate = true;
+  battGroup.add(battInstanced);
   root.add(battGroup);
 
-  // 3. Storage Buffer Meter: Center Segmented Arc (9 segments, 9 MB)
+  // 3. Storage Buffer Meter: Center Segmented Arc (9 segments into 1 InstancedMesh)
   const storageGroup = new Group();
   storageGroup.name = 'StorageGaugeGroup';
   storageGroup.position.set(0, 0.013, 0);
 
+  const storageInstanced = new InstancedMesh(segGeo, gaugeSharedMat, 9);
+  storageInstanced.name = 'StorageGaugeInstanced';
+  storageInstanced.instanceMatrix.setUsage(DynamicDrawUsage);
+
   for (let i = 0; i < 9; i++) {
-    const seg = new Mesh(segGeo, unlitMat);
-    seg.name = `GaugeStorageSeg_${i}`;
-    seg.rotation.set(Math.PI / 2, 0, 0);
-    seg.position.set((i - 4) * 0.0065, 0, 0);
-    storageGroup.add(seg);
+    dummy.position.set((i - 4) * 0.0065, 0, 0);
+    dummy.rotation.set(Math.PI / 2, 0, 0);
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    storageInstanced.setMatrixAt(i, dummy.matrix);
+    storageInstanced.setColorAt(i, COLOR_UNLIT);
+
+    // Backward-compatible query proxy (hidden from rendering, 0 draw calls)
+    const segProxy = new Mesh(segGeo, unlitMat);
+    segProxy.name = `GaugeStorageSeg_${i}`;
+    segProxy.visible = false;
+    storageGroup.add(segProxy);
   }
+  storageInstanced.instanceMatrix.needsUpdate = true;
+  if (storageInstanced.instanceColor) storageInstanced.instanceColor.needsUpdate = true;
+  storageGroup.add(storageInstanced);
   root.add(storageGroup);
 
-  // 4. Downlink Window Meter: Right Segmented Arc (10 segments, 10.0s window)
+  // 4. Downlink Window Meter: Right Segmented Arc (10 segments into 1 InstancedMesh)
   const windowGroup = new Group();
   windowGroup.name = 'WindowGaugeGroup';
   windowGroup.position.set(0.11, 0.013, 0);
 
+  const windowInstanced = new InstancedMesh(segGeo, gaugeSharedMat, 10);
+  windowInstanced.name = 'WindowGaugeInstanced';
+  windowInstanced.instanceMatrix.setUsage(DynamicDrawUsage);
+
   for (let i = 0; i < 10; i++) {
-    const seg = new Mesh(segGeo, unlitMat);
-    seg.name = `GaugeWindowSeg_${i}`;
-    seg.rotation.set(Math.PI / 2, 0, 0);
-    seg.position.set((i - 4.5) * 0.0065, 0, 0);
-    windowGroup.add(seg);
+    dummy.position.set((i - 4.5) * 0.0065, 0, 0);
+    dummy.rotation.set(Math.PI / 2, 0, 0);
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    windowInstanced.setMatrixAt(i, dummy.matrix);
+    windowInstanced.setColorAt(i, COLOR_UNLIT);
+
+    // Backward-compatible query proxy (hidden from rendering, 0 draw calls)
+    const segProxy = new Mesh(segGeo, unlitMat);
+    segProxy.name = `GaugeWindowSeg_${i}`;
+    segProxy.visible = false;
+    windowGroup.add(segProxy);
   }
+  windowInstanced.instanceMatrix.needsUpdate = true;
+  if (windowInstanced.instanceColor) windowInstanced.instanceColor.needsUpdate = true;
+  windowGroup.add(windowInstanced);
   root.add(windowGroup);
 
-  // Store material palette on userData for zero-allocation runtime updates in missionControlSystem
+  // Store preallocated color palette and material references on userData
+  root.userData.colors = {
+    unlit: COLOR_UNLIT,
+    cyan: COLOR_CYAN,
+    amber: COLOR_AMBER,
+    red: COLOR_RED,
+  };
+
   root.userData.materials = {
     unlit: unlitMat,
     cyan: cyanLitMat,

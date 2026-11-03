@@ -393,9 +393,13 @@ export class MissionEngine {
     pkt.processed = true;
     pkt.processingState = 'PROCESSED';
     pkt.compressionAlgorithm =
-      pkt.sectorId === 'C'
-        ? 'EDGE_TRUSS_VECTORIZATION'
-        : 'NDWI_WATER_MASK_EXTRACTION';
+      pkt.sensorMode === 'OPTICAL'
+        ? pkt.sectorId === 'C'
+          ? 'OPTICAL_ROAD_EDGE_ENCODING'
+          : 'OPTICAL_EVIDENCE_COMPRESSION'
+        : pkt.sectorId === 'C'
+          ? 'SAR_AMBIGUITY_METADATA_ENCODING'
+          : 'SAR_BACKSCATTER_EVIDENCE_COMPRESSION';
     pkt.processingOperation = pkt.compressionAlgorithm;
     pkt.provenanceLineage = `${pkt.provenanceLineage} -> CRADLE[${pkt.compressionAlgorithm}]`;
     if (!pkt.provenanceChain) pkt.provenanceChain = [];

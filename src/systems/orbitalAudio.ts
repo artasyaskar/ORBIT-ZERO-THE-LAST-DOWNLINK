@@ -629,12 +629,12 @@ export class OrbitalAudioController {
     } catch {}
   }
 
-  public playLaserCharge(): void {
+  public playCarrierAcquisition(): void {
     if (this.volume <= 0) return;
     const ctx = this.ensureContext();
     if (!ctx) return;
     try {
-      // Rising frequency sweep (laser charge buildup)
+      // Rising frequency sweep (S-band carrier synthesizer acquisition lock)
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       const now = ctx.currentTime;
@@ -658,6 +658,10 @@ export class OrbitalAudioController {
         } catch {}
       };
     } catch {}
+  }
+
+  public playLaserCharge(): void {
+    this.playCarrierAcquisition();
   }
 
   public playSuccessFanfare(): void {

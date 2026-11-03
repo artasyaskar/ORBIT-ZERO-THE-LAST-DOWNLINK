@@ -744,7 +744,7 @@ export function createEarthGlobeAsset(): Object3D {
   mergeStaticMeshesByMaterial(karachiGroup, ['KarachiDishShockwave']);
   root.add(karachiGroup);
 
-  // 9. Phase 5: Volumetric Space-to-Ground Downlink Telemetry Laser (CubeSat -> Karachi)
+  // 9. Phase 5: Space-to-Ground Downlink Telemetry Beam Visualization (Stylized 2205.5 MHz S-band carrier link)
   const laserGroup = new Group();
   laserGroup.name = 'DownlinkLaserBeamGroup';
 
@@ -853,6 +853,7 @@ export function createEarthGlobeAsset(): Object3D {
     activeReticleGroup.add(bracketMesh);
   }
 
+  mergeStaticMeshesByMaterial(activeReticleGroup);
   activeReticleGroup.visible = true;
   root.add(activeReticleGroup);
 
@@ -998,16 +999,6 @@ export function createSectorMarkerAsset(
     corePip.position.set(0, pylonHeight + 0.0055, 0);
     root.add(corePip);
   }
-
-  // 5. Generous Semi-Transparent Pick Collider Sphere (r = 28mm)
-  // Ensures mouse raycasts and VR index fingers reliably hit the beacon from any orientation
-  const pickCollider = new Mesh(
-    new SphereGeometry(0.028, 12, 8),
-    sharedPickColliderMat,
-  );
-  pickCollider.name = 'SectorPickCollider';
-  pickCollider.position.set(0, 0.020, 0);
-  root.add(pickCollider);
 
   mergeStaticMeshesByMaterial(root);
 

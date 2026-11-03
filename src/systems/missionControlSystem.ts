@@ -19,6 +19,7 @@ import {
   Grabbed,
   GrabSystem,
   InputSystem,
+  InstancedMesh,
   Line,
   Mesh,
   MeshBasicMaterial,
@@ -86,9 +87,9 @@ const DOWNLINK_BAY_POSITIONS: [number, number, number][] = [
   [0.49, 0.79, -0.46],
 ];
 
-const STANDBY_CUBE_COLORS = [0x38bdf8, 0xf59e0b, 0x10b981];
+const STANDBY_CUBE_COLORS = [0x38bdf8, 0x38bdf8, 0xf59e0b];
 
-const SCANNER_HOME_POSITION = new Vector3(0.66, 0.71, -0.22);
+const SCANNER_HOME_POSITION = new Vector3(0.65, 0.22, 0.15);
 const GLOBE_CENTER_WORLD = new Vector3(0, 0.98, -0.58);
 const PROCESS_CRADLE_WORLD = new Vector3(0.24, 0.79, -0.55);
 const DISCARD_CHUTE_WORLD = new Vector3(0.45, 0.79, -0.44);
@@ -120,6 +121,12 @@ export class MissionControlSystem extends createSystem({
   private materialCache = new WeakMap<Object3D, MeshStandardMaterial[]>();
   private cubeCanvasMap = new Map<number, CubeCanvasBinding>();
   private tempVec = new Vector3();
+  private tempObj = new Object3D();
+  private hasHiddenParkedPads = false;
+  private static readonly GAUGE_COLOR_UNLIT = new Color(0x1e293b);
+  private static readonly GAUGE_COLOR_CYAN = new Color(0x38bdf8);
+  private static readonly GAUGE_COLOR_AMBER = new Color(0xf59e0b);
+  private static readonly GAUGE_COLOR_RED = new Color(0xef4444);
   private lastTransmittedCount = 0;
   private downlinkUiSyncAccumulator = 0;
   private missionElapsedTime = 0;
@@ -231,6 +238,20 @@ export class MissionControlSystem extends createSystem({
     if (globe) {
       this.earthGlobeEnhancements = createEarthGlobeEnhancementsOptimized();
       globe.add(this.earthGlobeEnhancements);
+    }
+
+    // Hide retired legacy console pads parked at [0, -10, 0] from rendering (eliminates 13 redundant draw calls)
+    const parkedPadIds = [
+      'pad-fire-swath',
+      'pad-toggle-sensor',
+      'pad-process-cradle',
+      'pad-queue-downlink',
+      'pad-commit-downlink',
+      'pad-discard-chute',
+    ];
+    for (const id of parkedPadIds) {
+      const obj = this.world.getSceneObject(id);
+      if (obj) obj.visible = false;
     }
 
     // 1b. Bind Deep-Space Milky Way Cosmic Skybox Dome
@@ -490,6 +511,30 @@ export class MissionControlSystem extends createSystem({
         },
         getDrawCalls: () => this.world.renderer.info.render.calls,
         getTriangles: () => this.world.renderer.info.render.triangles,
+        getDrawCallList: () => {
+          const names: string[] = [];
+          this.scene.traverse((obj) => {
+            if ((obj as any).isMesh || (obj as any).isLine || (obj as any).isPoints) {
+              if (obj.visible) {
+                let cur: Object3D | null = obj.parent;
+                let allVisible = true;
+                const path: string[] = [obj.name || obj.type];
+                while (cur) {
+                  if (!cur.visible) {
+                    allVisible = false;
+                    break;
+                  }
+                  if (cur.name) path.unshift(cur.name);
+                  cur = cur.parent;
+                }
+                if (allVisible) {
+                  names.push(path.join(' / '));
+                }
+              }
+            }
+          });
+          return names;
+        },
         setScenario: (id: MissionScenarioId) => {
           this.dailyDate = null;
           this.engine.setScenario(id);
@@ -562,6 +607,22 @@ export class MissionControlSystem extends createSystem({
   }
 
   update(delta: number): void {
+    if (!this.hasHiddenParkedPads) {
+      this.hasHiddenParkedPads = true;
+      const parkedPadIds = [
+        'pad-fire-swath',
+        'pad-toggle-sensor',
+        'pad-process-cradle',
+        'pad-queue-downlink',
+        'pad-commit-downlink',
+        'pad-discard-chute',
+      ];
+      for (const id of parkedPadIds) {
+        const obj = this.world.getSceneObject(id);
+        if (obj) obj.visible = false;
+      }
+    }
+
     this.frameSnapshot = this.engine.getState();
     if (this.frameSnapshot.paused) return;
     const simulationDelta = Math.max(0, delta);
@@ -710,40 +771,62 @@ export class MissionControlSystem extends createSystem({
     const deskGauges = this.world.getSceneObject('desk-gauges');
     if (deskGauges && this.frameSnapshot) {
       const state = this.frameSnapshot;
+      const cUnlit = MissionControlSystem.GAUGE_COLOR_UNLIT;
+      const cCyan = MissionControlSystem.GAUGE_COLOR_CYAN;
+      const cAmber = MissionControlSystem.GAUGE_COLOR_AMBER;
+      const cRed = MissionControlSystem.GAUGE_COLOR_RED;
       const mats = deskGauges.userData.materials;
-      if (mats) {
-        // 1. Battery Gauge (10 segments, 55 Wh total capacity)
-        const litBattSegs = Math.max(0, Math.min(10, Math.ceil((state.power / 55) * 10)));
+
+      // 1. Battery Gauge (10 segments into 1 InstancedMesh)
+      const battInst = deskGauges.getObjectByName('BatteryGaugeInstanced');
+      const litBattSegs = Math.max(0, Math.min(10, Math.ceil((state.power / 55) * 10)));
+      if (battInst instanceof InstancedMesh) {
+        const battColor = state.power > 44 ? cCyan : state.power >= 20 ? cAmber : cRed;
+        for (let i = 0; i < 10; i++) {
+          battInst.setColorAt(i, i < litBattSegs ? battColor : cUnlit);
+        }
+        if (battInst.instanceColor) battInst.instanceColor.needsUpdate = true;
+      } else if (mats) {
         const battMat = state.power > 44 ? mats.cyan : state.power >= 20 ? mats.amber : mats.red;
         for (let i = 0; i < 10; i++) {
           const seg = deskGauges.getObjectByName(`GaugeBattSeg_${i}`);
-          if (seg instanceof Mesh) {
-            seg.material = i < litBattSegs ? battMat : mats.unlit;
-          }
+          if (seg instanceof Mesh) seg.material = i < litBattSegs ? battMat : mats.unlit;
         }
+      }
 
-        // 2. Solid-State Storage Buffer Gauge (9 segments, 9 MB total capacity)
-        const litStorageSegs = Math.max(0, Math.min(9, Math.ceil(state.storageUsed)));
+      // 2. Solid-State Storage Buffer Gauge (9 segments into 1 InstancedMesh)
+      const storageInst = deskGauges.getObjectByName('StorageGaugeInstanced');
+      const litStorageSegs = Math.max(0, Math.min(9, Math.ceil(state.storageUsed)));
+      if (storageInst instanceof InstancedMesh) {
+        for (let i = 0; i < 9; i++) {
+          storageInst.setColorAt(i, i < litStorageSegs ? cAmber : cUnlit);
+        }
+        if (storageInst.instanceColor) storageInst.instanceColor.needsUpdate = true;
+      } else if (mats) {
         for (let i = 0; i < 9; i++) {
           const seg = deskGauges.getObjectByName(`GaugeStorageSeg_${i}`);
-          if (seg instanceof Mesh) {
-            seg.material = i < litStorageSegs ? mats.amber : mats.unlit;
-          }
+          if (seg instanceof Mesh) seg.material = i < litStorageSegs ? mats.amber : mats.unlit;
         }
+      }
 
-        // 3. Karachi Contact Window Gauge (10 segments, 10.0s window)
-        const queuedPackets = state.packets.filter((p) => state.queuePacketIds.includes(p.id));
-        const totalTxSec = queuedPackets.reduce((acc, p) => acc + p.transmitSec, 0);
-        const isOverflow = totalTxSec > state.downlinkWindowSec;
-        const litWinSegs = Math.max(0, Math.min(10, Math.ceil(totalTxSec)));
-        const flashRed = isOverflow && Math.sin(this.elapsedTime * 14) > 0;
+      // 3. Karachi Contact Window Gauge (10 segments into 1 InstancedMesh)
+      const windowInst = deskGauges.getObjectByName('WindowGaugeInstanced');
+      const queuedPackets = state.packets.filter((p) => state.queuePacketIds.includes(p.id));
+      const totalTxSec = queuedPackets.reduce((acc, p) => acc + p.transmitSec, 0);
+      const isOverflow = totalTxSec > state.downlinkWindowSec;
+      const litWinSegs = Math.max(0, Math.min(10, Math.ceil(totalTxSec)));
+      const flashRed = isOverflow && Math.sin(this.elapsedTime * 14) > 0;
+      if (windowInst instanceof InstancedMesh) {
+        const winColor = flashRed ? cRed : totalTxSec <= 8 ? cCyan : cAmber;
+        for (let i = 0; i < 10; i++) {
+          windowInst.setColorAt(i, i < litWinSegs ? winColor : cUnlit);
+        }
+        if (windowInst.instanceColor) windowInst.instanceColor.needsUpdate = true;
+      } else if (mats) {
         const winMat = flashRed ? mats.red : totalTxSec <= 8 ? mats.cyan : mats.amber;
-
         for (let i = 0; i < 10; i++) {
           const seg = deskGauges.getObjectByName(`GaugeWindowSeg_${i}`);
-          if (seg instanceof Mesh) {
-            seg.material = i < litWinSegs ? winMat : mats.unlit;
-          }
+          if (seg instanceof Mesh) seg.material = i < litWinSegs ? winMat : mats.unlit;
         }
       }
     }
@@ -823,16 +906,33 @@ export class MissionControlSystem extends createSystem({
         emitter.material.emissiveIntensity = 0.9 + (metrics.isSpeaking ? 0.8 * metrics.intensity : 0.12 * Math.sin(this.elapsedTime * 3));
       }
 
-      // Animate 3D Audio Spectrum Waveform bars beside ARIA's head (Concept Image 1 Match)
+      // Animate 3D Audio Spectrum Waveform bars beside ARIA's head (Concept Image 1 Match - InstancedMesh)
       const waveformObj = avatarObj.getObjectByName('AriaWaveform3D');
       if (waveformObj) {
-        for (let i = 0; i < 18; i++) {
-          const bar = waveformObj.getObjectByName(`AriaWaveBar_${i}`);
-          if (bar) {
+        const instancedBars = waveformObj.getObjectByName('AriaWaveformInstancedBars');
+        if (instancedBars instanceof InstancedMesh) {
+          for (let i = 0; i < 20; i++) {
+            const baseH = 0.016 + 0.052 * Math.sin((i / 19) * Math.PI);
             const wave = metrics.isSpeaking
               ? 0.4 + 0.6 * Math.abs(Math.sin(this.elapsedTime * 14 + i * 0.85)) * metrics.intensity
               : 0.2 + 0.12 * Math.sin(this.elapsedTime * 2.5 + i * 0.4);
-            bar.scale.y = Math.max(0.25, wave * 2.4);
+            const scaleY = Math.max(0.25, wave * 2.4);
+            this.tempObj.position.set(i * 0.011, 0, 0);
+            this.tempObj.rotation.set(0, 0, 0);
+            this.tempObj.scale.set(1.0, baseH * scaleY, 1.0);
+            this.tempObj.updateMatrix();
+            instancedBars.setMatrixAt(i, this.tempObj.matrix);
+          }
+          instancedBars.instanceMatrix.needsUpdate = true;
+        } else {
+          for (let i = 0; i < 18; i++) {
+            const bar = waveformObj.getObjectByName(`AriaWaveBar_${i}`);
+            if (bar) {
+              const wave = metrics.isSpeaking
+                ? 0.4 + 0.6 * Math.abs(Math.sin(this.elapsedTime * 14 + i * 0.85)) * metrics.intensity
+                : 0.2 + 0.12 * Math.sin(this.elapsedTime * 2.5 + i * 0.4);
+              bar.scale.y = Math.max(0.25, wave * 2.4);
+            }
           }
         }
       }
@@ -1234,7 +1334,7 @@ export class MissionControlSystem extends createSystem({
             }
           }
 
-          // Phase 5: Space-to-Ground Volumetric Downlink Laser & Karachi Ground Station Lock
+          // Phase 5: Space-to-Ground Downlink Telemetry Beam & Karachi Ground Station Lock (Stylized S-Band Carrier Link Visualization)
           const globe = this.world.getSceneObject('earth-globe');
           const cubesat = this.world.getSceneObject('cubesat-spacecraft');
           if (globe && cubesat) {
@@ -1902,7 +2002,7 @@ export class MissionControlSystem extends createSystem({
     const isDebrief = this.engine.getState().phase === 'DEBRIEF';
 
     if (this.briefingPanel) {
-      this.briefingPanel.visible = show;
+      this.briefingPanel.visible = show && !isDebrief;
     }
     if (this.telemetryPanel) {
       this.telemetryPanel.visible = show;
@@ -1984,6 +2084,21 @@ export class MissionControlSystem extends createSystem({
     this.applyAction({ type: 'SET_SENSOR', sensorMode: this.engine.getState().activeSensorMode === 'RADAR' ? 'OPTICAL' : 'RADAR' });
     this.playCue('TOGGLE_SENSOR');
     const state = this.engine.getState();
+    const isRadar = state.activeSensorMode === 'RADAR';
+
+    // Animate physical 3D aerospace switch stem & micro-LED on flight deck
+    const consoleObj = this.world.getSceneObject('orbital-console');
+    if (consoleObj) {
+      const stem = consoleObj.getObjectByName('SensorToggleStem');
+      if (stem) {
+        stem.rotation.x = isRadar ? -0.38 : 0.38;
+      }
+      const led = consoleObj.getObjectByName('SensorSwitchLed');
+      if (led instanceof Mesh && led.material instanceof MeshBasicMaterial) {
+        led.material.color.setHex(isRadar ? 0x10b981 : 0x38bdf8);
+      }
+    }
+
     this.voiceCommander?.handleSectorSelection(state.selectedSectorId, state.activeSensorMode);
     this.syncAll();
   }
@@ -2114,7 +2229,7 @@ export class MissionControlSystem extends createSystem({
       this.lastDownlinkTickSecond = -1;
       this.playCue('SOLENOID_LATCH');
       this.playCue('DOWNLINK_COMMIT');
-      this.audio.playLaserCharge(); // High-energy laser charge buildup
+      this.audio.playCarrierAcquisition(); // S-band carrier synthesizer lock buildup
       this.voiceCommander?.trigger('DOWNLINK_TRANSMIT');
 
       // Immediately activate live S-Band microwave uplink beam
@@ -2249,10 +2364,9 @@ export class MissionControlSystem extends createSystem({
       });
     }
     const scanner = this.world.getSceneObject('scanner-tool');
-    SCANNER_HOME_POSITION.x = preferences.dominantHand === 'LEFT' ? -0.66 : 0.66;
-    SCANNER_HOME_POSITION.z = -0.22;
-    SCANNER_HOME_POSITION.y = 0.71;
-    SCANNER_HOME_POSITION.z = -0.35;
+    SCANNER_HOME_POSITION.x = preferences.dominantHand === 'LEFT' ? -0.65 : 0.65;
+    SCANNER_HOME_POSITION.y = 0.22;
+    SCANNER_HOME_POSITION.z = 0.15;
     const holster = this.world.getSceneObject('orbital-console')?.getObjectByName('ScannerHolster');
     if (holster) holster.position.x = SCANNER_HOME_POSITION.x;
     if (scanner && !this.isAnyObjectGrabbed()) scanner.position.copy(SCANNER_HOME_POSITION);
@@ -2307,7 +2421,7 @@ export class MissionControlSystem extends createSystem({
   public setCameraPreset(preset: 'HERO' | 'GLOBE' | 'CUBES' | 'CRADLE' | 'DOWNLINK' | 'DEBRIEF'): void {
     if (this.world.renderer.xr.isPresenting) return;
     const presets: Record<string, { pos: [number, number, number]; target: [number, number, number]; fov: number }> = {
-      HERO: { pos: [0, 1.15, 0.48], target: [0, 1.18, -0.76], fov: 75 },
+      HERO: { pos: [0, 1.12, 0.46], target: [0, 1.15, -0.78], fov: 76 },
       GLOBE: { pos: [0, 1.12, -0.22], target: [0, 0.99, -0.58], fov: 55 },
       CUBES: { pos: [-0.37, 0.98, -0.18], target: [-0.37, 0.79, -0.43], fov: 50 },
       CRADLE: { pos: [0.24, 0.96, -0.28], target: [0.24, 0.79, -0.55], fov: 50 },
@@ -3070,7 +3184,7 @@ export class MissionControlSystem extends createSystem({
   /**
    * High-DPI 512×512 telemetry renderer with 4-quadrant layout:
    * 1. Top Header Banner: Sector code, sensor mode & request match status pill
-   * 2. Left Swath: Simulated Synthetic Aperture Radar backscatter or Optical NDWI flood swath
+   * 2. Left Swath: Simulated Synthetic Aperture Radar backscatter or Optical visible swath
    * 3. Right Telemetry: SNR signal ratio, confidence grade, AI compression state
    * 4. Bottom Meter: Transmit duration vs 10.0s downlink window consumption bar
    */
@@ -3209,7 +3323,7 @@ export class MissionControlSystem extends createSystem({
       ctx.font = 'bold 20px monospace';
       ctx.fillText(matchLabel, 344, 68);
 
-      // 2. Left Visual Swath Box (Radar Backscatter or Optical NDWI Swath)
+      // 2. Left Visual Swath Box (Radar Backscatter or Optical Swath)
       ctx.fillStyle = '#0b1626';
       ctx.fillRect(26, 106, 224, 218);
       ctx.strokeStyle = '#1e3a5f';
@@ -3270,7 +3384,7 @@ export class MissionControlSystem extends createSystem({
         ctx.fillStyle = '#38bdf8';
         ctx.font = 'bold 16px monospace';
         ctx.fillText(
-          pkt.sensorMode === 'RADAR' ? 'SAR BACKSCATTER' : 'OPTICAL NDWI',
+          pkt.sensorMode === 'RADAR' ? 'SAR BACKSCATTER' : 'OPTICAL SWATH',
           36,
           130,
         );
@@ -3292,8 +3406,16 @@ export class MissionControlSystem extends createSystem({
       ctx.font = 'bold 16px monospace';
       ctx.fillText(snrText, 274, 178);
 
+      const compLabel =
+        pkt.compressionAlgorithm === 'OPTICAL_ROAD_EDGE_ENCODING'
+          ? 'EDGE'
+          : pkt.compressionAlgorithm === 'SAR_AMBIGUITY_METADATA_ENCODING'
+            ? 'AMBIG'
+            : pkt.sensorMode === 'RADAR'
+              ? 'SAR-ENC'
+              : 'OPT-ENC';
       const procStr = pkt.processed
-        ? `1 STR (${pkt.compressionAlgorithm === 'EDGE_TRUSS_VECTORIZATION' ? 'TRUSS' : 'NDWI'})`
+        ? `1 STR (${compLabel})`
         : '3 STR (RAW)';
       ctx.fillStyle = pkt.processed ? '#10b981' : '#f59e0b';
       ctx.font = 'bold 16px monospace';

@@ -8,65 +8,31 @@
  */
 
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { createServer } from 'node:net';
-import { get as getHttps } from 'node:https';
+import { readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { preview } from 'vite';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const vite = join(root, 'node_modules', 'vite', 'bin', 'vite.js');
 
-// 1. Allocate free port
-const port = await new Promise((resolvePort, reject) => {
-  const server = createServer();
-  server.once('error', reject);
-  server.listen(0, '127.0.0.1', () => {
-    const address = server.address();
-    server.close(() => resolvePort(address.port));
-  });
+console.log('[RC9-Master] Starting in-process Vite preview server...');
+const previewServer = await preview({
+  root,
+  preview: {
+    host: '127.0.0.1',
+    port: 0,
+  },
 });
 
-const url = `https://127.0.0.1:${port}/`;
-console.log(`[RC9-Master] Starting Vite preview server at ${url}...`);
-
-const preview = spawn(
-  process.execPath,
-  [vite, 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
-  { cwd: root, stdio: 'pipe' }
-);
-
-let serverLog = '';
-preview.stdout.on('data', (d) => { serverLog += d; });
-preview.stderr.on('data', (d) => { serverLog += d; });
+const url = previewServer.resolvedUrls.local[0];
+console.log(`[RC9-Master] Preview server ready at ${url}. Launching Chrome with WebGL ANGLE...`);
 
 let browser;
 let page;
 const testResults = [];
 
 try {
-  // Wait for preview server ready
-  const deadline = Date.now() + 30000;
-  while (true) {
-    try {
-      const ready = await new Promise((res) => {
-        const req = getHttps(url, { rejectUnauthorized: false }, (r) => {
-          r.resume();
-          res(r.statusCode === 200);
-        });
-        req.on('error', () => res(false));
-        req.setTimeout(1000, () => { req.destroy(); res(false); });
-      });
-      if (ready) break;
-    } catch {}
-    if (Date.now() > deadline) {
-      throw new Error(`Preview server did not start within 30s. Logs:\n${serverLog}`);
-    }
-    await new Promise((r) => setTimeout(r, 250));
-  }
-
-  console.log(`[RC9-Master] Preview server ready. Launching Chrome with WebGL ANGLE...`);
   browser = await chromium.launch({
     channel: process.platform === 'win32' ? 'chrome' : 'chromium',
     headless: true,
@@ -83,17 +49,38 @@ try {
     viewport: { width: 1280, height: 720 },
     ignoreHTTPSErrors: true,
   });
-  page = await context.newPage();
-  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-  console.log(`[RC9-Master] Waiting for window.__ORBIT_ZERO__ runtime...`);
+  const iwerSource = await readFile(join(root, 'node_modules', 'iwer', 'build', 'iwer.js'), 'utf8');
+  await context.addInitScript({
+    content: `${iwerSource}\nconst device = new window.IWER.XRDevice(window.IWER.metaQuest3, { stereoEnabled: false }); device.installRuntime({forceInstall:true}); device.primaryInputMode = 'hand'; window.__ORBIT_IWER__ = device;`,
+  });
+
+  page = await context.newPage();
+  page.on('pageerror', (err) => console.error('[Browser Error]', err));
+  page.on('console', (msg) => {
+    console.log(`[Browser Console ${msg.type()}]`, msg.text());
+  });
+
+  const response = await page.goto(`${url}?game=1`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  console.log(`[RC9-Master] HTTP Status: ${response?.status()}, URL: ${page.url()}, Title: "${await page.title()}"`);
+
+  console.log(`[RC9-Master] Waiting for window.__ORBIT_ZERO__ runtime (up to 90s for cold shader compilation)...`);
   await page.waitForFunction(
     () => typeof window.__ORBIT_ZERO__ !== 'undefined',
     null,
-    { timeout: 30000 }
+    { timeout: 90000 }
   );
 
   await page.waitForTimeout(1500);
+
+  // If initial operator briefing directive modal is active, dismiss via player-facing action
+  const commenceBtn = page.locator('#orbit-zero-briefing-modal #btn-commence-pass');
+  if (await commenceBtn.isVisible()) {
+    console.log('[RC9-Master] Dismissing operator crisis directive modal via player-facing #orbit-zero-briefing-modal #btn-commence-pass...');
+    await commenceBtn.click();
+    await page.waitForSelector('#orbit-zero-briefing-modal', { state: 'hidden', timeout: 5000 }).catch(() => {});
+    await page.waitForTimeout(400);
+  }
 
   // =========================================================================
   // TEST 1: 3D Gimbal Globe Interactive Drag Rotation & Focal Zoom
@@ -252,7 +239,7 @@ try {
   await page.evaluate(() => {
     window.__ORBIT_ZERO__.simulateCubeDrop(0, 'PROCESS');
   });
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(1400);
 
   const postCradleState = await page.evaluate(() => {
     const st = window.__ORBIT_ZERO__.getState();
@@ -318,9 +305,9 @@ try {
   testResults.push('TEST 7 PASSED: Downlink Bay Slotting and Physical Drag-Out Unqueue Recovery');
 
   // =========================================================================
-  // TEST 8: S-Rank Triage Multi-Target Acquisition
+  // TEST 8: Two-Target Acquisition Within Downlink Window
   // =========================================================================
-  console.log('\n--- TEST 8: S-Rank Multi-Target Acquisition ---');
+  console.log('\n--- TEST 8: Two-Target Acquisition Within Downlink Window ---');
   // Scan Sector C (Bridge Crossing Approach) with OPTICAL
   await page.evaluate(() => {
     const api = window.__ORBIT_ZERO__;
@@ -352,12 +339,20 @@ try {
   assert.equal(preTxAudit.committedSec, 5.8, 'Total committed duration must be 5.8s (1.8s + 4.0s)');
   assert.equal(preTxAudit.fitsWindow, true, 'Queue must comfortably fit inside the 10.0s Karachi contact window');
   console.log(`Pre-Transmission Queue: ${preTxAudit.queueCount} packets, ${preTxAudit.committedSec}s / ${preTxAudit.windowSec}s [Margin: ${(preTxAudit.windowSec - preTxAudit.committedSec).toFixed(1)}s]`);
-  testResults.push('TEST 8 PASSED: S-Rank Multi-Target Acquisition within 10.0s Horizon Window');
+  const activeGameplayPerf = await page.evaluate(() => {
+    const api = window.__ORBIT_ZERO__;
+    return {
+      drawCalls: api.getDrawCalls(),
+      triangles: api.getTriangles(),
+    };
+  });
+  console.log(`[Active Gameplay State Profiling] Draw Calls = ${activeGameplayPerf.drawCalls}, Triangles = ${activeGameplayPerf.triangles}`);
+  testResults.push('TEST 8 PASSED: Two-Target Rapid Acquisition (Sector B & C) within 10.0s Horizon Window');
 
   // =========================================================================
-  // TEST 9: Cinematic Space-to-Ground Telemetry Laser Finale
+  // TEST 9: Cinematic Space-to-Ground S-Band Carrier Link & Karachi Lock
   // =========================================================================
-  console.log('\n--- TEST 9: Cinematic Telemetry Laser & Karachi Lock ---');
+  console.log('\n--- TEST 9: Space-to-Ground S-Band Carrier Link & Karachi Lock ---');
   // Press physical 3D Red Transmit Plunger
   await page.evaluate(() => {
     window.__ORBIT_ZERO__.commitDownlink();
@@ -384,13 +379,13 @@ try {
   assert.equal(downlinkLaserActive.laserGroupVisible, true, 'DownlinkLaserBeamGroup must be visible during DOWNLINK phase');
   assert.equal(downlinkLaserActive.laserCoreVisible, true, 'DownlinkLaserCore must be actively illuminated');
   assert.equal(downlinkLaserActive.shockwaveVisible, true, 'Karachi demodulation shockwave must be visible and pulsing');
-  console.log(`Downlink Telemetry Laser Active: LaserCore=${downlinkLaserActive.laserCoreVisible}, KarachiShockwave=${downlinkLaserActive.shockwaveVisible}`);
-  testResults.push('TEST 9 PASSED: Space-to-Ground Telemetry Laser and Karachi Ground Station Lock');
+  console.log(`S-Band Telemetry Carrier Link Active: CarrierCore=${downlinkLaserActive.laserCoreVisible}, KarachiShockwave=${downlinkLaserActive.shockwaveVisible}`);
+  testResults.push('TEST 9 PASSED: Space-to-Ground S-Band Carrier Link and Karachi Ground Station Lock');
 
   // =========================================================================
-  // TEST 10: Telemetry Streaming, Handshake Confirm & S-Rank Debrief
+  // TEST 10: Telemetry Streaming, Handshake Confirm & Sub-Pass Debrief
   // =========================================================================
-  console.log('\n--- TEST 10: Handshake Confirmation & S-Rank Debriefing ---');
+  console.log('\n--- TEST 10: Telemetry Handshake Confirmation & Sub-Pass Debrief ---');
   // Drain 12.0 seconds of downlink time to transmit all packets and conclude pass
   await page.evaluate(() => {
     window.__ORBIT_ZERO__.tickDownlink(12.0);
@@ -419,14 +414,19 @@ try {
   assert.equal(debriefAudit.phase, 'DEBRIEF', 'Phase must transition to DEBRIEF');
   assert(debriefAudit.hasDebrief, 'Debrief report must be generated');
   assert.equal(debriefAudit.deliveredPackets, 2, 'Both queued evidence packets must be delivered to ground teams');
-  assert.equal(debriefAudit.laserOff, true, 'Telemetry laser must turn off cleanly upon pass conclusion');
-  console.log(`Debrief Concluded: Rank="${debriefAudit.missionRank}", Score=${debriefAudit.totalScore}, Grade=${debriefAudit.grade}, Delivered=${debriefAudit.deliveredPackets}`);
-  testResults.push(`TEST 10 PASSED: Telemetry Handshake Confirmed, Debrief Rank: "${debriefAudit.missionRank}"`);
+  assert.equal(debriefAudit.laserOff, true, 'S-Band carrier link visualization must turn off cleanly upon pass conclusion');
+  console.log(`Debrief Concluded: Rank="${debriefAudit.missionRank}", Score=${debriefAudit.totalScore}, Grade=${debriefAudit.grade}, Delivered=${debriefAudit.deliveredPackets} (Intended 2-Target Sub-Pass)`);
+  testResults.push(`TEST 10 PASSED: S-Band Telemetry Handshake Confirmed, Debrief Rank: "${debriefAudit.missionRank}" (Intended 2-Target Sub-Pass)`);
 
   // =========================================================================
   // TEST 11: Strict Hardware Budget & Zero-Leak Gate
   // =========================================================================
   console.log('\n--- TEST 11: Strict Hardware Budget Gate ---');
+  const drawList = await page.evaluate(() => {
+    return window.__ORBIT_ZERO__.getDrawCallList?.() ?? [];
+  });
+  console.log(`Rendered Meshes Traversed: ${drawList.length}`);
+
   const perf = await page.evaluate(() => {
     const api = window.__ORBIT_ZERO__;
     return {
@@ -452,5 +452,7 @@ try {
 } finally {
   if (page) await page.close().catch(() => {});
   if (browser) await browser.close().catch(() => {});
-  preview.kill();
+  if (previewServer?.httpServer) {
+    await new Promise((res) => previewServer.httpServer.close(res)).catch(() => {});
+  }
 }

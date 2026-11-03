@@ -100,8 +100,8 @@ export const DIALOGUE_CATALOG: Record<VoiceDialogueId, DialogueLine> = {
   DOWNLINK_TRANSMIT: {
     id: 'DOWNLINK_TRANSMIT',
     spoken:
-      'Downlink handshake locked to Karachi station. Streaming telemetry packets now. Keep alignment steady!',
-    subtitle: '[ARIA-7] TRANSMITTING: Karachi downlink laser active. Streaming verified packets.',
+      'Downlink handshake locked to Karachi station. S-band carrier active. Streaming telemetry packets now.',
+    subtitle: '[ARIA-7] Karachi S-band carrier lock confirmed. Streaming telemetry packets.',
     priority: 'HIGH',
     cooldownSec: 8,
   },
@@ -475,7 +475,8 @@ export class VoiceCommander {
     }
 
     const ariaHud = document.getElementById('orbit-zero-aria-hud');
-    if (ariaHud) {
+    const mountTarget = ariaHud ?? document.body;
+    if (mountTarget) {
       this.subtitleBarEl = document.createElement('div');
       this.subtitleBarEl.id = 'aria-subtitle-bar';
       this.subtitleBarEl.style.cssText = `
@@ -506,7 +507,7 @@ export class VoiceCommander {
 
       this.subtitleBarEl.appendChild(this.subtitleBadgeEl);
       this.subtitleBarEl.appendChild(this.subtitleTextEl);
-      ariaHud.appendChild(this.subtitleBarEl);
+      mountTarget.appendChild(this.subtitleBarEl);
     }
   }
 

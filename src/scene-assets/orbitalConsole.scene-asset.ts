@@ -41,20 +41,32 @@ export function createOrbitalConsoleAsset(): Object3D {
     const root = new Group();
     root.name = 'OrbitalConsole';
 
-    // RC10.0 Tactical Aerospace Material Library (Gen-Z color palette upgrade)
+    // RC10.0 Tactical Aerospace Material Library (Deepest Midnight Aerospace Aesthetic)
     const hullDarkMat = new MeshStandardMaterial({
-        color: 0x0c1524,
-        roughness: 0.32,
+        color: 0x08111e,
+        roughness: 0.35,
         metalness: 0.85,
     });
-    const deskDeckMat = hullDarkMat;
+    const deskDeckMat = new MeshStandardMaterial({
+        color: 0x08111e,
+        roughness: 0.34,
+        metalness: 0.82,
+    });
     const titaniumRimMat = new MeshStandardMaterial({
         color: 0x94a3b8,
-        roughness: 0.18,
-        metalness: 0.94,
+        roughness: 0.22,
+        metalness: 0.90,
     });
-    const gunmetalBezelMat = titaniumRimMat;
-    const carbonWellMat = hullDarkMat;
+    const gunmetalBezelMat = new MeshStandardMaterial({
+        color: 0x0d1c2e,
+        roughness: 0.40,
+        metalness: 0.65,
+    });
+    const carbonWellMat = new MeshStandardMaterial({
+        color: 0x050b14,
+        roughness: 0.38,
+        metalness: 0.80,
+    });
     const cyanAccentMat = new MeshStandardMaterial({
         color: TACTICAL_PALETTE.electricCyan,
         emissive: TACTICAL_PALETTE.electricCyan,
@@ -142,49 +154,77 @@ export function createOrbitalConsoleAsset(): Object3D {
 
     // Center Console Bridge spanning continuously forward to the window sill (Concept Images 1 & 2)
     const centerBridgeHull = new Mesh(
-        bevelBox(1.36, 0.056, 1.16, 0.012, 0.028, 3),
+        bevelBox(1.50, 0.056, 1.20, 0.012, 0.028, 3),
         deskDeckMat,
     );
     centerBridgeHull.name = 'CenterDeckHull';
-    centerBridgeHull.position.set(0, 0.748, -0.29);
+    centerBridgeHull.position.set(0, 0.748, -0.28);
     deckGroup.add(centerBridgeHull);
 
-    // Brushed Titanium Front Cowling Lip (catches overhead key light like reference)
+    // Left & Right Wraparound Console Wing Decks (Full 3.4m Cockpit Span - Concept Images 1 & 2)
+    const leftWingDeck = new Mesh(
+        bevelBox(1.20, 0.056, 1.25, 0.012, 0.028, 3),
+        deskDeckMat,
+    );
+    leftWingDeck.name = 'LeftWingDeck';
+    leftWingDeck.position.set(-1.15, 0.748, -0.22);
+    leftWingDeck.rotation.set(0, 0.22, 0);
+    deckGroup.add(leftWingDeck);
+
+    const rightWingDeck = new Mesh(
+        bevelBox(1.20, 0.056, 1.25, 0.012, 0.028, 3),
+        deskDeckMat,
+    );
+    rightWingDeck.name = 'RightWingDeck';
+    rightWingDeck.position.set(1.15, 0.748, -0.22);
+    rightWingDeck.rotation.set(0, -0.22, 0);
+    deckGroup.add(rightWingDeck);
+
+    // Brushed Titanium Ergonomic Front Cowling Lip (Center Seated Cutout)
     const frontTitaniumLip = new Mesh(
-        bevelBox(1.38, 0.028, 0.048, 0.007, 0.014, 3),
+        bevelBox(1.10, 0.028, 0.052, 0.007, 0.014, 3),
         titaniumRimMat,
     );
     frontTitaniumLip.name = 'FrontTitaniumBolster';
-    frontTitaniumLip.position.set(0, 0.768, 0.28);
+    frontTitaniumLip.position.set(0, 0.768, 0.22);
     deckGroup.add(frontTitaniumLip);
 
-    // Warm LED edge illumination strip along front bolster lip (Concept Image 1 Match)
-    const frontLedStrip = new Mesh(
-        bevelBox(0.92, 0.006, 0.008, 0.001, 0.002, 1),
-        new MeshBasicMaterial({ color: 0xffedd5, transparent: true, opacity: 0.95 }),
+    const leftWingLip = new Mesh(
+        bevelBox(1.25, 0.028, 0.052, 0.007, 0.014, 3),
+        titaniumRimMat,
     );
-    frontLedStrip.name = 'FrontBolsterWarmGlowStrip';
-    frontLedStrip.position.set(0, 0.776, 0.285);
-    deckGroup.add(frontLedStrip);
+    leftWingLip.name = 'LeftWingTitaniumLip';
+    leftWingLip.position.set(-1.02, 0.768, 0.32);
+    leftWingLip.rotation.set(0, 0.22, 0);
+    deckGroup.add(leftWingLip);
 
-    // Left & Right Console Wing Horizontal Amber Accent Bars (Concept Image 1 Match)
-    const wingAccentBarGeo = bevelBox(0.38, 0.008, 0.012, 0.001, 0.002, 1);
+    const rightWingLip = new Mesh(
+        bevelBox(1.25, 0.028, 0.052, 0.007, 0.014, 3),
+        titaniumRimMat,
+    );
+    rightWingLip.name = 'RightWingTitaniumLip';
+    rightWingLip.position.set(1.02, 0.768, 0.32);
+    rightWingLip.rotation.set(0, -0.22, 0);
+    deckGroup.add(rightWingLip);
+
+    // Left & Right Console Wing Horizontal Amber Accent Bars (100% Concept Image 1 & 2 Match)
+    const wingAccentBarGeo = bevelBox(0.85, 0.008, 0.012, 0.001, 0.002, 1);
     const warmLedMat = new MeshStandardMaterial({
         color: 0xffedd5,
         emissive: 0xf59e0b,
-        emissiveIntensity: 3.2,
+        emissiveIntensity: 3.5,
         roughness: 0.15,
     });
 
     const leftWingGlowBar = new Mesh(wingAccentBarGeo, warmLedMat);
     leftWingGlowBar.name = 'LeftWingWarmAccentBar';
-    leftWingGlowBar.position.set(-0.46, 0.778, -0.34);
+    leftWingGlowBar.position.set(-0.95, 0.776, 0.33);
     leftWingGlowBar.rotation.set(0, 0.22, 0);
     deckGroup.add(leftWingGlowBar);
 
     const rightWingGlowBar = new Mesh(wingAccentBarGeo, warmLedMat);
     rightWingGlowBar.name = 'RightWingWarmAccentBar';
-    rightWingGlowBar.position.set(0.46, 0.778, -0.34);
+    rightWingGlowBar.position.set(0.95, 0.776, 0.33);
     rightWingGlowBar.rotation.set(0, -0.22, 0);
     deckGroup.add(rightWingGlowBar);
 
@@ -255,80 +295,94 @@ export function createOrbitalConsoleAsset(): Object3D {
     const toggleStemChromeMat = new MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.12, metalness: 0.98 });
     const indicatorLedMat = new MeshBasicMaterial({ color: 0x38bdf8 });
     const indicatorAmberMat = new MeshBasicMaterial({ color: 0xf59e0b });
+    const indicatorEmeraldMat = new MeshBasicMaterial({ color: 0x10b981 });
 
-    // Left console wing switch cluster: 4 toggles with mounting plates and micro-LEDs
-    for (let s = 0; s < 4; s++) {
+    // Interactive Left Console Sensor Mode Toggle Switch (Optical <-> SAR Radar)
+    const sensorSwitchGroup = new Group();
+    sensorSwitchGroup.name = 'SensorToggleSwitch';
+    sensorSwitchGroup.position.set(-0.25, 0.787, -0.34);
+
+    const sensorPlate = new Mesh(bevelBox(0.026, 0.005, 0.040, 0.001, 0.002, 1), toggleBasePlateMat);
+    sensorPlate.name = 'SensorSwitchPlate';
+    sensorSwitchGroup.add(sensorPlate);
+
+    const sensorStem = new Mesh(new CylinderGeometry(0.004, 0.0055, 0.028, 12), toggleStemChromeMat);
+    sensorStem.name = 'SensorToggleStem';
+    sensorStem.position.set(0, 0.012, 0);
+    sensorStem.rotation.set(0.38, 0, 0); // Default Optical: +0.38 rad
+    sensorSwitchGroup.add(sensorStem);
+
+    const sensorLedMat = new MeshBasicMaterial({ color: 0x38bdf8 });
+    sensorLedMat.name = 'SensorSwitchLedMat';
+    const sensorLed = new Mesh(new CylinderGeometry(0.0028, 0.0028, 0.002, 8), sensorLedMat);
+    sensorLed.name = 'SensorSwitchLed';
+    sensorLed.position.set(0, 0.0035, 0.014);
+    sensorSwitchGroup.add(sensorLed);
+    deckGroup.add(sensorSwitchGroup);
+
+    // Left console wing aux switch cluster (Power bus, Telemetry lock, Uplink band)
+    for (let s = 1; s < 4; s++) {
         const swPlate = new Mesh(bevelBox(0.024, 0.005, 0.038, 0.001, 0.002, 1), toggleBasePlateMat);
-        swPlate.position.set(-0.20 - s * 0.036, 0.787, -0.36);
+        swPlate.position.set(-0.25 - s * 0.036, 0.787, -0.34);
         deckGroup.add(swPlate);
 
         const swStem = new Mesh(new CylinderGeometry(0.004, 0.0055, 0.026, 12), toggleStemChromeMat);
-        swStem.position.set(-0.20 - s * 0.036, 0.798, -0.36);
+        swStem.position.set(-0.25 - s * 0.036, 0.798, -0.34);
         swStem.rotation.set((s % 2 === 0 ? 0.38 : -0.38), 0, 0);
         deckGroup.add(swStem);
 
-        const swLed = new Mesh(new CylinderGeometry(0.0025, 0.0025, 0.002, 8), s === 1 ? indicatorAmberMat : indicatorLedMat);
-        swLed.position.set(-0.20 - s * 0.036, 0.790, -0.344);
+        const swLed = new Mesh(new CylinderGeometry(0.0025, 0.0025, 0.002, 8), s === 2 ? indicatorAmberMat : indicatorLedMat);
+        swLed.position.set(-0.25 - s * 0.036, 0.790, -0.326);
         deckGroup.add(swLed);
+    }
+
+    // Left wing knurled rotary dials (Frequency & Range select)
+    for (let r = 0; r < 2; r++) {
+        const knob = new Mesh(new CylinderGeometry(0.018, 0.020, 0.014, 20), toggleBasePlateMat);
+        knob.position.set(-0.41 - r * 0.044, 0.788, -0.34);
+        deckGroup.add(knob);
+
+        const knobCap = new Mesh(new CylinderGeometry(0.013, 0.013, 0.004, 16), toggleStemChromeMat);
+        knobCap.position.set(-0.41 - r * 0.044, 0.796, -0.34);
+        deckGroup.add(knobCap);
     }
 
     // Right console wing rotary knobs & switches: 2 knurled dials + 2 toggles
     for (let r = 0; r < 2; r++) {
-        const knob = new Mesh(new CylinderGeometry(0.022, 0.024, 0.016, 20), toggleBasePlateMat);
-        knob.position.set(0.20 + r * 0.046, 0.788, -0.36);
+        const knob = new Mesh(new CylinderGeometry(0.020, 0.022, 0.016, 20), toggleBasePlateMat);
+        knob.position.set(0.24 + r * 0.046, 0.788, -0.34);
         deckGroup.add(knob);
 
-        const knobCap = new Mesh(new CylinderGeometry(0.015, 0.015, 0.004, 16), toggleStemChromeMat);
-        knobCap.position.set(0.20 + r * 0.046, 0.797, -0.36);
+        const knobCap = new Mesh(new CylinderGeometry(0.014, 0.014, 0.004, 16), toggleStemChromeMat);
+        knobCap.position.set(0.24 + r * 0.046, 0.797, -0.34);
         deckGroup.add(knobCap);
     }
 
     for (let s = 0; s < 2; s++) {
         const swPlate = new Mesh(bevelBox(0.024, 0.005, 0.038, 0.001, 0.002, 1), toggleBasePlateMat);
-        swPlate.position.set(0.31 + s * 0.036, 0.787, -0.36);
+        swPlate.position.set(0.35 + s * 0.036, 0.787, -0.34);
         deckGroup.add(swPlate);
 
         const swStem = new Mesh(new CylinderGeometry(0.004, 0.0055, 0.026, 12), toggleStemChromeMat);
-        swStem.position.set(0.31 + s * 0.036, 0.798, -0.36);
+        swStem.position.set(0.35 + s * 0.036, 0.798, -0.34);
         swStem.rotation.set((s % 2 === 0 ? 0.38 : -0.38), 0, 0);
         deckGroup.add(swStem);
     }
 
-    // Left Wing Extension (angled ergonomics for left hand)
-    const leftWingSlab = new Mesh(
-        taperPlate(0.44, 0.44, 0.38, 0.054, 0.01),
-        deskDeckMat,
-    );
-    leftWingSlab.name = 'LeftWingSlab';
-    leftWingSlab.position.set(-0.42, 0.752, 0.06);
-    leftWingSlab.rotation.set(Math.PI / 2, 0, 0);
-    deckGroup.add(leftWingSlab);
+    // Right console status indicator matrix pad (Concept Images 1 & 2 detail)
+    const keypadBase = new Mesh(bevelBox(0.052, 0.005, 0.044, 0.001, 0.002, 1), toggleBasePlateMat);
+    keypadBase.position.set(0.44, 0.787, -0.34);
+    deckGroup.add(keypadBase);
 
-    const leftOuterRim = new Mesh(
-        bevelBox(0.036, 0.034, 0.44, 0.006, 0.01, 2),
-        titaniumRimMat,
-    );
-    leftOuterRim.name = 'LeftWingTitaniumRim';
-    leftOuterRim.position.set(-0.63, 0.772, 0.06);
-    deckGroup.add(leftOuterRim);
+    for (let kp = 0; kp < 6; kp++) {
+        const kpx = -0.016 + (kp % 3) * 0.016;
+        const kpz = -0.010 + Math.floor(kp / 3) * 0.020;
+        const keyLed = new Mesh(new CylinderGeometry(0.003, 0.003, 0.002, 6), kp === 1 ? indicatorAmberMat : (kp === 4 ? indicatorEmeraldMat : indicatorLedMat));
+        keyLed.position.set(0.44 + kpx, 0.790, -0.34 + kpz);
+        deckGroup.add(keyLed);
+    }
 
-    // Right Wing Extension (angled ergonomics for right hand)
-    const rightWingSlab = new Mesh(
-        taperPlate(0.44, 0.38, 0.44, 0.054, 0.01),
-        deskDeckMat,
-    );
-    rightWingSlab.name = 'RightWingSlab';
-    rightWingSlab.position.set(0.42, 0.752, 0.06);
-    rightWingSlab.rotation.set(Math.PI / 2, 0, 0);
-    deckGroup.add(rightWingSlab);
-
-    const rightOuterRim = new Mesh(
-        bevelBox(0.036, 0.034, 0.44, 0.006, 0.01, 2),
-        titaniumRimMat,
-    );
-    rightOuterRim.name = 'RightWingTitaniumRim';
-    rightOuterRim.position.set(0.63, 0.772, 0.06);
-    deckGroup.add(rightOuterRim);
+    // (LeftWingSlab & RightWingSlab replaced by full-span LeftWingDeck & RightWingDeck above)
 
     // 3. LEFT STATION: Handheld Dual-Aperture Scanner Dock & 3-Slot Evidence Cube Capture Tray (Hidden for Sleek Concept Art Cockpit)
     const scannerDockOuter = new Mesh(
@@ -684,102 +738,102 @@ export function createOrbitalConsoleAsset(): Object3D {
 
     // Heavy anti-slip steel floor plate spanning beneath pilot seat, console, and side walls
     const mainDeckFloor = new Mesh(
-        bevelBox(3.08, 0.042, 2.30, 0.008, 0.02, 2),
+        bevelBox(3.80, 0.042, 2.60, 0.008, 0.02, 2),
         deckPlateFloorMat,
     );
     mainDeckFloor.name = 'CockpitMainFloorDeck';
-    mainDeckFloor.position.set(0, 0.021, 0.18);
+    mainDeckFloor.position.set(0, 0.021, -0.10);
     cabinFloorGroup.add(mainDeckFloor);
 
     // Left and Right Industrial Floor Perimeter Curbs
     const leftFloorCurb = new Mesh(
-        bevelBox(0.048, 0.052, 2.26, 0.006, 0.012, 2),
+        bevelBox(0.048, 0.052, 2.50, 0.006, 0.012, 2),
         gunmetalBezelMat,
     );
     leftFloorCurb.name = 'PortFloorDeckCurb';
-    leftFloorCurb.position.set(-1.48, 0.046, 0.18);
+    leftFloorCurb.position.set(-1.82, 0.046, -0.10);
     cabinFloorGroup.add(leftFloorCurb);
 
     const rightFloorCurb = new Mesh(
-        bevelBox(0.048, 0.052, 2.26, 0.006, 0.012, 2),
+        bevelBox(0.048, 0.052, 2.50, 0.006, 0.012, 2),
         gunmetalBezelMat,
     );
     rightFloorCurb.name = 'StarboardFloorDeckCurb';
-    rightFloorCurb.position.set(1.48, 0.046, 0.18);
+    rightFloorCurb.position.set(1.82, 0.046, -0.10);
     cabinFloorGroup.add(rightFloorCurb);
 
     // Recessed Emergency Egress Guide Light Strips on Floor
     const leftFloorGuide = new Mesh(
-        bevelBox(0.018, 0.012, 1.88, 0.002, 0.004, 2),
+        bevelBox(0.018, 0.012, 2.20, 0.002, 0.004, 2),
         cyanAccentMat,
     );
     leftFloorGuide.name = 'PortFloorGuideLight';
-    leftFloorGuide.position.set(-1.42, 0.046, 0.18);
+    leftFloorGuide.position.set(-1.76, 0.046, -0.10);
     cabinFloorGroup.add(leftFloorGuide);
 
     const rightFloorGuide = new Mesh(
-        bevelBox(0.018, 0.012, 1.88, 0.002, 0.004, 2),
+        bevelBox(0.018, 0.012, 2.20, 0.002, 0.004, 2),
         cyanAccentMat,
     );
     rightFloorGuide.name = 'StarboardFloorGuideLight';
-    rightFloorGuide.position.set(1.42, 0.046, 0.18);
+    rightFloorGuide.position.set(1.76, 0.046, -0.10);
     cabinFloorGroup.add(rightFloorGuide);
 
-    // Lower Forward Pressure Bulkhead (Kick Plate Behind Console - Closes the void!)
+    // Lower Forward Pressure Bulkhead (Kick Plate Behind Console - Closes the void completely!)
     const lowerForwardBulkhead = new Mesh(
-        bevelBox(2.96, 0.68, 0.048, 0.008, 0.016, 2),
+        bevelBox(3.80, 0.88, 0.048, 0.008, 0.016, 2),
         hullDarkMat,
     );
     lowerForwardBulkhead.name = 'ForwardLowerBulkheadPlate';
-    lowerForwardBulkhead.position.set(0, 0.36, -0.88);
+    lowerForwardBulkhead.position.set(0, 0.44, -0.88);
     cabinFloorGroup.add(lowerForwardBulkhead);
 
     // Vertical Reinforcement Stiffener Ribs on Lower Bulkhead
-    for (let i = 0; i < 4; i++) {
-        const rx = -1.05 + i * 0.70;
+    for (let i = 0; i < 6; i++) {
+        const rx = -1.45 + i * 0.58;
         const kickRib = new Mesh(
-            bevelBox(0.038, 0.66, 0.036, 0.004, 0.008, 2),
+            bevelBox(0.038, 0.86, 0.036, 0.004, 0.008, 2),
             titaniumRimMat,
         );
         kickRib.name = `ForwardLowerBulkheadRib_${i + 1}`;
-        kickRib.position.set(rx, 0.36, -0.85);
+        kickRib.position.set(rx, 0.44, -0.85);
         cabinFloorGroup.add(kickRib);
     }
 
-    // 7. Panoramic Cockpit Cabin Enclosure (Positioned wide at x = ±2.65m to preserve 180° cupola views)
+    // 7. Panoramic Cockpit Cabin Enclosure (Solid Aerospace Composite Bulkheads - Fully Enclosed Cabin)
     const cabinWallsGroup = new Group();
     cabinWallsGroup.name = 'CockpitCabinSideWalls';
 
-    // Port (Left) Structural Bulkhead Wall (Wide Outer Perimeter)
-    const portWall = new Mesh(
-        bevelBox(0.052, 2.18, 2.40, 0.008, 0.016, 2),
+    const portCabinHull = new Mesh(
+        bevelBox(0.24, 1.95, 2.30, 0.016, 0.035, 3),
         hullDarkMat,
     );
-    portWall.name = 'PortCabinBulkheadWall';
-    portWall.position.set(-2.15, 1.12, -0.28);
-    portWall.rotation.set(0, 0.52, 0);
-    cabinWallsGroup.add(portWall);
+    portCabinHull.name = 'PortCabinHull';
+    portCabinHull.position.set(-1.84, 1.15, -0.05);
+    portCabinHull.rotation.set(0, 0.28, 0);
+    cabinWallsGroup.add(portCabinHull);
 
-    // Starboard (Right) Structural Bulkhead Wall (Wide Outer Perimeter)
-    const starboardWall = new Mesh(
-        bevelBox(0.052, 2.18, 2.40, 0.008, 0.016, 2),
+    const starCabinHull = new Mesh(
+        bevelBox(0.24, 1.95, 2.30, 0.016, 0.035, 3),
         hullDarkMat,
     );
-    starboardWall.name = 'StarboardCabinBulkheadWall';
-    starboardWall.position.set(2.15, 1.12, -0.28);
-    starboardWall.rotation.set(0, -0.52, 0);
-    cabinWallsGroup.add(starboardWall);
+    starCabinHull.name = 'StarboardCabinHull';
+    starCabinHull.position.set(1.84, 1.15, -0.05);
+    starCabinHull.rotation.set(0, -0.28, 0);
+    cabinWallsGroup.add(starCabinHull);
+
+    // (Aft wall omitted so operator camera at world z=+0.44 is never occluded)
 
     // 8. Overhead Cockpit Ceiling Canopy & Indirect Ambient Lighting
     const cabinCeilingGroup = new Group();
     cabinCeilingGroup.name = 'CockpitOverheadCeiling';
 
     const mainCeilingPlate = new Mesh(
-        bevelBox(3.40, 0.058, 2.40, 0.008, 0.018, 2),
+        bevelBox(4.20, 0.08, 2.40, 0.012, 0.03, 3),
         hullDarkMat,
     );
     mainCeilingPlate.name = 'CockpitCeilingSlab';
-    mainCeilingPlate.position.set(0, 2.24, 0.12);
+    mainCeilingPlate.position.set(0, 2.22, -0.10);
     cabinCeilingGroup.add(mainCeilingPlate);
 
     // Recessed Indirect Cockpit Floodlights (Warm Amber + Cool Cyan Soft Accents)
@@ -788,7 +842,7 @@ export function createOrbitalConsoleAsset(): Object3D {
         floodLightWarmMat,
     );
     portFloodLight.name = 'OverheadFloodLight_Port';
-    portFloodLight.position.set(-0.85, 2.22, 0.20);
+    portFloodLight.position.set(-0.85, 2.20, 0.20);
     cabinCeilingGroup.add(portFloodLight);
 
     const starFloodLight = new Mesh(
@@ -796,47 +850,16 @@ export function createOrbitalConsoleAsset(): Object3D {
         floodLightWarmMat,
     );
     starFloodLight.name = 'OverheadFloodLight_Starboard';
-    starFloodLight.position.set(0.85, 2.22, 0.20);
+    starFloodLight.position.set(0.85, 2.20, 0.20);
     cabinCeilingGroup.add(starFloodLight);
 
     // 9. Heavy Multi-Pane Panoramic Cupola Window Frame & Atmospheric Planetary Limb
     const cupolaGroup = new Group();
     cupolaGroup.name = 'OrbitalCupolaFrame';
 
-    // Subtle glowing atmospheric Earth-horizon limb arc in deep space behind the station
-    const horizonGlowMat = new MeshBasicMaterial({
-        color: 0x38bdf8,
-        transparent: true,
-        opacity: 0.38,
-    });
-    const horizonSubGlowMat = new MeshBasicMaterial({
-        color: 0x0284c7,
-        transparent: true,
-        opacity: 0.22,
-    });
-
-    // 9. Luminous Earth-Horizon Planetary Limb Arc visible through the Right Viewport
-    const horizonArc = new Mesh(
-        new TorusGeometry(2.8, 0.035, 12, 96, Math.PI * 0.45),
-        horizonGlowMat,
-    );
-    horizonArc.name = 'PlanetaryHorizonLimbArc';
-    horizonArc.position.set(0.72, 1.05, -1.55);
-    horizonArc.rotation.set(0, -0.42, 0.38);
-    cupolaGroup.add(horizonArc);
-
-    const horizonHaloArc = new Mesh(
-        new TorusGeometry(2.84, 0.085, 12, 96, Math.PI * 0.45),
-        horizonSubGlowMat,
-    );
-    horizonHaloArc.name = 'PlanetaryHorizonHaloArc';
-    horizonHaloArc.position.set(0.72, 1.05, -1.58);
-    horizonHaloArc.rotation.set(0, -0.42, 0.38);
-    cupolaGroup.add(horizonHaloArc);
-
     // 9b. Breathtaking Planetary Earth Orbital Horizon Vista in Right & Overhead Viewports (Concept Images 1 & 2)
-    // Repositioned so sunlit Earth face sweeps cleanly through the right window — no orange diagonal artifact
-    const planetVistaGeo = new SphereGeometry(4.5, 48, 36);
+    // Repositioned so sunlit Earth face sweeps cleanly across lower right window — leaving upper window open to CubeSat & stars
+    const planetVistaGeo = new SphereGeometry(5.2, 64, 48);
     const planetVistaMat = new MeshStandardMaterial({
         color: 0xffffff,
         roughness: 0.35,
@@ -845,12 +868,12 @@ export function createOrbitalConsoleAsset(): Object3D {
     });
     const planetVista = new Mesh(planetVistaGeo, planetVistaMat);
     planetVista.name = 'StarboardPlanetaryHorizonVista';
-    planetVista.position.set(6.0, -0.35, -4.0);
-    planetVista.rotation.set(0.12, -1.05, 0.08);
+    planetVista.position.set(5.5, -2.0, -3.4);
+    planetVista.rotation.set(0.12, -1.22, 0.05);
     cupolaGroup.add(planetVista);
 
     const horizonLimbGlow = new Mesh(
-        new TorusGeometry(4.56, 0.075, 16, 96, Math.PI * 0.45),
+        new TorusGeometry(5.25, 0.065, 16, 96, Math.PI * 0.45),
         new MeshBasicMaterial({
             color: 0x38bdf8,
             transparent: true,
@@ -860,13 +883,13 @@ export function createOrbitalConsoleAsset(): Object3D {
         }),
     );
     horizonLimbGlow.name = 'StarboardAtmosphereGlowArc';
-    horizonLimbGlow.position.set(6.0, -0.35, -4.0);
-    horizonLimbGlow.rotation.set(0.12, -1.05, 0.08);
+    horizonLimbGlow.position.set(5.5, -2.0, -3.4);
+    horizonLimbGlow.rotation.set(0.12, -1.22, 0.05);
     cupolaGroup.add(horizonLimbGlow);
 
     // Lower Forward Viewport Sill (Heavy Beveled Armor Beam with Dark Aerospace Finish)
     const sillBeam = new Mesh(
-        bevelBox(3.20, 0.052, 0.12, 0.008, 0.016, 2),
+        bevelBox(3.40, 0.052, 0.12, 0.008, 0.016, 2),
         hullDarkMat,
     );
     sillBeam.name = 'CupolaForwardSill';
@@ -874,7 +897,7 @@ export function createOrbitalConsoleAsset(): Object3D {
     cupolaGroup.add(sillBeam);
 
     const sillTrim = new Mesh(
-        bevelBox(3.20, 0.018, 0.036, 0.003, 0.008, 2),
+        bevelBox(3.40, 0.018, 0.036, 0.003, 0.008, 2),
         gunmetalBezelMat,
     );
     sillTrim.name = 'CupolaForwardSillTrim';
@@ -883,7 +906,7 @@ export function createOrbitalConsoleAsset(): Object3D {
 
     // Upper Canopy Header Arch connecting mullions to the ceiling
     const canopyHeaderBeam = new Mesh(
-        bevelBox(3.20, 0.058, 0.082, 0.008, 0.016, 2),
+        bevelBox(3.40, 0.058, 0.082, 0.008, 0.016, 2),
         hullDarkMat,
     );
     canopyHeaderBeam.name = 'CupolaCanopyHeader';
@@ -891,7 +914,7 @@ export function createOrbitalConsoleAsset(): Object3D {
     cupolaGroup.add(canopyHeaderBeam);
 
     const headerTrim = new Mesh(
-        bevelBox(3.20, 0.018, 0.032, 0.003, 0.006, 2),
+        bevelBox(3.40, 0.018, 0.032, 0.003, 0.006, 2),
         gunmetalBezelMat,
     );
     headerTrim.name = 'CupolaHeaderTrim';
@@ -900,45 +923,45 @@ export function createOrbitalConsoleAsset(): Object3D {
 
     // 10. Solid Aerospace Cabin Bulkhead Structure (ISS Cupola Mullions)
     const portMullionWall = new Mesh(
-        bevelBox(0.18, 1.30, 0.14, 0.016, 0.024, 3),
+        bevelBox(0.22, 1.32, 0.18, 0.018, 0.032, 3),
         hullDarkMat,
     );
     portMullionWall.name = 'PortMullionBulkhead';
-    portMullionWall.position.set(-0.46, 1.36, -0.84);
-    portMullionWall.rotation.set(0, 0.18, 0);
+    portMullionWall.position.set(-0.48, 1.36, -0.84);
+    portMullionWall.rotation.set(0, 0.16, 0);
     cupolaGroup.add(portMullionWall);
 
     const starMullionWall = new Mesh(
-        bevelBox(0.18, 1.30, 0.14, 0.016, 0.024, 3),
+        bevelBox(0.22, 1.32, 0.18, 0.018, 0.032, 3),
         hullDarkMat,
     );
     starMullionWall.name = 'StarboardMullionBulkhead';
-    starMullionWall.position.set(0.46, 1.36, -0.84);
-    starMullionWall.rotation.set(0, -0.18, 0);
+    starMullionWall.position.set(0.48, 1.36, -0.84);
+    starMullionWall.rotation.set(0, -0.16, 0);
     cupolaGroup.add(starMullionWall);
 
     // Outer bulkheads sit flush with angled window frame — seamless cupola canopy!
     const portOuterWall = new Mesh(
-        bevelBox(0.14, 1.32, 0.045, 0.008, 0.016, 2),
+        bevelBox(0.32, 1.32, 0.18, 0.018, 0.032, 3),
         hullDarkMat,
     );
     portOuterWall.name = 'PortOuterBulkhead';
-    portOuterWall.position.set(-1.54, 1.38, -0.62);
-    portOuterWall.rotation.set(0, 0.32, 0);
+    portOuterWall.position.set(-1.62, 1.38, -0.58);
+    portOuterWall.rotation.set(0, 0.28, 0);
     cupolaGroup.add(portOuterWall);
 
     const starOuterWall = new Mesh(
-        bevelBox(0.14, 1.32, 0.045, 0.008, 0.016, 2),
+        bevelBox(0.32, 1.32, 0.18, 0.018, 0.032, 3),
         hullDarkMat,
     );
     starOuterWall.name = 'StarboardOuterBulkhead';
-    starOuterWall.position.set(1.54, 1.38, -0.62);
-    starOuterWall.rotation.set(0, -0.32, 0);
+    starOuterWall.position.set(1.62, 1.38, -0.58);
+    starOuterWall.rotation.set(0, -0.28, 0);
     cupolaGroup.add(starOuterWall);
 
     // Solid Lower Wall completely sealing the area between floor and sill (no gaps!)
     const lowerCanopyWall = new Mesh(
-        bevelBox(3.40, 0.76, 0.28, 0.016, 0.032, 3),
+        bevelBox(3.60, 0.76, 0.28, 0.016, 0.032, 3),
         hullDarkMat,
     );
     lowerCanopyWall.name = 'LowerCanopySillBulkhead';
@@ -946,7 +969,7 @@ export function createOrbitalConsoleAsset(): Object3D {
     cupolaGroup.add(lowerCanopyWall);
 
     const upperCanopyWall = new Mesh(
-        bevelBox(3.40, 0.22, 0.18, 0.014, 0.028, 3),
+        bevelBox(3.60, 0.22, 0.18, 0.014, 0.028, 3),
         hullDarkMat,
     );
     upperCanopyWall.name = 'UpperCanopyBrowBulkhead';
@@ -954,35 +977,35 @@ export function createOrbitalConsoleAsset(): Object3D {
     cupolaGroup.add(upperCanopyWall);
 
     // 10b. Authentic Molded Cupola Window Bezels with Rounded Corner Fillets (Concept Images 1 & 2)
-    const windowBeamThick = 0.018;
-    const windowDepth = 0.012;
-    const cornerR = 0.12;
+    const windowBeamThick = 0.048;
+    const windowDepth = 0.052;
+    const cornerR = 0.18;
 
-    // Helper function to build rounded ISS porthole window bezels
+    // Helper function to build rounded luxury spaceship porthole window bezels
     function buildRoundedPorthole(width: number, height: number): Group {
         const pGroup = new Group();
         const wSpan = width - cornerR * 2;
         const hSpan = height - cornerR * 2;
 
         // 4 Straight Beveled Edge Beams
-        const topBar = new Mesh(bevelBox(wSpan, windowBeamThick, windowDepth, 0.003, 0.006, 2), gunmetalBezelMat);
+        const topBar = new Mesh(bevelBox(wSpan, windowBeamThick, windowDepth, 0.006, 0.012, 2), gunmetalBezelMat);
         topBar.position.set(0, height * 0.5 - windowBeamThick * 0.5, 0);
         pGroup.add(topBar);
 
-        const botBar = new Mesh(bevelBox(wSpan, windowBeamThick, windowDepth, 0.003, 0.006, 2), gunmetalBezelMat);
+        const botBar = new Mesh(bevelBox(wSpan, windowBeamThick, windowDepth, 0.006, 0.012, 2), gunmetalBezelMat);
         botBar.position.set(0, -height * 0.5 + windowBeamThick * 0.5, 0);
         pGroup.add(botBar);
 
-        const leftBar = new Mesh(bevelBox(windowBeamThick, hSpan, windowDepth, 0.003, 0.006, 2), gunmetalBezelMat);
+        const leftBar = new Mesh(bevelBox(windowBeamThick, hSpan, windowDepth, 0.006, 0.012, 2), gunmetalBezelMat);
         leftBar.position.set(-width * 0.5 + windowBeamThick * 0.5, 0, 0);
         pGroup.add(leftBar);
 
-        const rightBar = new Mesh(bevelBox(windowBeamThick, hSpan, windowDepth, 0.003, 0.006, 2), gunmetalBezelMat);
+        const rightBar = new Mesh(bevelBox(windowBeamThick, hSpan, windowDepth, 0.006, 0.012, 2), gunmetalBezelMat);
         rightBar.position.set(width * 0.5 - windowBeamThick * 0.5, 0, 0);
         pGroup.add(rightBar);
 
         // 4 Smooth Rounded Corner Fillets
-        const cornerTorus = new TorusGeometry(cornerR, windowBeamThick * 0.45, 8, 16, Math.PI / 2);
+        const cornerTorus = new TorusGeometry(cornerR, windowBeamThick * 0.5, 12, 24, Math.PI / 2);
         const cTL = new Mesh(cornerTorus, gunmetalBezelMat);
         cTL.position.set(-wSpan * 0.5, hSpan * 0.5, 0);
         cTL.rotation.set(0, 0, Math.PI / 2);
@@ -1006,24 +1029,24 @@ export function createOrbitalConsoleAsset(): Object3D {
         return pGroup;
     }
 
-    // Center Window Portal (frames Earth Globe centerpiece) - Full height from sill to header
-    const centerPortal = buildRoundedPorthole(0.84, 1.28);
+    // Center Window Portal (frames Earth Globe centerpiece)
+    const centerPortal = buildRoundedPorthole(0.86, 1.25);
     centerPortal.name = 'CenterCupolaPortal';
     centerPortal.position.set(0, 1.38, -0.88);
     cupolaGroup.add(centerPortal);
 
     // Port (Left) Window Portal (frames Commander ARIA-7 & Cosmic Starfield)
-    const leftPortal = buildRoundedPorthole(1.08, 1.28);
+    const leftPortal = buildRoundedPorthole(1.12, 1.25);
     leftPortal.name = 'LeftCupolaPortal';
-    leftPortal.position.set(-0.98, 1.38, -0.78);
-    leftPortal.rotation.set(0, 0.32, 0);
+    leftPortal.position.set(-1.02, 1.38, -0.78);
+    leftPortal.rotation.set(0, 0.28, 0);
     cupolaGroup.add(leftPortal);
 
     // Starboard (Right) Window Portal (frames 3U CubeSat Satellite & Earth Horizon)
-    const rightPortal = buildRoundedPorthole(1.08, 1.28);
+    const rightPortal = buildRoundedPorthole(1.12, 1.25);
     rightPortal.name = 'RightCupolaPortal';
-    rightPortal.position.set(0.98, 1.38, -0.78);
-    rightPortal.rotation.set(0, -0.32, 0);
+    rightPortal.position.set(1.02, 1.38, -0.78);
+    rightPortal.rotation.set(0, -0.28, 0);
     cupolaGroup.add(rightPortal);
 
     // 11. Authentic Curved Silver-Titanium Cockpit Handrails / Grab Bars (Concept Images 1 & 2 Match)
@@ -1063,42 +1086,43 @@ export function createOrbitalConsoleAsset(): Object3D {
         return railGroup;
     }
 
-    // Vertical grab rails on structural mullions between windows
-    const portMullionRail = buildCurvedGrabRail(0.48);
+    // Vertical grab rails on structural mullions between windows (Mounted strictly ON mullions)
+    const portMullionRail = buildCurvedGrabRail(0.36);
     portMullionRail.name = 'PortMullionGrabRail';
-    portMullionRail.position.set(-0.46, 1.36, -0.80);
+    portMullionRail.position.set(-0.48, 1.48, -0.76);
+    portMullionRail.rotation.set(0, 0.16, 0);
     cupolaGroup.add(portMullionRail);
 
-    const starMullionRail = buildCurvedGrabRail(0.48);
+    const portMullionRailLower = buildCurvedGrabRail(0.36);
+    portMullionRailLower.name = 'PortMullionGrabRail_Lower';
+    portMullionRailLower.position.set(-0.48, 1.12, -0.76);
+    portMullionRailLower.rotation.set(0, 0.16, 0);
+    cupolaGroup.add(portMullionRailLower);
+
+    const starMullionRail = buildCurvedGrabRail(0.36);
     starMullionRail.name = 'StarMullionGrabRail';
-    starMullionRail.position.set(0.46, 1.36, -0.80);
+    starMullionRail.position.set(0.48, 1.48, -0.76);
+    starMullionRail.rotation.set(0, -0.16, 0);
     cupolaGroup.add(starMullionRail);
 
+    const starMullionRailLower = buildCurvedGrabRail(0.36);
+    starMullionRailLower.name = 'StarMullionGrabRail_Lower';
+    starMullionRailLower.position.set(0.48, 1.12, -0.76);
+    starMullionRailLower.rotation.set(0, -0.16, 0);
+    cupolaGroup.add(starMullionRailLower);
+
     // Outer frame grab rails mounted flush to window outer jambs
-    const portOuterRail = buildCurvedGrabRail(0.48);
+    const portOuterRail = buildCurvedGrabRail(0.42);
     portOuterRail.name = 'PortOuterGrabRail';
-    portOuterRail.position.set(-1.42, 1.36, -0.66);
-    portOuterRail.rotation.set(0, 0.36, 0);
+    portOuterRail.position.set(-1.58, 1.36, -0.54);
+    portOuterRail.rotation.set(0, 0.28, 0);
     cupolaGroup.add(portOuterRail);
 
-    const starOuterRail = buildCurvedGrabRail(0.48);
+    const starOuterRail = buildCurvedGrabRail(0.42);
     starOuterRail.name = 'StarOuterGrabRail';
-    starOuterRail.position.set(1.42, 1.36, -0.66);
-    starOuterRail.rotation.set(0, -0.36, 0);
+    starOuterRail.position.set(1.58, 1.36, -0.54);
+    starOuterRail.rotation.set(0, -0.28, 0);
     cupolaGroup.add(starOuterRail);
-
-    // Lower windowsill horizontal grab rails under side windows (Concept Image 1 Match)
-    const portSillRail = buildCurvedGrabRail(0.38);
-    portSillRail.name = 'PortSillGrabRail';
-    portSillRail.position.set(-0.92, 0.74, -0.74);
-    portSillRail.rotation.set(0, 0.36, Math.PI / 2);
-    cupolaGroup.add(portSillRail);
-
-    const starSillRail = buildCurvedGrabRail(0.38);
-    starSillRail.name = 'StarSillGrabRail';
-    starSillRail.position.set(0.92, 0.74, -0.74);
-    starSillRail.rotation.set(0, -0.36, Math.PI / 2);
-    cupolaGroup.add(starSillRail);
 
     // 12b. Forward Sill Debossed Brand Emblem Plate (Concept Images 1 & 2)
     const brandPlate = new Mesh(
@@ -1119,22 +1143,23 @@ export function createOrbitalConsoleAsset(): Object3D {
 
     // 13. Overhead Circular Cupola Cap Skylight (Flush Ceiling Mounting — Concept Images 1 & 2)
     const domeRing = new Mesh(
-        new TorusGeometry(0.52, 0.016, 16, 64),
+        new TorusGeometry(0.62, 0.024, 16, 64),
         titaniumRimMat,
     );
     domeRing.name = 'CupolaSkylightRing';
-    domeRing.position.set(0, 2.15, -0.72);
-    domeRing.rotation.set(Math.PI / 2 + 0.26, 0, 0);
+    domeRing.position.set(0, 2.22, -0.15);
+    domeRing.rotation.set(Math.PI / 2, 0, 0);
     cupolaGroup.add(domeRing);
 
     const innerDomeRing = new Mesh(
-        new TorusGeometry(0.56, 0.012, 14, 64),
+        new TorusGeometry(0.66, 0.018, 14, 64),
         gunmetalBezelMat,
     );
     innerDomeRing.name = 'CupolaInnerSkylightRing';
-    innerDomeRing.position.set(0, 2.15, -0.72);
-    innerDomeRing.rotation.set(Math.PI / 2 + 0.26, 0, 0);
+    innerDomeRing.position.set(0, 2.22, -0.15);
+    innerDomeRing.rotation.set(Math.PI / 2, 0, 0);
     cupolaGroup.add(innerDomeRing);
+
     // Luminous Earth-atmosphere limb visible through the overhead cupola skylight
     const skylightLimbMat = new MeshBasicMaterial({
         color: 0x38bdf8,
@@ -1143,12 +1168,12 @@ export function createOrbitalConsoleAsset(): Object3D {
         side: DoubleSide,
     });
     const skylightAtmoArc = new Mesh(
-        new TorusGeometry(0.50, 0.028, 12, 48, Math.PI * 0.85),
+        new TorusGeometry(0.60, 0.035, 12, 48, Math.PI * 0.85),
         skylightLimbMat,
     );
     skylightAtmoArc.name = 'CupolaSkylightAtmosphereArc';
-    skylightAtmoArc.position.set(0, 2.16, -0.74);
-    skylightAtmoArc.rotation.set(Math.PI / 2 + 0.26, 0, Math.PI * 0.08);
+    skylightAtmoArc.position.set(0, 2.23, -0.15);
+    skylightAtmoArc.rotation.set(Math.PI / 2, 0, Math.PI * 0.08);
     cupolaGroup.add(skylightAtmoArc);
 
 
@@ -1196,7 +1221,11 @@ export function createOrbitalConsoleAsset(): Object3D {
     const consoleDesk = new Group();
     consoleDesk.name = 'ConsoleDeskAssembly';
     consoleDesk.add(baseGroup, deckGroup);
-    mergeStaticMeshesByMaterial(consoleDesk);
+    mergeStaticMeshesByMaterial(consoleDesk, [
+        'SensorToggleSwitch',
+        'SensorToggleStem',
+        'SensorSwitchLed',
+    ]);
     root.add(consoleDesk);
 
     // 2. Merge surrounding cockpit cabin interior and cupola frame
@@ -1233,7 +1262,7 @@ function buildDeepSpaceStarfieldGeometry(): BufferGeometry {
         return (seed - 1) / 2147483646;
     };
 
-    const starCount = 2500;
+    const starCount = 3500;
     const radius = 18.5; // Outer deep-space celestial dome
 
     for (let i = 0; i < starCount; i++) {

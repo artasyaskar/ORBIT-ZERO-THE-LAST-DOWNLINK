@@ -199,6 +199,10 @@ export class VRHandSimulator {
 
       const worldPos = new Vector3();
       obj.getWorldPosition(worldPos);
+
+      // Skip offstage/parked legacy nodes relegated from earlier cockpit iterations
+      if (worldPos.y < -2.0) continue;
+
       const d = worldPos.distanceTo(seatedOrigin);
 
       if (d < minDistance) minDistance = d;

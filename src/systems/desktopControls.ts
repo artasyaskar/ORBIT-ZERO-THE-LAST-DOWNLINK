@@ -819,7 +819,12 @@ export class DesktopControlsManager {
       }
 
       // 5. Console Pads & Hardware
-      if (/pad-toggle-sensor/i.test(name)) {
+      if (
+        /pad-toggle-sensor/i.test(name) ||
+        /SensorToggle/i.test(name) ||
+        /SensorSwitch/i.test(name) ||
+        /ToggleStem/i.test(name)
+      ) {
         this.toggleSensor();
         return true;
       }
@@ -1785,7 +1790,7 @@ export class DesktopControlsManager {
 
     // Concept Image 1 & 2 faithful: Clean frosted glass subtitle card beneath 3D ARIA-7 bust
     this.ariaHudEl.innerHTML = `
-      <div style="
+      <div id="aria-subtitle-bar" style="
         background: rgba(6, 12, 24, 0.76);
         backdrop-filter: blur(14px);
         -webkit-backdrop-filter: blur(14px);
@@ -1797,8 +1802,8 @@ export class DesktopControlsManager {
         flex-direction: column;
         gap: 3px;
       ">
-        <div style="font-size: 11px; font-weight: 800; color: #22d3ee; letter-spacing: 1.5px;">ARIA-7</div>
-        <div style="font-size: 11px; color: #e2e8f0; font-weight: 500; line-height: 1.4; letter-spacing: 0.3px;">${line}</div>
+        <div id="aria-subtitle-badge" style="font-size: 11px; font-weight: 800; color: #22d3ee; letter-spacing: 1.5px;">ARIA-7</div>
+        <div id="aria-subtitle-text" style="font-size: 11px; color: #e2e8f0; font-weight: 500; line-height: 1.4; letter-spacing: 0.3px;">${line}</div>
       </div>
     `;
   }

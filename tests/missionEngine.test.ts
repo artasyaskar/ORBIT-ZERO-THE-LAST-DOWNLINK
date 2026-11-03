@@ -506,18 +506,32 @@ describe('ORBIT ZERO - MissionEngine Deterministic Triage Simulation', () => {
       expect(optPkt.phenomenologyTag).toBe('VISIBLE_NEAR_INFRARED_REFLECTANCE');
     });
 
-    it('7.3 attaches correct compression algorithm tag to processed data packets', () => {
+    it('7.3 attaches correct compression algorithm tag to processed data packets based on sensor mode and sector', () => {
       const engine = new MissionEngine();
+      // RADAR normal sector
       const pktB = engine.scanSector('B', 'RADAR').packet!;
-      const pktC = engine.scanSector('C', 'OPTICAL').packet!;
-
       const resB = engine.processPacket(pktB.id);
       expect(resB.ok).toBe(true);
-      expect(resB.packet?.compressionAlgorithm).toBe('NDWI_WATER_MASK_EXTRACTION');
+      expect(resB.packet?.compressionAlgorithm).toBe('SAR_BACKSCATTER_EVIDENCE_COMPRESSION');
 
+      // OPTICAL Sector C
+      const pktC = engine.scanSector('C', 'OPTICAL').packet!;
       const resC = engine.processPacket(pktC.id);
       expect(resC.ok).toBe(true);
-      expect(resC.packet?.compressionAlgorithm).toBe('EDGE_TRUSS_VECTORIZATION');
+      expect(resC.packet?.compressionAlgorithm).toBe('OPTICAL_ROAD_EDGE_ENCODING');
+
+      // OPTICAL normal sector
+      const pktA = engine.scanSector('A', 'OPTICAL').packet!;
+      const resA = engine.processPacket(pktA.id);
+      expect(resA.ok).toBe(true);
+      expect(resA.packet?.compressionAlgorithm).toBe('OPTICAL_EVIDENCE_COMPRESSION');
+
+      // RADAR Sector C (reset engine for fresh tray)
+      const engine2 = new MissionEngine();
+      const pktC_radar = engine2.scanSector('C', 'RADAR').packet!;
+      const resC_radar = engine2.processPacket(pktC_radar.id);
+      expect(resC_radar.ok).toBe(true);
+      expect(resC_radar.packet?.compressionAlgorithm).toBe('SAR_AMBIGUITY_METADATA_ENCODING');
     });
   });
 
@@ -797,7 +811,7 @@ describe('ORBIT ZERO - MissionEngine Deterministic Triage Simulation', () => {
 
       engine.processPacket(pktB.id);
       const procPkt = engine.getState().packets.find((p) => p.id === pktB.id)!;
-      expect(procPkt.provenanceLineage).toContain('CRADLE[NDWI_WATER_MASK_EXTRACTION]');
+      expect(procPkt.provenanceLineage).toContain('CRADLE[SAR_BACKSCATTER_EVIDENCE_COMPRESSION]');
       expect(procPkt.compressionRatio).toBe(3.0);
 
       engine.queuePacket(pktB.id);

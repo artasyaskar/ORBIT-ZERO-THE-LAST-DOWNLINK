@@ -65,6 +65,12 @@ export interface GroundRequest {
   consequenceOnFailure: string;
 }
 
+export type CompressionAlgorithm =
+  | 'OPTICAL_EVIDENCE_COMPRESSION'
+  | 'OPTICAL_ROAD_EDGE_ENCODING'
+  | 'SAR_BACKSCATTER_EVIDENCE_COMPRESSION'
+  | 'SAR_AMBIGUITY_METADATA_ENCODING';
+
 export interface DataPacket {
   id: string;
   sectorId: SectorId;
@@ -81,7 +87,7 @@ export interface DataPacket {
   swathWidthKm: number;
   resolutionMeters: number;
   phenomenologyTag: string;
-  compressionAlgorithm?: 'NDWI_WATER_MASK_EXTRACTION' | 'EDGE_TRUSS_VECTORIZATION';
+  compressionAlgorithm?: CompressionAlgorithm;
   storageCost: number;
   transmitSec: number;
   rawStorageCost: number;

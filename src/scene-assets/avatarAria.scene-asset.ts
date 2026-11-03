@@ -11,12 +11,18 @@
  */
 
 import {
+  AdditiveBlending,
+  CanvasTexture,
   CylinderGeometry,
+  DoubleSide,
+  DynamicDrawUsage,
   Group,
+  InstancedMesh,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
   Object3D,
+  PlaneGeometry,
   SphereGeometry,
   TorusGeometry,
   Vector3,
@@ -29,18 +35,18 @@ export function createAvatarAriaAsset(): Object3D {
 
   // Luminous Holographic Cyan Materials (Authentic Translucent Hologram Shader Aesthetics)
   const holoPrimaryMat = new MeshStandardMaterial({
-    color: 0x06b6d4,
-    emissive: 0x22d3ee,
-    emissiveIntensity: 2.8,
-    roughness: 0.12,
-    metalness: 0.88,
+    color: 0x0284c7,
+    emissive: 0x38bdf8,
+    emissiveIntensity: 2.5,
+    roughness: 0.15,
+    metalness: 0.85,
     transparent: true,
-    opacity: 0.82,
+    opacity: 0.85,
   });
   holoPrimaryMat.name = 'AriaHoloPrimaryMat';
 
   const holoEyeMat = new MeshBasicMaterial({
-    color: 0x67e8f9,
+    color: 0xbae6fd,
     transparent: true,
     opacity: 0.98,
   });
@@ -49,18 +55,18 @@ export function createAvatarAriaAsset(): Object3D {
   const holoWireMat = new MeshBasicMaterial({
     color: 0x38bdf8,
     transparent: true,
-    opacity: 0.65,
-    wireframe: true,
+    opacity: 0.25,
+    wireframe: false,
   });
 
   const holoCoreMat = new MeshStandardMaterial({
-    color: 0x22d3ee,
+    color: 0x0369a1,
     emissive: 0x0ea5e9,
-    emissiveIntensity: 2.2,
-    roughness: 0.18,
-    metalness: 0.82,
+    emissiveIntensity: 2.0,
+    roughness: 0.20,
+    metalness: 0.80,
     transparent: true,
-    opacity: 0.78,
+    opacity: 0.80,
   });
 
   // Holographic Emitter Anchor Proxy (queryable by systems without mid-air clutter)
@@ -77,6 +83,7 @@ export function createAvatarAriaAsset(): Object3D {
   const bustGroup = new Group();
   bustGroup.name = 'AriaBustGroup';
   bustGroup.position.set(0, 0, 0);
+  bustGroup.visible = false; // Legacy primitive mannequin hidden in favor of crisp holographic vector portrait plate
 
   // 2a. Natural Feminine Cranium & Hair Silhouette
   const skullGeo = new SphereGeometry(0.062, 32, 24);
@@ -86,11 +93,15 @@ export function createAvatarAriaAsset(): Object3D {
   cranium.scale.set(0.82, 1.08, 0.90);
   bustGroup.add(cranium);
 
-  // Subtle Holographic Wireframe Cage over Cranium
-  const craniumWire = new Mesh(new SphereGeometry(0.0635, 20, 16), holoWireMat);
-  craniumWire.position.copy(cranium.position);
-  craniumWire.scale.copy(cranium.scale);
-  bustGroup.add(craniumWire);
+  // Ethereal Holographic Halo Ring framing AI cranium
+  const craniumHalo = new Mesh(
+    new TorusGeometry(0.064, 0.0022, 8, 36),
+    new MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.85 })
+  );
+  craniumHalo.name = 'AriaHaloRing';
+  craniumHalo.position.set(0, 0.092, -0.006);
+  craniumHalo.rotation.set(Math.PI / 2, 0, 0);
+  bustGroup.add(craniumHalo);
 
   // Feminine Sleek Hair Silhouette Volume (Sweep back)
   const hairBack = new Mesh(
@@ -247,17 +258,231 @@ export function createAvatarAriaAsset(): Object3D {
   });
   barMat.name = 'AriaWaveformBarMat';
 
+  // 1 InstancedMesh for all 20 bars (normalized unit height 1.0)
+  const baseBarGeo = bevelBox(0.0055, 1.0, 0.004, 0.0008, 0.0012, 1);
+  const instancedBars = new InstancedMesh(baseBarGeo, barMat, nBars);
+  instancedBars.name = 'AriaWaveformInstancedBars';
+  instancedBars.instanceMatrix.setUsage(DynamicDrawUsage);
+
+  const dummy = new Object3D();
   for (let i = 0; i < nBars; i++) {
     const barHeight = 0.016 + 0.052 * Math.sin((i / (nBars - 1)) * Math.PI);
-    const barMesh = new Mesh(
-      bevelBox(0.0055, barHeight, 0.004, 0.0008, 0.0012, 1),
-      barMat,
-    );
-    barMesh.name = `AriaWaveBar_${i}`;
-    barMesh.position.set(i * 0.011, 0, 0);
-    waveformGroup.add(barMesh);
+    dummy.position.set(i * 0.011, 0, 0);
+    dummy.scale.set(1.0, barHeight, 1.0);
+    dummy.updateMatrix();
+    instancedBars.setMatrixAt(i, dummy.matrix);
+
+    // Backward-compatible query proxy (hidden from rendering, 0 draw calls)
+    const proxyMesh = new Mesh();
+    proxyMesh.name = `AriaWaveBar_${i}`;
+    proxyMesh.visible = false;
+    waveformGroup.add(proxyMesh);
   }
+  instancedBars.instanceMatrix.needsUpdate = true;
+  waveformGroup.add(instancedBars);
   root.add(waveformGroup);
 
+  // 4. High-Definition Ethereal Holographic AI Commander Visage Plate (Concept Images 1 & 2 Match)
+  const portraitTex = createAriaPortraitTexture();
+  if (portraitTex) {
+    const portraitMat = new MeshBasicMaterial({
+      map: portraitTex,
+      transparent: true,
+      blending: AdditiveBlending,
+      depthWrite: false,
+      side: DoubleSide,
+    });
+    portraitMat.name = 'AriaPortraitPlateMat';
+    const portraitMesh = new Mesh(new PlaneGeometry(0.26, 0.26), portraitMat);
+    portraitMesh.name = 'AriaPortraitPlate';
+    portraitMesh.position.set(0, 0.02, 0.02);
+    root.add(portraitMesh);
+
+    // Tone down underlying primitive geometry so crisp holographic vector portrait takes focus
+    holoPrimaryMat.opacity = 0.18;
+    holoEyeMat.opacity = 0.25;
+    holoCoreMat.opacity = 0.15;
+  }
+
   return root;
+}
+
+function createAriaPortraitTexture(): CanvasTexture | null {
+  if (typeof document === 'undefined') return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  ctx.clearRect(0, 0, 512, 512);
+
+  // Soft cyan radial glow aura behind head
+  const radGlow = ctx.createRadialGradient(256, 210, 40, 256, 210, 220);
+  radGlow.addColorStop(0, 'rgba(56, 189, 248, 0.45)');
+  radGlow.addColorStop(0.5, 'rgba(14, 165, 233, 0.18)');
+  radGlow.addColorStop(1, 'rgba(2, 132, 199, 0)');
+  ctx.fillStyle = radGlow;
+  ctx.fillRect(0, 0, 512, 512);
+
+  // Outer HUD corner targeting brackets
+  ctx.strokeStyle = 'rgba(56, 189, 248, 0.65)';
+  ctx.lineWidth = 3;
+  const bLen = 28;
+  const m = 36;
+  ctx.beginPath(); ctx.moveTo(m, m + bLen); ctx.lineTo(m, m); ctx.lineTo(m + bLen, m); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(512 - m - bLen, m); ctx.lineTo(512 - m, m); ctx.lineTo(512 - m, m + bLen); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(m, 512 - m - bLen); ctx.lineTo(m, 512 - m); ctx.lineTo(m + bLen, 512 - m); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(512 - m - bLen, 512 - m); ctx.lineTo(512 - m, 512 - m); ctx.lineTo(512 - m, 512 - m - bLen); ctx.stroke();
+
+  // Feminine AI Commander Portrait Paths
+  ctx.save();
+  ctx.shadowColor = '#38bdf8';
+  ctx.shadowBlur = 12;
+
+  // Head contour & silhouette
+  ctx.strokeStyle = '#38bdf8';
+  ctx.lineWidth = 3.5;
+  ctx.beginPath();
+  ctx.moveTo(256, 95);
+  ctx.bezierCurveTo(200, 95, 175, 140, 178, 205);
+  ctx.bezierCurveTo(180, 250, 195, 285, 220, 315);
+  ctx.bezierCurveTo(235, 335, 248, 350, 256, 354);
+  ctx.bezierCurveTo(264, 350, 277, 335, 292, 315);
+  ctx.bezierCurveTo(317, 285, 332, 250, 334, 205);
+  ctx.bezierCurveTo(337, 140, 312, 95, 256, 95);
+  ctx.fillStyle = 'rgba(2, 132, 199, 0.35)';
+  ctx.fill();
+  ctx.stroke();
+
+  // Swept-back aerospace hair locks
+  ctx.strokeStyle = 'rgba(186, 230, 253, 0.85)';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(256, 96);
+  ctx.quadraticCurveTo(210, 115, 172, 175);
+  ctx.moveTo(256, 96);
+  ctx.quadraticCurveTo(302, 115, 340, 175);
+  ctx.moveTo(230, 105);
+  ctx.quadraticCurveTo(185, 150, 168, 230);
+  ctx.moveTo(282, 105);
+  ctx.quadraticCurveTo(327, 150, 344, 230);
+  ctx.stroke();
+
+  // Eyebrows
+  ctx.strokeStyle = '#bae6fd';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(215, 195);
+  ctx.quadraticCurveTo(228, 190, 242, 195);
+  ctx.moveTo(270, 195);
+  ctx.quadraticCurveTo(284, 190, 297, 195);
+  ctx.stroke();
+
+  // Almond Cybernetic Eyes
+  ctx.fillStyle = '#bae6fd';
+  ctx.strokeStyle = '#38bdf8';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(212, 212);
+  ctx.quadraticCurveTo(228, 204, 244, 212);
+  ctx.quadraticCurveTo(228, 222, 212, 212);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(228, 212, 4.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(268, 212);
+  ctx.quadraticCurveTo(284, 204, 300, 212);
+  ctx.quadraticCurveTo(284, 222, 268, 212);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(284, 212, 4.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Nose Bridge & Tip
+  ctx.strokeStyle = 'rgba(186, 230, 253, 0.75)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(256, 210);
+  ctx.lineTo(254, 252);
+  ctx.quadraticCurveTo(256, 256, 260, 252);
+  ctx.stroke();
+
+  // Lips
+  ctx.strokeStyle = '#38bdf8';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(238, 285);
+  ctx.quadraticCurveTo(256, 280, 274, 285);
+  ctx.quadraticCurveTo(256, 293, 238, 285);
+  ctx.stroke();
+
+  // Cheekbone contour lines
+  ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(196, 240);
+  ctx.quadraticCurveTo(210, 260, 224, 280);
+  ctx.moveTo(316, 240);
+  ctx.quadraticCurveTo(302, 260, 288, 280);
+  ctx.stroke();
+
+  // Neck & Aerospace Cybernetic Collar
+  ctx.strokeStyle = '#38bdf8';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(236, 345);
+  ctx.lineTo(230, 395);
+  ctx.lineTo(165, 435);
+  ctx.moveTo(276, 345);
+  ctx.lineTo(282, 395);
+  ctx.lineTo(347, 435);
+  ctx.moveTo(230, 395);
+  ctx.lineTo(256, 420);
+  ctx.lineTo(282, 395);
+  ctx.stroke();
+
+  // Aerospace Shoulder Slopes
+  ctx.beginPath();
+  ctx.moveTo(165, 435);
+  ctx.lineTo(120, 465);
+  ctx.moveTo(347, 435);
+  ctx.lineTo(392, 465);
+  ctx.stroke();
+
+  // Forehead Cybernetic Interface Node
+  ctx.fillStyle = '#e0f2fe';
+  ctx.beginPath();
+  ctx.arc(256, 155, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#38bdf8';
+  ctx.beginPath();
+  ctx.arc(256, 155, 9, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Horizontal Holographic Scanlines
+  ctx.strokeStyle = 'rgba(56, 189, 248, 0.16)';
+  ctx.lineWidth = 1.5;
+  for (let y = 80; y < 470; y += 8) {
+    ctx.beginPath();
+    ctx.moveTo(80, y);
+    ctx.lineTo(432, y);
+    ctx.stroke();
+  }
+
+  // Label [ ARIA-7 ]
+  ctx.font = 'bold 26px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#bae6fd';
+  ctx.shadowColor = '#38bdf8';
+  ctx.shadowBlur = 14;
+  ctx.fillText('ARIA-7', 256, 482);
+
+  ctx.restore();
+
+  const tex = new CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
 }

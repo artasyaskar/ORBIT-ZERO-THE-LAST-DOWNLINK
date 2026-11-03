@@ -27,7 +27,8 @@ export const TACTICAL_PALETTE = {
   stormPurple: 0x6A1B9A,        // Monsoon storm cells
   lightningYellow: 0xFFEB3B,    // Lightning flashes
   floodCyan: 0x00BCD4,          // Inundated areas
-  laserGreen: 0x00FF88,         // 532nm downlink telemetry laser
+  carrierEmerald: 0x00FF88,     // S-band RF downlink carrier beam visualization
+  laserGreen: 0x00FF88,         // Backward-compatible alias for carrier beam visualization
   
   // Holographic UI
   holoCore: 0x00E5FF,           // ARIA-7 avatar core

@@ -23,19 +23,34 @@ export function evaluateRequestWithPackets(
   const unverified = transmittedPackets.find((packet) => packet.sectorId === request.targetSectorId && packet.confidence === 'UNVERIFIED');
   const packet = best ?? unverified ?? null;
   const status = !best ? 'UNVERIFIED' : confidenceRank[best.confidence] >= confidenceRank[request.minimumConfidence] ? 'VERIFIED' : 'PARTIAL';
+  const isThresholdMetProbable = status === 'VERIFIED' && best?.confidence === 'PROBABLE';
+  const statusBadge =
+    status === 'VERIFIED'
+      ? isThresholdMetProbable
+        ? '[OK] THRESHOLD MET: PROBABLE'
+        : '[OK] VERIFIED'
+      : status === 'PARTIAL'
+        ? '[?] PARTIAL'
+        : '[X] UNVERIFIED';
+
+  const explanation =
+    status === 'VERIFIED'
+      ? isThresholdMetProbable
+        ? `${best!.sectorCode} ${best!.sensorMode} meets operational acceptance threshold (${best!.confidenceBadge}). Terrain uncertainty remains.`
+        : `${best!.sectorCode} ${best!.sensorMode} ${best!.confidenceBadge} meets the requested evidence threshold.`
+      : status === 'PARTIAL'
+        ? `${best!.sectorCode} ${best!.sensorMode} is only ${best!.confidenceBadge}; ground teams still require ${request.requiredBadge}.`
+        : unverified ? `${unverified.sectorCode} observation contains no usable evidence for this request.`
+          : `No valid evidence reached the ground for Sector ${request.targetSectorId}.`;
+
   return {
     requestId: request.id, shortLabel: request.shortLabel, title: request.title, status,
-    statusBadge: status === 'VERIFIED' ? '[OK] VERIFIED' : status === 'PARTIAL' ? '[?] PARTIAL' : '[X] UNVERIFIED',
+    statusBadge,
     scorePoints: status === 'VERIFIED' ? 30 : status === 'PARTIAL' ? 18 : 0,
     maxPoints: 30, matchedPacketId: packet?.id ?? null,
     matchedSectorId: packet?.sectorId ?? null, matchedSensorMode: packet?.sensorMode ?? null,
     matchedConfidence: packet?.confidence ?? null,
-    explanation: status === 'VERIFIED'
-      ? `${best!.sectorCode} ${best!.sensorMode} ${best!.confidenceBadge} meets the requested evidence threshold.`
-      : status === 'PARTIAL'
-        ? `${best!.sectorCode} ${best!.sensorMode} is only ${best!.confidenceBadge}; ground teams still require ${request.requiredBadge}.`
-        : unverified ? `${unverified.sectorCode} observation contains no usable evidence for this request.`
-          : `No valid evidence reached the ground for Sector ${request.targetSectorId}.`,
+    explanation,
     groundConsequence: status === 'VERIFIED' ? request.consequenceOnSuccess : status === 'PARTIAL' ? request.consequenceOnPartial : request.consequenceOnFailure,
   };
 }
