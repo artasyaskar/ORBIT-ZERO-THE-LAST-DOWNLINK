@@ -267,65 +267,7 @@ function buildSphericalSectorOverlay(
   ribbonMesh.renderOrder = 3;
   group.add(ribbonMesh);
 
-  // 2. Subtle spherical triangle-fan surface fill mesh (curves over the sphere via radial rings)
   const centerUnit = latLonToGlobePoint(centerLatLon[0], centerLatLon[1], 1.0).normalize();
-  const fillRadius = GLOBE_RADIUS * 1.0025;
-  const radialRings = 3;
-  const fillVerts: number[] = [
-    centerUnit.x * fillRadius,
-    centerUnit.y * fillRadius,
-    centerUnit.z * fillRadius,
-  ];
-  const fillNorms: number[] = [centerUnit.x, centerUnit.y, centerUnit.z];
-  const fillIndices: number[] = [];
-
-  for (let r = 1; r <= radialRings; r++) {
-    const rf = r / radialRings;
-    for (let i = 0; i < nPts; i++) {
-      const u = new Vector3().lerpVectors(centerUnit, arcPoints[i], rf).normalize();
-      fillVerts.push(u.x * fillRadius, u.y * fillRadius, u.z * fillRadius);
-      fillNorms.push(u.x, u.y, u.z);
-    }
-  }
-
-  for (let i = 0; i < nPts; i++) {
-    const nextI = (i + 1) % nPts;
-    fillIndices.push(0, 1 + i, 1 + nextI);
-  }
-  for (let r = 1; r < radialRings; r++) {
-    const ringStart = 1 + (r - 1) * nPts;
-    const nextRingStart = 1 + r * nPts;
-    for (let i = 0; i < nPts; i++) {
-      const nextI = (i + 1) % nPts;
-      fillIndices.push(
-        ringStart + i,
-        nextRingStart + i,
-        nextRingStart + nextI,
-        ringStart + i,
-        nextRingStart + nextI,
-        ringStart + nextI,
-      );
-    }
-  }
-
-  const fillGeo = new BufferGeometry();
-  fillGeo.setAttribute('position', new Float32BufferAttribute(fillVerts, 3));
-  fillGeo.setAttribute('normal', new Float32BufferAttribute(fillNorms, 3));
-  fillGeo.setIndex(fillIndices);
-
-  const fillMat = new MeshBasicMaterial({
-    color: baseHex,
-    transparent: true,
-    opacity: isStorm ? 0.055 : 0.035,
-    side: DoubleSide,
-    depthWrite: false,
-  });
-  fillMat.name = `SectorFillMat_${sectorId}`;
-
-  const fillMesh = new Mesh(fillGeo, fillMat);
-  fillMesh.name = `SectorFill_${sectorId}`;
-  fillMesh.renderOrder = 2;
-  group.add(fillMesh);
 
   // 3. Volumetric spherical storm cloud deck hovering over storm sectors (B, C in Monsoon, and E)
   if (isStorm || sectorId === 'C') {
@@ -471,7 +413,7 @@ export function createEarthGlobeAsset(): Object3D {
   root.name = 'TacticalEarthGlobe';
 
   // 1. Primary Earth Sphere (NASA Blue Marble 2K target mesh)
-  const earthSphereGeo = new SphereGeometry(GLOBE_RADIUS, 48, 36);
+  const earthSphereGeo = new SphereGeometry(GLOBE_RADIUS, 36, 26);
   applyEarthBaseVertexColors(earthSphereGeo);
 
   const earthSurfaceMat = new MeshStandardMaterial({
@@ -488,7 +430,7 @@ export function createEarthGlobeAsset(): Object3D {
   root.add(coreSphere);
 
   // 2. Dynamic Planetary Cloud Layer Sphere (mapped with windowed NASA cloud texture at runtime)
-  const cloudSphereGeo = new SphereGeometry(GLOBE_RADIUS * 1.009, 32, 24);
+  const cloudSphereGeo = new SphereGeometry(GLOBE_RADIUS * 1.009, 24, 18);
   const cloudLayerMat = new MeshStandardMaterial({
     color: 0xf8fafc,
     emissive: 0x38bdf8,
@@ -508,7 +450,7 @@ export function createEarthGlobeAsset(): Object3D {
   root.add(cloudSphere);
 
   // 3. Multi-Layer Luminous Atmospheric Limb & Fresnel Corona Halo (Concept Images 1 & 2)
-  const innerAtmoGeo = new SphereGeometry(GLOBE_RADIUS * 1.018, 36, 26);
+  const innerAtmoGeo = new SphereGeometry(GLOBE_RADIUS * 1.018, 24, 18);
   const innerAtmoMat = new MeshBasicMaterial({
     color: 0x38bdf8,
     side: BackSide,
@@ -522,7 +464,7 @@ export function createEarthGlobeAsset(): Object3D {
   innerAtmoShell.renderOrder = 4;
   root.add(innerAtmoShell);
 
-  const outerAtmoGeo = new SphereGeometry(GLOBE_RADIUS * 1.048, 36, 26);
+  const outerAtmoGeo = new SphereGeometry(GLOBE_RADIUS * 1.048, 24, 18);
   const outerAtmoMat = new MeshBasicMaterial({
     color: 0x0ea5e9,
     side: BackSide,
@@ -536,65 +478,42 @@ export function createEarthGlobeAsset(): Object3D {
   outerAtmoShell.renderOrder = 5;
   root.add(outerAtmoShell);
 
-  const coronaAtmoGeo = new SphereGeometry(GLOBE_RADIUS * 1.082, 32, 24);
-  const coronaAtmoMat = new MeshBasicMaterial({
-    color: 0x0284c7,
-    side: BackSide,
+  // Surface-Tangent Radiant Horizon Limb Ring & Orbital Trajectory Inclination Rings (Merged)
+  const orbitalRingsSharedMat = new MeshBasicMaterial({
+    color: 0x38bdf8,
     transparent: true,
-    opacity: 0.36,
+    opacity: 0.78,
     depthWrite: false,
     blending: AdditiveBlending,
   });
-  const coronaAtmoShell = new Mesh(coronaAtmoGeo, coronaAtmoMat);
-  coronaAtmoShell.name = 'GlobeCoronaGlow';
-  coronaAtmoShell.renderOrder = 6;
-  root.add(coronaAtmoShell);
+  const orbitalRingsStaticGroup = new Group();
+  orbitalRingsStaticGroup.name = 'GlobeOrbitalTrackRingsGroup';
 
-  // Surface-Tangent Radiant Horizon Limb Ring (Intense electric cyan limb)
   const horizonLimbRing = new Mesh(
     new TorusGeometry(GLOBE_RADIUS * 1.014, 0.0036, 12, 72),
-    new MeshBasicMaterial({
-      color: 0x38bdf8,
-      transparent: true,
-      opacity: 0.95,
-      depthWrite: false,
-      blending: AdditiveBlending,
-    }),
+    orbitalRingsSharedMat,
   );
   horizonLimbRing.name = 'GlobeHorizonLimbRing';
-  horizonLimbRing.renderOrder = 5;
-  root.add(horizonLimbRing);
+  orbitalRingsStaticGroup.add(horizonLimbRing);
 
-  // 3b. Orbital Trajectory Inclination Ring (55° LEO Pass - Concept Images 1 & 2 Match)
   const orbitalTrackRing = new Mesh(
     new TorusGeometry(GLOBE_RADIUS * 1.12, 0.0018, 8, 80),
-    new MeshBasicMaterial({
-      color: 0x38bdf8,
-      transparent: true,
-      opacity: 0.75,
-      depthWrite: false,
-      blending: AdditiveBlending,
-    }),
+    orbitalRingsSharedMat,
   );
   orbitalTrackRing.name = 'GlobeOrbitalTrackRing55';
   orbitalTrackRing.rotation.set(Math.PI * 0.31, 0.22, 0);
-  orbitalTrackRing.renderOrder = 6;
-  root.add(orbitalTrackRing);
+  orbitalRingsStaticGroup.add(orbitalTrackRing);
 
   const orbitalTrackRingPolar = new Mesh(
     new TorusGeometry(GLOBE_RADIUS * 1.15, 0.0015, 8, 80),
-    new MeshBasicMaterial({
-      color: 0x22d3ee,
-      transparent: true,
-      opacity: 0.55,
-      depthWrite: false,
-      blending: AdditiveBlending,
-    }),
+    orbitalRingsSharedMat,
   );
   orbitalTrackRingPolar.name = 'GlobeOrbitalTrackRingPolar';
   orbitalTrackRingPolar.rotation.set(0.18, Math.PI * 0.42, 0.35);
-  orbitalTrackRingPolar.renderOrder = 6;
-  root.add(orbitalTrackRingPolar);
+  orbitalRingsStaticGroup.add(orbitalTrackRingPolar);
+
+  mergeStaticMeshesByMaterial(orbitalRingsStaticGroup);
+  root.add(orbitalRingsStaticGroup);
 
   // 4. Surface-Conforming Spherical Sector Boundary Polygons (Sectors A-F)
   const sectorOverlayGroup = new Group();
@@ -834,19 +753,12 @@ export function createEarthGlobeAsset(): Object3D {
   crosshairLines.name = 'ActiveReticleCrosshairs';
   activeReticleGroup.add(crosshairLines);
 
-  // 4 Corner Brackets
-  const cornerMat = new MeshBasicMaterial({
-    color: 0x38bdf8,
-    transparent: true,
-    opacity: 0.95,
-    depthWrite: false,
-  });
-  cornerMat.name = 'ActiveReticleCornerMat';
+  // 4 Corner Brackets (share reticleRingMat so mergeStaticMeshesByMaterial merges them into 1 draw call)
   for (let c = 0; c < 4; c++) {
     const bracketAngle = (c * Math.PI) / 2 + Math.PI / 4;
     const bracketMesh = new Mesh(
       new TorusGeometry(0.050, 0.0008, 6, 16, Math.PI * 0.28),
-      cornerMat,
+      reticleRingMat,
     );
     bracketMesh.name = `ActiveReticleBracket_${c}`;
     bracketMesh.rotation.set(0, 0, bracketAngle - Math.PI * 0.14);
