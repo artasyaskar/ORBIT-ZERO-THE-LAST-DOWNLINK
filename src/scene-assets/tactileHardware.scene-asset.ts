@@ -491,15 +491,17 @@ export function createDataCubeAsset(accentHex = 0x45c9c0): Object3D {
   return root;
 }
 
+// Preallocated shared pad bezel material across all console pads
+const sharedPadBezelMat = new MeshStandardMaterial({
+  color: 0x1e293b,
+  roughness: 0.35,
+  metalness: 0.88,
+});
+
 export function createConsolePadAsset(accentHex = 0x45c9c0): Object3D {
   const root = new Group();
   root.name = 'ConsoleTactilePad';
 
-  const bezelMat = new MeshStandardMaterial({
-    color: 0x1e293b,
-    roughness: 0.35,
-    metalness: 0.88,
-  });
   const capMat = new MeshStandardMaterial({
     color: accentHex,
     emissive: accentHex,
@@ -508,16 +510,8 @@ export function createConsolePadAsset(accentHex = 0x45c9c0): Object3D {
     metalness: 0.45,
   });
 
-  const base = new Mesh(
-    bevelBox(0.052, 0.005, 0.040, 0.002, 0.004, 2),
-    bezelMat,
-  );
-  base.name = 'PadBezelBase';
-  base.position.set(0, 0.0025, 0);
-  root.add(base);
-
   const cap = new Mesh(
-    bevelBox(0.042, 0.004, 0.030, 0.0015, 0.003, 1),
+    bevelBox(0.044, 0.006, 0.032, 0.0015, 0.003, 1),
     capMat,
   );
   cap.name = 'PadIlluminatedCap';
