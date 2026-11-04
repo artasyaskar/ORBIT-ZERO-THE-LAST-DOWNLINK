@@ -114,37 +114,37 @@
   <div id="BriefingHeader" class="header-banner">
     <div id="BriefingTitle" class="title-text">ORBIT ZERO: THE LAST DOWNLINK</div>
     <div id="BriefingSubtitle" class="subtitle-text">
-      INDUS FLOOD TRIAGE | 3 GROUND REQUESTS | 10.0s WINDOW
+      OP 01: FIRELINE (BOLAN) | 10.0s @ 10 MB/s | 18 MB/STR | 52 Wh
     </div>
   </div>
 
   <div id="Req1Card" class="req-card">
-    <div id="Req1Title" class="req-title">REQ 1: SEC-B EAST LEVEE ROAD [CONFIRMED]</div>
+    <div id="Req1Title" class="req-title">REQ 1: CANYON FIRELINE [CONFIRMED]</div>
     <div id="Req1Status" class="req-detail" style="height: 50px; overflow: hidden;">
-      Storm Clouds over Levee -> Scan SEC-B with RADAR
+      Dense Smoke over Bolan Canyon Highway -&gt; Scan SEC-B with THERMAL
     </div>
   </div>
 
   <div id="Req2Card" class="req-card">
-    <div id="Req2Title" class="req-title">REQ 2: SEC-C STEEL BRIDGE [CONFIRMED]</div>
+    <div id="Req2Title" class="req-title">REQ 2: VIADUCT FIREBREAK [CONFIRMED]</div>
     <div id="Req2Status" class="req-detail" style="height: 50px; overflow: hidden;">
-      Clear Sky over Bridge -> Scan SEC-C with OPTICAL
+      Clear Sky over Bolan Viaduct -&gt; Scan SEC-C with OPTICAL
     </div>
   </div>
 
   <div id="Req3Card" class="req-card">
-    <div id="Req3Title" class="req-title">REQ 3: SEC-E SHELTER RIDGE [PROBABLE]</div>
+    <div id="Req3Title" class="req-title">REQ 3: RIDGE DEPOT [CONFIRMED]</div>
     <div id="Req3Status" class="req-detail" style="height: 50px; overflow: hidden;">
-      Storm Clouds over Ridge -> Scan SEC-E with RADAR
+      Moderate Smoke over Juniper Ridge Depot -&gt; Scan SEC-E with THERMAL
     </div>
   </div>
 
   <div id="SelectedSectorCard" class="sector-box">
     <div id="SelectedSectorTitle" class="sector-title">
-      TARGET: SEC-B East Levee Highway (STORM CLOUDS)
+      TARGET: SEC-B Bolan Canyon Highway (DENSE SMOKE)
     </div>
     <div id="SelectedSectorDesc" class="sector-desc" style="height: 50px; overflow: hidden;">
-      Sensor: RADAR (14 PWR, 3 STR, 4.5s Tx) | Penetrates storm clouds
+      Sensor: THERMAL (11 Wh, 3 STR, 42 MB / 4.2s Tx) | Penetrates biomass smoke
     </div>
   </div>
 
@@ -153,12 +153,21 @@
   </Button>
 
   <Button id="Btn_ToggleSensor" class="action-btn">
-    <ButtonLabel id="Lbl_ToggleSensor" style="color: #e0f2fe; font-size: 13px; font-weight: 700;">Active Sensor: RADAR (Switch OPTICAL / RADAR)</ButtonLabel>
+    <ButtonLabel id="Lbl_ToggleSensor" style="color: #e0f2fe; font-size: 13px; font-weight: 700;">Active Sensor: RADAR (Switch OPTICAL / THERMAL / RADAR)</ButtonLabel>
   </Button>
 
   <Button id="Btn_ScanSector" class="action-btn">
-    <ButtonLabel id="Lbl_ScanSector" style="color: #38bdf8; font-size: 13px; font-weight: 700;">SCAN SEC-B WITH RADAR (-14 PWR)</ButtonLabel>
+    <ButtonLabel id="Lbl_ScanSector" style="color: #38bdf8; font-size: 13px; font-weight: 700;">SCAN SEC-B WITH RADAR (-14 Wh)</ButtonLabel>
   </Button>
+
+  <div style="flex-direction: row; gap: 6px; width: 100%;">
+    <Button id="Btn_SelectCampaign" class="action-btn" style="width: 52%;">
+      <ButtonLabel id="Lbl_SelectCampaign" style="color: #fbbf24; font-size: 12px; font-weight: 700;">SWITCH OP (CAMPAIGN)</ButtonLabel>
+    </Button>
+    <Button id="Btn_StartTutorial" class="action-btn" style="width: 46%;">
+      <ButtonLabel id="Lbl_StartTutorial" style="color: #34d399; font-size: 12px; font-weight: 700;">ORBITAL ACADEMY</ButtonLabel>
+    </Button>
+  </div>
 
   <Button id="Btn_CalibrateSeat" class="action-btn" style="display: flex">
     <ButtonLabel style="color: #cbd5e1; font-size: 13px; font-weight: 700;">Recenter Seated VR Viewpoint</ButtonLabel>
