@@ -13,9 +13,9 @@
 
 import { LandingAudioController } from './landingAudio';
 import { LandingScene } from './landingScene';
-import { LandingUI } from './landingUI';
+import { LandingUI, type LandingLaunchSelection } from './landingUI';
 
-export type LaunchGameCallback = (launchXR: boolean) => unknown | Promise<unknown>;
+export type LaunchGameCallback = (selection: LandingLaunchSelection) => unknown | Promise<unknown>;
 
 export class LandingController {
   private container: HTMLElement;
@@ -37,8 +37,11 @@ export class LandingController {
 
     this.ui = new LandingUI(this.container, {
       onEnterExperience: () => this.handleEnterExperience(),
-      onPlayDesktop: () => this.handleLaunch(false),
-      onEnterVR: () => this.handleLaunch(true),
+      onSelectCampaign: () => {
+        if (this.audio) this.audio.playUiChime(880);
+      },
+      onPlayDesktop: (sel) => this.handleLaunch(sel),
+      onEnterVR: (sel) => this.handleLaunch(sel),
       onToggleMute: () => this.handleToggleMute(),
       onBackToOrbit: () => this.handleBackToOrbit(),
     });
@@ -83,7 +86,7 @@ export class LandingController {
     return this.audio.toggleMute();
   }
 
-  private async handleLaunch(launchXR: boolean): Promise<void> {
+  private async handleLaunch(selection: LandingLaunchSelection): Promise<void> {
     if (this.isTransitioning) return;
     this.isTransitioning = true;
 
@@ -92,8 +95,9 @@ export class LandingController {
       this.audio.playTransitionWhoosh();
     }
 
-    // Smooth camera push-in towards orbital perspective
-    if (this.scene) {
+    // Smooth camera push-in towards orbital perspective on Desktop;
+    // skip async delay when launchXR is true so Meta Quest Browser user gesture activation does not expire.
+    if (this.scene && !selection.launchXR) {
       try {
         await this.scene.playTransitionToOrbit();
       } catch {
@@ -106,7 +110,7 @@ export class LandingController {
 
     // Hand over control to the core game engine
     try {
-      await this.onLaunchGame(launchXR);
+      await this.onLaunchGame(selection);
     } catch (err) {
       console.error('[LandingController] Failed to launch game:', err);
     }
