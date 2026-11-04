@@ -137,16 +137,16 @@
 
   <div id="DebriefOutcomeCard" class="outcome-card">
     <div id="OutcomeReq1" class="outcome-line">
-      REQ 1 (SEC-B Road Inundation): AWAITING DOWNLINK
+      REQ 1 (SEC-B Bolan Canyon Fireline): AWAITING DOWNLINK
     </div>
     <div id="OutcomeReq2" class="outcome-line">
-      REQ 2 (SEC-C Crossing Approach): AWAITING DOWNLINK
+      REQ 2 (SEC-C Bolan Viaduct Firebreak): AWAITING DOWNLINK
     </div>
     <div id="OutcomeReq3" class="outcome-line">
-      REQ 3 (SEC-E Shelter Spur): AWAITING DOWNLINK
+      REQ 3 (SEC-E Juniper Ridge Depot): AWAITING DOWNLINK
     </div>
     <div id="DebriefAdviceText" class="advice-text">
-      OPTIMAL: B(RADAR) + C(OPTICAL) + E(RADAR), compress 2 cubes (7.6s &lt;= 10.0s).
+      OPTIMAL: B(THERMAL) + C(OPTICAL) + E(THERMAL), compress B+E (7.6s &lt;= 10.0s).
     </div>
   </div>
 
