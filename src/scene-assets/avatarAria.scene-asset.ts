@@ -272,8 +272,8 @@ export function createAvatarAriaAsset(): Object3D {
     dummy.updateMatrix();
     instancedBars.setMatrixAt(i, dummy.matrix);
 
-    // Backward-compatible query proxy (hidden from rendering, 0 draw calls)
-    const proxyMesh = new Mesh();
+    // Backward-compatible query proxy (Object3D prevents InputSystem BVH generation errors)
+    const proxyMesh = new Object3D();
     proxyMesh.name = `AriaWaveBar_${i}`;
     proxyMesh.visible = false;
     waveformGroup.add(proxyMesh);
