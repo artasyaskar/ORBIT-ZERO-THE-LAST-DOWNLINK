@@ -309,13 +309,154 @@
    ========================================================================= */
 
 .oz-selection-content {
-  max-width: 760px;
+  max-width: 920px;
   margin: 0 auto;
   width: 100%;
   z-index: 30;
   display: flex;
   flex-direction: column;
   align-items: center;
+}
+
+.oz-hero-cta-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+
+.oz-btn-hero-secondary {
+  padding: 15px 24px;
+  font-size: 12px;
+  border: 1.5px solid rgba(255, 213, 128, 0.55);
+  color: var(--oz-gold);
+  background: rgba(11, 26, 51, 0.78);
+}
+
+.oz-btn-hero-secondary:hover, .oz-btn-hero-secondary:focus-visible {
+  border-color: var(--oz-gold);
+  background: rgba(255, 213, 128, 0.16);
+  color: #ffffff;
+  outline: none;
+}
+
+.oz-campaign-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  width: 100%;
+  margin-bottom: 14px;
+  pointer-events: auto;
+}
+
+.oz-op-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  background: rgba(6, 14, 28, 0.85);
+  border: 1.5px solid rgba(0, 240, 255, 0.22);
+  border-radius: 6px;
+  padding: 12px 14px;
+  cursor: pointer;
+  color: var(--oz-text-primary);
+  transition: all 0.2s ease;
+  backdrop-filter: blur(16px);
+}
+
+.oz-op-card:hover, .oz-op-card:focus-visible {
+  border-color: var(--oz-cyan);
+  background: rgba(0, 240, 255, 0.1);
+  outline: none;
+}
+
+.oz-op-card-active {
+  border-color: var(--oz-cyan);
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.2), rgba(6, 14, 28, 0.92));
+  box-shadow: 0 0 22px var(--oz-cyan-glow);
+}
+
+.oz-op-code {
+  font-family: var(--oz-font-mono);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 1.1px;
+  color: var(--oz-cyan);
+  margin-bottom: 4px;
+}
+
+.oz-op-title {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: #ffffff;
+  margin-bottom: 4px;
+}
+
+.oz-op-meta {
+  font-family: var(--oz-font-mono);
+  font-size: 9.5px;
+  color: var(--oz-text-muted);
+}
+
+.oz-briefing-preview {
+  width: 100%;
+  background: rgba(6, 14, 29, 0.88);
+  border: 1.5px solid rgba(0, 240, 255, 0.32);
+  border-radius: 6px;
+  padding: 14px 18px;
+  margin-bottom: 16px;
+  backdrop-filter: blur(18px);
+  pointer-events: auto;
+}
+
+.oz-briefing-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.oz-briefing-opcode {
+  font-family: var(--oz-font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  color: var(--oz-gold);
+}
+
+.oz-briefing-title {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.oz-briefing-budget {
+  font-family: var(--oz-font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--oz-cyan);
+  background: rgba(0, 240, 255, 0.1);
+  border: 1px solid rgba(0, 240, 255, 0.28);
+  border-radius: 4px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.oz-briefing-text {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--oz-text-secondary);
+  margin: 0 0 8px;
+}
+
+.oz-briefing-requests {
+  font-family: var(--oz-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--oz-emerald);
+  letter-spacing: 0.4px;
 }
 
 /* PROMINENT BACK NAVIGATION (ALWAYS VISIBLE & UNBLOCKED) */
