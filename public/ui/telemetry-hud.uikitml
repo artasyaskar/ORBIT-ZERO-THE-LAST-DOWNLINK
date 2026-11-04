@@ -1,19 +1,64 @@
 <!--
-  ORBIT ZERO: THE LAST DOWNLINK — Compact Overhead Telemetry Visor & Evidence Cube Inspector
-  Positioned high above the 3U CubeSat so the spacecraft and Earth globe remain 100% unobstructed.
+  ORBIT ZERO: THE LAST DOWNLINK — Ergonomic Overhead Tactical Visor & Evidence Inspector
+  Designed per Meta Horizon OS Sept 2026 Spatial UI standards.
+  Presents clear primary directive, aerospace resource telemetry, and tangible cube inspection.
 -->
 <style>
   .panel-root {
     flex-direction: column;
-    width: 520px;
-    padding-top: 12px;
-    padding-bottom: 12px;
-    padding-left: 16px;
-    padding-right: 16px;
-    background-color: #060e1de6;
-    border-radius: 14px;
-    border-width: 1.5px;
+    width: 540px;
+    padding-top: 14px;
+    padding-bottom: 14px;
+    padding-left: 18px;
+    padding-right: 18px;
+    background-color: #060e1df0;
+    border-radius: 16px;
+    border-width: 2px;
     border-color: #0284c7;
+  }
+
+  .operation-title-bar {
+    flex-direction: row;
+    justify-content: space-between;
+    width: 100%;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom-width: 1px;
+    border-color: #1e3a5f;
+  }
+
+  .op-title-text {
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    color: #38bdf8;
+  }
+
+  .op-phase-text {
+    font-size: 13px;
+    font-weight: 700;
+    color: #f59e0b;
+  }
+
+  .directive-banner {
+    flex-direction: column;
+    width: 100%;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    padding-left: 14px;
+    padding-right: 14px;
+    background-color: #0c4a6ecc;
+    border-radius: 10px;
+    border-width: 1.5px;
+    border-color: #38bdf8;
+    margin-bottom: 10px;
+  }
+
+  .directive-text {
+    font-size: 15px;
+    font-weight: 800;
+    line-height: 1.35;
+    color: #ffffff;
   }
 
   .telemetry-header {
@@ -27,40 +72,20 @@
     border-radius: 8px;
     border-width: 1px;
     border-color: #0369a1;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
   }
 
   .resource-row {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 700;
     color: #38bdf8;
   }
 
   .window-row {
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 700;
     color: #f59e0b;
-    margin-top: 2px;
-  }
-
-  .status-banner {
-    flex-direction: column;
-    width: 100%;
-    padding-top: 6px;
-    padding-bottom: 6px;
-    padding-left: 10px;
-    padding-right: 10px;
-    background-color: #17243cf0;
-    border-radius: 7px;
-    border-width: 1px;
-    border-color: #334155;
-    margin-bottom: 6px;
-  }
-
-  .status-text {
-    font-size: 13px;
-    font-weight: 600;
-    color: #f8fafc;
+    margin-top: 3px;
   }
 
   .inspector-card {
@@ -74,11 +99,11 @@
     border-radius: 8px;
     border-width: 1px;
     border-color: #1e3a5f;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
   }
 
   .inspector-title {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 700;
     color: #f8fafc;
   }
@@ -110,18 +135,23 @@
   }
 </style>
 <Panel class="panel-root">
-  <div id="TelemetryHeaderCard" class="telemetry-header">
-    <div id="ResourceReadout" class="resource-row">
-      POWER: 55 / 55 PWR  |  STORAGE: 0 / 9 STR
-    </div>
-    <div id="WindowReadout" class="window-row">
-      DOWNLINK QUEUE: 0.0s / 10.0s WINDOW  |  PHASE: OPERATIONS
+  <div class="operation-title-bar">
+    <div id="OperationTitleText" class="op-title-text">ORBIT ZERO // OP 01: FIRELINE (BOLAN)</div>
+    <div id="OperationPhaseBadge" class="op-phase-text">PHASE: RECON &amp; PROCESSING</div>
+  </div>
+
+  <div id="StatusBannerCard" class="directive-banner">
+    <div id="StatusMessageText" class="directive-text" style="height: 48px; overflow: hidden;">
+      &gt; STEP 1: Point at highlighted Sector B on the globe and pinch to acquire target.
     </div>
   </div>
 
-  <div id="StatusBannerCard" class="status-banner">
-    <div id="StatusMessageText" class="status-text" style="height: 58px; overflow: hidden;">
-      PASS ACTIVE: Scan SEC-B (RADAR), SEC-C (OPTICAL), SEC-E (RADAR), compress 2 cubes, then transmit!
+  <div id="TelemetryHeaderCard" class="telemetry-header">
+    <div id="ResourceReadout" class="resource-row">
+      POWER: 52 / 52 Wh  |  STORAGE: 0 / 9 STR (18 MB/UNIT)
+    </div>
+    <div id="WindowReadout" class="window-row">
+      DOWNLINK QUEUE: 0.0s / 10.0s (10.0 MB/s)  |  KARACHI PASS: STANDBY
     </div>
   </div>
 
@@ -133,12 +163,12 @@
       Scan a sector or grab/poke an Evidence Cube on the tray to inspect.
     </div>
     <div id="InspectorScience" class="inspector-science" style="height: 40px; overflow: hidden;">
-      Onboard Processing (6 PWR) compresses CONFIRMED/PROBABLE cubes: 3 STR -&gt; 1 STR, 4.5s -&gt; 1.8s Tx.
+      Onboard Processing (6 Wh) compresses CONFIRMED/PROBABLE cubes: 3 STR (40-45 MB) -&gt; 1 STR (18 MB / 1.8s Tx).
     </div>
   </div>
 
   <Button id="Btn_ProcessCube" class="action-btn">
-    <ButtonLabel id="Lbl_ProcessCube" style="color: #f59e0b; font-size: 13px; font-weight: 700;">PROCESS SELECTED CUBE (-6 PWR -&gt; 1 STR / 1.8s Tx)</ButtonLabel>
+    <ButtonLabel id="Lbl_ProcessCube" style="color: #f59e0b; font-size: 13px; font-weight: 700;">PROCESS SELECTED CUBE (-6 Wh -&gt; 1 STR / 18 MB / 1.8s Tx)</ButtonLabel>
   </Button>
 
   <Button id="Btn_QueueCube" class="action-btn">
