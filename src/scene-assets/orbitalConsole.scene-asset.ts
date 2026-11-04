@@ -19,12 +19,17 @@ import {
     Float32BufferAttribute,
     FrontSide,
     Group,
+    LineBasicMaterial,
+    LineSegments,
     Mesh,
     MeshBasicMaterial,
     MeshStandardMaterial,
     Object3D,
+    PlaneGeometry,
+    PointLight,
     Points,
     PointsMaterial,
+    RingGeometry,
     SphereGeometry,
     TorusGeometry,
     Vector3,
@@ -264,18 +269,10 @@ export function createOrbitalConsoleAsset(): Object3D {
         [0.00, 0.778, -0.44],
         [0.10, 0.778, -0.44],
     ];
-    const wellColors = [0x22d3ee, 0x22d3ee, 0xf59e0b];
     for (let w = 0; w < 3; w++) {
-        const padMat = new MeshStandardMaterial({
-            color: wellColors[w],
-            emissive: wellColors[w],
-            emissiveIntensity: 2.8,
-            roughness: 0.12,
-            metalness: 0.6,
-        });
         const wellPad = new Mesh(
             bevelBox(0.078, 0.004, 0.078, 0.001, 0.003, 1),
-            padMat,
+            w === 2 ? amberInductionMat : cyanAccentMat,
         );
         wellPad.name = `CubeDockWellGlow_${w + 1}`;
         wellPad.position.set(wellSlotPositions[w][0], wellSlotPositions[w][1], wellSlotPositions[w][2]);
@@ -290,12 +287,12 @@ export function createOrbitalConsoleAsset(): Object3D {
         deckGroup.add(slotRim);
     }
 
-        // Left & Right Aerospace Toggle Switches & Rotary Knobs (Concept Images 1 & 2 Match)
-    const toggleBasePlateMat = new MeshStandardMaterial({ color: 0x0f172a, roughness: 0.35, metalness: 0.85 });
-    const toggleStemChromeMat = new MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.12, metalness: 0.98 });
-    const indicatorLedMat = new MeshBasicMaterial({ color: 0x38bdf8 });
-    const indicatorAmberMat = new MeshBasicMaterial({ color: 0xf59e0b });
-    const indicatorEmeraldMat = new MeshBasicMaterial({ color: 0x10b981 });
+    // Left & Right Aerospace Toggle Switches & Rotary Knobs (reuse shared materials for static merge)
+    const toggleBasePlateMat = gunmetalBezelMat;
+    const toggleStemChromeMat = titaniumRimMat;
+    const indicatorLedMat = cyanAccentMat;
+    const indicatorAmberMat = amberInductionMat;
+    const indicatorEmeraldMat = emeraldWaveguideMat;
 
     // Interactive Left Console Sensor Mode Toggle Switch (Optical <-> SAR Radar)
     const sensorSwitchGroup = new Group();
@@ -384,62 +381,62 @@ export function createOrbitalConsoleAsset(): Object3D {
 
     // (LeftWingSlab & RightWingSlab replaced by full-span LeftWingDeck & RightWingDeck above)
 
-    // 3. LEFT STATION: Handheld Dual-Aperture Scanner Dock & 3-Slot Evidence Cube Capture Tray (Hidden for Sleek Concept Art Cockpit)
+    // 3. LEFT STATION: Handheld Dual-Aperture Scanner Dock & 3-Slot Evidence Cube Capture Tray
     const scannerDockOuter = new Mesh(
         bevelBox(0.135, 0.018, 0.165, 0.004, 0.012, 3),
         titaniumRimMat,
     );
     scannerDockOuter.name = 'ScannerHolsterBezel';
-    scannerDockOuter.position.set(-0.48, 0.778, 0.02);
-    scannerDockOuter.visible = false;
-    // deckGroup.add(scannerDockOuter);
+    scannerDockOuter.position.set(-0.44, 0.778, 0.26);
+    scannerDockOuter.visible = true;
+    deckGroup.add(scannerDockOuter);
 
     const scannerDockWell = new Mesh(
         bevelBox(0.108, 0.016, 0.138, 0.003, 0.008, 2),
         carbonWellMat,
     );
     scannerDockWell.name = 'ScannerHolsterWell';
-    scannerDockWell.position.set(-0.48, 0.782, 0.02);
-    scannerDockWell.visible = false;
-    // deckGroup.add(scannerDockWell);
+    scannerDockWell.position.set(-0.44, 0.782, 0.26);
+    scannerDockWell.visible = true;
+    deckGroup.add(scannerDockWell);
 
-    // 3-Slot Raw Evidence Cube Tray (Hidden for Sleek Concept Art Cockpit)
+    // 3-Slot Raw Evidence Cube Tray (centered at world [-0.31, 0.792, -0.42] -> local [-0.31, 0.778, 0.14])
     const trayOuterBezel = new Mesh(
-        bevelBox(0.31, 0.018, 0.125, 0.004, 0.014, 3),
+        bevelBox(0.27, 0.018, 0.125, 0.004, 0.014, 3),
         titaniumRimMat,
     );
     trayOuterBezel.name = 'RawCubeTrayBezel';
-    trayOuterBezel.position.set(-0.37, 0.778, 0.13);
-    trayOuterBezel.visible = false;
-    // deckGroup.add(trayOuterBezel);
+    trayOuterBezel.position.set(-0.31, 0.778, 0.14);
+    trayOuterBezel.visible = true;
+    deckGroup.add(trayOuterBezel);
 
     const trayDarkBed = new Mesh(
-        bevelBox(0.286, 0.016, 0.102, 0.003, 0.01, 2),
+        bevelBox(0.246, 0.016, 0.102, 0.003, 0.01, 2),
         carbonWellMat,
     );
     trayDarkBed.name = 'RawCubeTrayBed';
-    trayDarkBed.position.set(-0.37, 0.781, 0.13);
-    trayDarkBed.visible = false;
-    // deckGroup.add(trayDarkBed);
+    trayDarkBed.position.set(-0.31, 0.781, 0.14);
+    trayDarkBed.visible = true;
+    deckGroup.add(trayDarkBed);
 
-    const rawSlotX = [-0.46, -0.37, -0.28];
-    const socketRingGeo = bevelBox(0.076, 0.006, 0.076, 0.0015, 0.006, 2);
+    const rawSlotX = [-0.38, -0.31, -0.24];
+    const socketRingGeo = bevelBox(0.068, 0.006, 0.076, 0.0015, 0.006, 2);
     for (let i = 0; i < 3; i++) {
         const socketFrame = new Mesh(socketRingGeo, gunmetalBezelMat);
         socketFrame.name = `RawTraySocket_${i + 1}`;
-        socketFrame.position.set(rawSlotX[i], 0.788, 0.13);
-        socketFrame.visible = false;
-        // deckGroup.add(socketFrame);
+        socketFrame.position.set(rawSlotX[i], 0.788, 0.14);
+        socketFrame.visible = true;
+        deckGroup.add(socketFrame);
     }
 
     const trayAccentPipe = new Mesh(
-        bevelBox(0.26, 0.005, 0.006, 0.001, 0.002, 2),
+        bevelBox(0.23, 0.005, 0.006, 0.001, 0.002, 2),
         cyanAccentMat,
     );
     trayAccentPipe.name = 'LeftTrayLedStrip';
-    trayAccentPipe.position.set(-0.37, 0.788, 0.184);
-    trayAccentPipe.visible = false;
-    // deckGroup.add(trayAccentPipe);
+    trayAccentPipe.position.set(-0.31, 0.788, 0.194);
+    trayAccentPipe.visible = true;
+    deckGroup.add(trayAccentPipe);
 
     // 4. CENTER STATION: Recessed Turbine Globe Gimbal Pedestal (local [0, 0.78, -0.02])
     const gimbalGroup = new Group();
@@ -482,24 +479,249 @@ export function createOrbitalConsoleAsset(): Object3D {
         gimbalGroup.add(caliper);
     }
 
-    // deckGroup.add(gimbalGroup);
     gimbalGroup.visible = false;
 
-    // 5. RIGHT STATION: Amber Induction Processing Cradle, 3-Slot Downlink Bay & Jettison Chute (Hidden for Sleek Concept Art Cockpit)
+    // =========================================================================
+    // 4b. CENTRAL CIRCULAR HOLOGRAPHIC WAR-ROOM TACTICAL PROJECTOR TABLE
+    // (Signature Feature: Matching Visual Concepts 05 & 07, devpost war-room reference)
+    // =========================================================================
+    function buildCircularHoloWarTable(): Group {
+        const holoTable = new Group();
+        holoTable.name = 'HoloTacticalWarTable';
+        holoTable.position.set(0, 0.779, -0.05);
+
+        const holoCyanBasicMat = new MeshBasicMaterial({
+            color: 0x00f0ff,
+            transparent: true,
+            opacity: 0.88,
+            blending: AdditiveBlending,
+        });
+        const holoAmberBasicMat = new MeshBasicMaterial({
+            color: 0xf59e0b,
+            transparent: true,
+            opacity: 0.82,
+            blending: AdditiveBlending,
+        });
+
+        // 1. Heavy Chamfered Titanium Collar Frame & Recessed Dark Carbon Core
+        const outerBezel = new Mesh(
+            new CylinderGeometry(0.58, 0.60, 0.016, 24),
+            titaniumRimMat,
+        );
+        outerBezel.name = 'HoloTableBezelCollar';
+        outerBezel.position.set(0, 0.008, 0);
+        holoTable.add(outerBezel);
+
+        const innerWell = new Mesh(
+            new CylinderGeometry(0.555, 0.545, 0.018, 24),
+            carbonWellMat,
+        );
+        innerWell.name = 'HoloTableCarbonWell';
+        innerWell.position.set(0, 0.010, 0);
+        holoTable.add(innerWell);
+
+        // 2. Concentric Holographic Emissive Energy Rings (shared materials for static merge)
+        const outerGlowRing = new Mesh(
+            new TorusGeometry(0.55, 0.0035, 6, 24),
+            holoCyanBasicMat,
+        );
+        outerGlowRing.name = 'HoloRingOuterCyan';
+        outerGlowRing.rotation.set(Math.PI / 2, 0, 0);
+        outerGlowRing.position.set(0, 0.020, 0);
+        holoTable.add(outerGlowRing);
+
+        const midTacticalRing = new Mesh(
+            new TorusGeometry(0.38, 0.0028, 6, 24),
+            holoAmberBasicMat,
+        );
+        midTacticalRing.name = 'HoloRingMidAmber';
+        midTacticalRing.rotation.set(Math.PI / 2, 0, 0);
+        midTacticalRing.position.set(0, 0.021, 0);
+        holoTable.add(midTacticalRing);
+
+        const innerOrbitRing = new Mesh(
+            new TorusGeometry(0.24, 0.0024, 6, 24),
+            holoCyanBasicMat,
+        );
+        innerOrbitRing.name = 'HoloRingInnerCyan';
+        innerOrbitRing.rotation.set(Math.PI / 2, 0, 0);
+        innerOrbitRing.position.set(0, 0.022, 0);
+        holoTable.add(innerOrbitRing);
+
+        // 3. Radial Compass Azimuth Lines + Inter-Node Tactical Links merged into 1 LineSegments draw call
+        const radialLineGeo = new BufferGeometry();
+        const linePositions: number[] = [
+            -0.28, 0.022, -0.18,   0.00, 0.023, -0.14,
+            0.00, 0.023, -0.14,   -0.22, 0.022, 0.12,
+            0.00, 0.023, -0.14,    0.22, 0.022, 0.12,
+            0.00, 0.023, -0.14,    0.28, 0.022, -0.18,
+            0.22, 0.022, 0.12,     0.00, 0.022, 0.22,
+            -0.22, 0.022, 0.12,    0.00, 0.022, 0.22,
+        ];
+        for (let i = 0; i < 12; i++) {
+            const angle = (i / 12) * Math.PI * 2;
+            const r1 = 0.24;
+            const r2 = 0.54;
+            linePositions.push(
+                Math.cos(angle) * r1, 0.021, Math.sin(angle) * r1,
+                Math.cos(angle) * r2, 0.021, Math.sin(angle) * r2,
+            );
+        }
+        radialLineGeo.setAttribute('position', new Float32BufferAttribute(linePositions, 3));
+        const radialLines = new LineSegments(
+            radialLineGeo,
+            new LineBasicMaterial({
+                color: 0x0ea5e9,
+                transparent: true,
+                opacity: 0.55,
+                blending: AdditiveBlending,
+            }),
+        );
+        radialLines.name = 'HoloCompassRadialLines';
+        holoTable.add(radialLines);
+
+        // 4. Tactical Data Network Nodes (shared materials so static merge collapses 12 meshes -> 2)
+        const nodeGroup = new Group();
+        nodeGroup.name = 'HoloTacticalNodes';
+
+        const nodesData = [
+            { id: 'NODE_SAT', pos: [-0.28, 0.022, -0.18], amber: false },
+            { id: 'NODE_STATION', pos: [0.28, 0.022, -0.18], amber: true },
+            { id: 'NODE_FLOOD', pos: [0.00, 0.023, -0.14], amber: false },
+            { id: 'NODE_HIGHWAY', pos: [-0.22, 0.022, 0.12], amber: false },
+            { id: 'NODE_SPUR', pos: [0.22, 0.022, 0.12], amber: true },
+            { id: 'NODE_RESCUE', pos: [0.00, 0.022, 0.22], amber: false },
+        ];
+
+        const nodeRingGeo = new TorusGeometry(0.022, 0.0016, 4, 12);
+        const nodeCoreGeo = new SphereGeometry(0.006, 6, 6);
+
+        for (const n of nodesData) {
+            const nGroup = new Group();
+            nGroup.name = n.id;
+            nGroup.position.set(n.pos[0], n.pos[1], n.pos[2]);
+            const sharedMat = n.amber ? holoAmberBasicMat : holoCyanBasicMat;
+
+            const ringMesh = new Mesh(nodeRingGeo, sharedMat);
+            ringMesh.rotation.set(Math.PI / 2, 0, 0);
+            nGroup.add(ringMesh);
+
+            const coreMesh = new Mesh(nodeCoreGeo, sharedMat);
+            nGroup.add(coreMesh);
+
+            nodeGroup.add(nGroup);
+        }
+        holoTable.add(nodeGroup);
+
+        // 5. Rotating Holographic Radar Sweep Blade
+        const sweepGeo = new RingGeometry(0.04, 0.54, 32, 1, 0, Math.PI / 4);
+        const sweepMat = new MeshBasicMaterial({
+            color: 0x00f0ff,
+            transparent: true,
+            opacity: 0.18,
+            blending: AdditiveBlending,
+            side: DoubleSide,
+            depthWrite: false,
+        });
+        const sweepMesh = new Mesh(sweepGeo, sweepMat);
+        sweepMesh.name = 'TacticalRadarSweepBlade';
+        sweepMesh.rotation.set(-Math.PI / 2, 0, 0);
+        sweepMesh.position.set(0, 0.023, 0);
+        holoTable.add(sweepMesh);
+
+        // 6. Dynamic Specular Point Light (Illuminates Console Surface & Evidences)
+        const tablePointLight = new PointLight(0x00f0ff, 2.8, 1.8);
+        tablePointLight.name = 'HoloTableProjectorLight';
+        tablePointLight.position.set(0, 0.08, 0);
+        holoTable.add(tablePointLight);
+
+        // 7. Floating 3D Flood Inundation Hologram Mesh (Image 2 & 4 Signature!)
+        const floodReliefGroup = new Group();
+        floodReliefGroup.name = 'FloodInundationHoloRelief';
+        floodReliefGroup.position.set(0, 0.24, -0.06);
+        floodReliefGroup.rotation.set(-0.35, 0, 0);
+
+        const terrainGeo = new PlaneGeometry(0.42, 0.26, 20, 14);
+        const pos = terrainGeo.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+            const x = pos.getX(i);
+            const y = pos.getY(i);
+            const distFromRiver = Math.abs(x - Math.sin(y * 8) * 0.06);
+            if (distFromRiver < 0.05) {
+                pos.setZ(i, -0.016 + Math.cos(distFromRiver * 30) * 0.008);
+            } else {
+                pos.setZ(i, Math.sin(x * 12) * Math.cos(y * 10) * 0.008);
+            }
+        }
+        terrainGeo.computeVertexNormals();
+
+        const terrainMesh = new Mesh(
+            terrainGeo,
+            new MeshBasicMaterial({
+                color: 0x0f2a4a,
+                wireframe: true,
+                transparent: true,
+                opacity: 0.65,
+                blending: AdditiveBlending,
+            }),
+        );
+        terrainMesh.name = 'HoloRiverTerrainWire';
+        floodReliefGroup.add(terrainMesh);
+
+        const floodWaterGeo = new PlaneGeometry(0.36, 0.18, 12, 8);
+        const floodWaterMesh = new Mesh(
+            floodWaterGeo,
+            new MeshBasicMaterial({
+                color: 0x00f0ff,
+                transparent: true,
+                opacity: 0.45,
+                blending: AdditiveBlending,
+                side: DoubleSide,
+                depthWrite: false,
+            }),
+        );
+        floodWaterMesh.name = 'HoloFloodWaterPolygons';
+        floodWaterMesh.position.set(0, 0, 0.003);
+        floodReliefGroup.add(floodWaterMesh);
+
+        const reticleGeo = new TorusGeometry(0.018, 0.002, 6, 20);
+        const reticleMesh = new Mesh(
+            reticleGeo,
+            new MeshBasicMaterial({
+                color: 0xef4444,
+                transparent: true,
+                opacity: 0.95,
+                blending: AdditiveBlending,
+            }),
+        );
+        reticleMesh.name = 'HoloBreachWarningReticle';
+        reticleMesh.position.set(0.02, 0.02, 0.01);
+        floodReliefGroup.add(reticleMesh);
+
+        holoTable.add(floodReliefGroup);
+
+        return holoTable;
+    }
+
+    const holoTacticalTable = buildCircularHoloWarTable();
+    deckGroup.add(holoTacticalTable);
+
+    // 5. RIGHT STATION: Amber Induction Processing Cradle, 3-Slot Downlink Bay & Jettison Chute
     const cradleOuterHousing = new Mesh(
         bevelBox(0.112, 0.022, 0.118, 0.004, 0.012, 3),
         copperClampMat,
     );
     cradleOuterHousing.name = 'ProcessingCradleSocket';
-    cradleOuterHousing.position.set(0.24, 0.78, 0.01);
-    cradleOuterHousing.visible = false;
-    // deckGroup.add(cradleOuterHousing);
+    cradleOuterHousing.position.set(0.18, 0.78, 0.07);
+    cradleOuterHousing.visible = true;
+    deckGroup.add(cradleOuterHousing);
 
-    // Dynamic Processing Cradle Assembly (Hidden for Sleek Concept Art Cockpit)
+    // Dynamic Processing Cradle Assembly
     const cradleGroup = new Group();
     cradleGroup.name = 'ProcessingCradleAssembly';
-    cradleGroup.position.set(0.24, 0.78, 0.01);
-    cradleGroup.visible = false;
+    cradleGroup.position.set(0.18, 0.78, 0.07);
+    cradleGroup.visible = true;
+    deckGroup.add(cradleGroup);
 
     const cradleInductionCore = new Mesh(
         bevelBox(0.084, 0.024, 0.088, 0.003, 0.008, 2),
@@ -516,13 +738,18 @@ export function createOrbitalConsoleAsset(): Object3D {
     inductionRing.position.set(0, 0.014, 0);
     cradleGroup.add(inductionRing);
 
+    const cradleLight = new PointLight(0xf59e0b, 2.2, 1.5);
+    cradleLight.name = 'CradleAmberLight';
+    cradleLight.position.set(0, 0.04, 0);
+    cradleGroup.add(cradleLight);
+
     const telemetryHoodGeo = bevelBox(0.084, 0.022, 0.024, 0.003, 0.004, 2);
     const telemetryHood = new Mesh(telemetryHoodGeo, gunmetalBezelMat);
     telemetryHood.name = 'CradleTelemetryHood';
-    telemetryHood.position.set(0.24, 0.804, -0.042);
+    telemetryHood.position.set(0.22, 0.804, 0.038);
     telemetryHood.rotation.set(-0.35, 0, 0);
-    telemetryHood.visible = false;
-    // deckGroup.add(telemetryHood);
+    telemetryHood.visible = true;
+    deckGroup.add(telemetryHood);
 
     // Raised copper induction clamp jaws on left and right of cradle (dynamic animation targets)
     const clampJawGeo = bevelBox(0.012, 0.028, 0.092, 0.002, 0.004, 2);
@@ -537,50 +764,55 @@ export function createOrbitalConsoleAsset(): Object3D {
     cradleGroup.add(rightJaw);
     mergeStaticMeshesByMaterial(cradleGroup, ['CradleClampLeft', 'CradleClampRight']);
 
-    // Discard / Recycle Chute at world [0.45, 0.78, -0.44] -> local [0.45, 0.78, 0.12] (Hidden for Sleek Concept Art Cockpit)
+    // Discard / Recycle Chute at world [0.44, 0.78, -0.34] -> local [0.44, 0.78, 0.22]
     const discardRim = new Mesh(
         new CylinderGeometry(0.052, 0.058, 0.022, 24),
         gunmetalBezelMat,
     );
     discardRim.name = 'DiscardChuteRim';
-    discardRim.position.set(0.45, 0.78, 0.12);
-    discardRim.visible = false;
-    // deckGroup.add(discardRim);
+    discardRim.position.set(0.44, 0.78, 0.22);
+    discardRim.visible = true;
+    deckGroup.add(discardRim);
 
     const discardCore = new Mesh(
         new CylinderGeometry(0.038, 0.042, 0.025, 20),
         coralHazardMat,
     );
     discardCore.name = 'DiscardChuteSocket';
-    discardCore.position.set(0.45, 0.781, 0.12);
-    discardCore.visible = false;
-    // deckGroup.add(discardCore);
+    discardCore.position.set(0.44, 0.781, 0.22);
+    discardCore.visible = true;
+    deckGroup.add(discardCore);
 
-    // 3-Slot Downlink Transmission Bay at world [0.29, 0.39, 0.49], z = -0.46 -> local z = +0.10 (Hidden for Sleek Concept Art Cockpit)
+    // 3-Slot Downlink Transmission Bay at world [0.25, 0.32, 0.39], z = -0.43 -> local z = +0.13
     const downlinkBayBezel = new Mesh(
-        bevelBox(0.315, 0.018, 0.118, 0.004, 0.014, 3),
+        bevelBox(0.255, 0.018, 0.118, 0.004, 0.014, 3),
         titaniumRimMat,
     );
     downlinkBayBezel.name = 'DownlinkBayOuterFrame';
-    downlinkBayBezel.position.set(0.39, 0.778, 0.10);
-    downlinkBayBezel.visible = false;
-    // deckGroup.add(downlinkBayBezel);
+    downlinkBayBezel.position.set(0.32, 0.778, 0.13);
+    downlinkBayBezel.visible = true;
+    deckGroup.add(downlinkBayBezel);
 
     const downlinkBayBed = new Mesh(
-        bevelBox(0.292, 0.016, 0.096, 0.003, 0.01, 2),
+        bevelBox(0.232, 0.016, 0.096, 0.003, 0.01, 2),
         carbonWellMat,
     );
     downlinkBayBed.name = 'DownlinkBayCarbonBed';
-    downlinkBayBed.position.set(0.39, 0.781, 0.10);
-    downlinkBayBed.visible = false;
-    // deckGroup.add(downlinkBayBed);
+    downlinkBayBed.position.set(0.32, 0.781, 0.13);
+    downlinkBayBed.visible = true;
+    deckGroup.add(downlinkBayBed);
 
-    const dlSlotX = [0.29, 0.39, 0.49];
-    const dlSlotBezelGeo = bevelBox(0.078, 0.007, 0.08, 0.002, 0.006, 2);
+    const dlSlotX = [0.25, 0.32, 0.39];
+    const dlSlotBezelGeo = bevelBox(0.068, 0.007, 0.08, 0.002, 0.006, 2);
     const dlWaveguideGeo = bevelBox(0.056, 0.008, 0.01, 0.001, 0.002, 2);
 
     const downlinkDynamicGroup = new Group();
     downlinkDynamicGroup.name = 'DownlinkBayDynamicGroup';
+
+    const dlLight = new PointLight(0x38bdf8, 2.0, 1.5);
+    dlLight.name = 'DownlinkBayBlueLight';
+    dlLight.position.set(0.33, 0.84, 0.14);
+    downlinkDynamicGroup.add(dlLight);
 
     const waveguideMat = new MeshStandardMaterial({
         color: 0x334155,
@@ -594,16 +826,17 @@ export function createOrbitalConsoleAsset(): Object3D {
     for (let i = 0; i < 3; i++) {
         const slotBase = new Mesh(dlSlotBezelGeo, gunmetalBezelMat);
         slotBase.name = `DownlinkSlotBezel_${i + 1}`;
-        slotBase.position.set(dlSlotX[i], 0.788, 0.10);
-        // deckGroup.add(slotBase);
+        slotBase.position.set(dlSlotX[i], 0.788, 0.14);
+        deckGroup.add(slotBase);
 
         const waveguide = new Mesh(dlWaveguideGeo, waveguideMat);
         waveguide.name = `DownlinkSlotWaveguide_${i + 1}`;
-        waveguide.position.set(dlSlotX[i], 0.789, 0.132);
-        // downlinkDynamicGroup.add(waveguide);
+        waveguide.position.set(dlSlotX[i], 0.789, 0.172);
+        downlinkDynamicGroup.add(waveguide);
+
         const progressBar = new Mesh(dlWaveguideGeo, progressMat);
         progressBar.name = `DownlinkSlotProgress_${i + 1}`;
-        progressBar.position.set(dlSlotX[i], 0.794, 0.132);
+        progressBar.position.set(dlSlotX[i], 0.794, 0.172);
         progressBar.visible = false;
         progressBar.raycast = () => { };
         downlinkDynamicGroup.add(progressBar);
@@ -636,8 +869,8 @@ export function createOrbitalConsoleAsset(): Object3D {
     hornCapMesh.position.set(0, 0.059, 0);
     transmitterMastGroup.add(hornCapMesh);
 
-    // deckGroup.add(transmitterMastGroup);
-    transmitterMastGroup.visible = false;
+    deckGroup.add(transmitterMastGroup);
+    transmitterMastGroup.visible = true;
 
     // S-Band live microwave telemetry uplink beam and data pulse rings
     const uplinkGroup = new Group();
@@ -727,10 +960,129 @@ export function createOrbitalConsoleAsset(): Object3D {
     discardHalo.position.set(0.45, 0.787, 0.12);
     discardHalo.visible = false;
     downlinkDynamicGroup.add(discardHalo);
-    mergeStaticMeshesByMaterial(downlinkDynamicGroup, [
-        'DownlinkSlotProgress_1', 'DownlinkSlotProgress_2', 'DownlinkSlotProgress_3',
-        'CradleDropHalo', 'QueueDropHalo', 'DiscardDropHalo',
-    ]);
+
+    deckGroup.add(downlinkDynamicGroup);
+
+    // =========================================================================
+    // 5b. TACTILE AEROSPACE HARDWARE CONSOLE PUSH BUTTONS & ROCKER SWITCHES
+    // (Physical Controls for Bare Hands in VR & Direct Mouse Raycasting on Desktop)
+    // =========================================================================
+    const tactilePadGroup = new Group();
+    tactilePadGroup.name = 'TactileDeckControls';
+
+    function buildTactileDeckButton(name: string, mat: MeshStandardMaterial, x: number, z: number): Mesh {
+        const bezel = new Mesh(
+            bevelBox(0.068, 0.012, 0.052, 0.002, 0.006, 1),
+            gunmetalBezelMat,
+        );
+        bezel.name = `${name}_Bezel`;
+        bezel.position.set(x, 0.792, z);
+        tactilePadGroup.add(bezel);
+
+        const cap = new Mesh(
+            bevelBox(0.054, 0.008, 0.038, 0.0015, 0.004, 1),
+            mat,
+        );
+        cap.name = name;
+        cap.position.set(x, 0.798, z);
+        return cap;
+    }
+
+    const btnSensor = buildTactileDeckButton('TactileBtn_SensorMode', cyanAccentMat, -0.20, 0.17);
+    tactilePadGroup.add(btnSensor);
+
+    const btnScan = buildTactileDeckButton('TactileBtn_ScanTrigger', cyanAccentMat, -0.09, 0.17);
+    tactilePadGroup.add(btnScan);
+
+    const btnCompress = buildTactileDeckButton('TactileBtn_Compress', amberInductionMat, 0.09, 0.17);
+    tactilePadGroup.add(btnCompress);
+
+    const btnTransmit = buildTactileDeckButton('TactileBtn_Transmit', emeraldWaveguideMat, 0.20, 0.17);
+    tactilePadGroup.add(btnTransmit);
+
+    deckGroup.add(tactilePadGroup);
+
+    // =========================================================================
+    // 5c. S-BAND TRANSMISSION THROTTLE LEVER (Concept Images 05, 07, 08 Match)
+    // =========================================================================
+    const throttleGroup = new Group();
+    throttleGroup.name = 'SBandTransmissionLever';
+    throttleGroup.position.set(0.58, 0.784, 0.10);
+
+    // 1. Heavy Quadrant Base with Beveled Titanium Finish & Warning Striping
+    const quadrantBase = new Mesh(
+        bevelBox(0.096, 0.038, 0.145, 0.005, 0.012, 2),
+        gunmetalBezelMat,
+    );
+    quadrantBase.name = 'LeverQuadrantBase';
+    quadrantBase.position.set(0, 0.019, 0);
+    throttleGroup.add(quadrantBase);
+
+    const hazardPlate = new Mesh(
+        bevelBox(0.088, 0.006, 0.136, 0.002, 0.006, 1),
+        hazardStripeMat,
+    );
+    hazardPlate.name = 'LeverHazardPlate';
+    hazardPlate.position.set(0, 0.039, 0);
+    throttleGroup.add(hazardPlate);
+
+    const slotTrack = new Mesh(
+        bevelBox(0.018, 0.010, 0.115, 0.002, 0.004, 1),
+        carbonWellMat,
+    );
+    slotTrack.name = 'LeverSlotTrack';
+    slotTrack.position.set(0, 0.041, 0);
+    throttleGroup.add(slotTrack);
+
+    const primedLed = new Mesh(
+        bevelBox(0.024, 0.004, 0.018, 0.001, 0.002, 1),
+        amberInductionMat,
+    );
+    primedLed.name = 'LeverPrimedLed';
+    primedLed.position.set(-0.028, 0.042, 0.035);
+    throttleGroup.add(primedLed);
+
+    const transmitLed = new Mesh(
+        bevelBox(0.024, 0.004, 0.018, 0.001, 0.002, 1),
+        emeraldWaveguideMat,
+    );
+    transmitLed.name = 'LeverTransmitLed';
+    transmitLed.position.set(-0.028, 0.042, -0.035);
+    throttleGroup.add(transmitLed);
+
+    // 2. Throttle Lever Arm Assembly (Rotatable Pivot Group)
+    const leverArmGroup = new Group();
+    leverArmGroup.name = 'LeverArmAssembly';
+    leverArmGroup.position.set(0, 0.035, 0.02);
+    leverArmGroup.rotation.set(-0.35, 0, 0);
+
+    const leverStem = new Mesh(
+        new CylinderGeometry(0.006, 0.007, 0.11, 14),
+        titaniumRimMat,
+    );
+    leverStem.name = 'LeverStem';
+    leverStem.position.set(0, 0.055, 0);
+    leverArmGroup.add(leverStem);
+
+    const leverGrip = new Mesh(
+        new CylinderGeometry(0.014, 0.014, 0.072, 18),
+        hullDarkMat,
+    );
+    leverGrip.name = 'LeverGrip';
+    leverGrip.rotation.set(0, 0, Math.PI / 2);
+    leverGrip.position.set(0, 0.11, 0);
+    leverArmGroup.add(leverGrip);
+
+    const handleTip = new Mesh(
+        new SphereGeometry(0.010, 12, 12),
+        emeraldWaveguideMat,
+    );
+    handleTip.name = 'LeverTipBeacon';
+    handleTip.position.set(0.038, 0.11, 0);
+    leverArmGroup.add(handleTip);
+
+    throttleGroup.add(leverArmGroup);
+    deckGroup.add(throttleGroup);
 
     // 6. Cockpit Architectural Interior: Heavy Anti-Slip Floor Deck & Forward Kickplate
     const cabinFloorGroup = new Group();
@@ -922,13 +1274,14 @@ export function createOrbitalConsoleAsset(): Object3D {
     cupolaGroup.add(headerTrim);
 
     // 10. Solid Aerospace Cabin Bulkhead Structure (ISS Cupola Mullions)
+    // Positioned outward at x = +/- 1.12m for panoramic 2.24m wide canopy opening (Concept Image 05 Match)
     const portMullionWall = new Mesh(
         bevelBox(0.22, 1.32, 0.18, 0.018, 0.032, 3),
         hullDarkMat,
     );
     portMullionWall.name = 'PortMullionBulkhead';
-    portMullionWall.position.set(-0.48, 1.36, -0.84);
-    portMullionWall.rotation.set(0, 0.16, 0);
+    portMullionWall.position.set(-1.12, 1.36, -0.78);
+    portMullionWall.rotation.set(0, 0.22, 0);
     cupolaGroup.add(portMullionWall);
 
     const starMullionWall = new Mesh(
@@ -936,8 +1289,8 @@ export function createOrbitalConsoleAsset(): Object3D {
         hullDarkMat,
     );
     starMullionWall.name = 'StarboardMullionBulkhead';
-    starMullionWall.position.set(0.48, 1.36, -0.84);
-    starMullionWall.rotation.set(0, -0.16, 0);
+    starMullionWall.position.set(1.12, 1.36, -0.78);
+    starMullionWall.rotation.set(0, -0.22, 0);
     cupolaGroup.add(starMullionWall);
 
     // Outer bulkheads sit flush with angled window frame — seamless cupola canopy!
@@ -1029,24 +1382,24 @@ export function createOrbitalConsoleAsset(): Object3D {
         return pGroup;
     }
 
-    // Center Window Portal (frames Earth Globe centerpiece)
-    const centerPortal = buildRoundedPorthole(0.86, 1.25);
+    // Center Window Portal — Sweeping Panoramic 2.18m Wide Windscreen (Concept Image 05 Match)
+    const centerPortal = buildRoundedPorthole(2.18, 1.28);
     centerPortal.name = 'CenterCupolaPortal';
     centerPortal.position.set(0, 1.38, -0.88);
     cupolaGroup.add(centerPortal);
 
     // Port (Left) Window Portal (frames Commander ARIA-7 & Cosmic Starfield)
-    const leftPortal = buildRoundedPorthole(1.12, 1.25);
+    const leftPortal = buildRoundedPorthole(0.96, 1.28);
     leftPortal.name = 'LeftCupolaPortal';
-    leftPortal.position.set(-1.02, 1.38, -0.78);
-    leftPortal.rotation.set(0, 0.28, 0);
+    leftPortal.position.set(-1.58, 1.38, -0.66);
+    leftPortal.rotation.set(0, 0.32, 0);
     cupolaGroup.add(leftPortal);
 
     // Starboard (Right) Window Portal (frames 3U CubeSat Satellite & Earth Horizon)
-    const rightPortal = buildRoundedPorthole(1.12, 1.25);
+    const rightPortal = buildRoundedPorthole(0.96, 1.28);
     rightPortal.name = 'RightCupolaPortal';
-    rightPortal.position.set(1.02, 1.38, -0.78);
-    rightPortal.rotation.set(0, -0.28, 0);
+    rightPortal.position.set(1.58, 1.38, -0.66);
+    rightPortal.rotation.set(0, -0.32, 0);
     cupolaGroup.add(rightPortal);
 
     // 11. Authentic Curved Silver-Titanium Cockpit Handrails / Grab Bars (Concept Images 1 & 2 Match)
@@ -1086,29 +1439,29 @@ export function createOrbitalConsoleAsset(): Object3D {
         return railGroup;
     }
 
-    // Vertical grab rails on structural mullions between windows (Mounted strictly ON mullions)
+    // Vertical grab rails on structural mullions between windows (Mounted strictly ON mullions at x = +/- 1.12m)
     const portMullionRail = buildCurvedGrabRail(0.36);
     portMullionRail.name = 'PortMullionGrabRail';
-    portMullionRail.position.set(-0.48, 1.48, -0.76);
-    portMullionRail.rotation.set(0, 0.16, 0);
+    portMullionRail.position.set(-1.12, 1.48, -0.72);
+    portMullionRail.rotation.set(0, 0.22, 0);
     cupolaGroup.add(portMullionRail);
 
     const portMullionRailLower = buildCurvedGrabRail(0.36);
     portMullionRailLower.name = 'PortMullionGrabRail_Lower';
-    portMullionRailLower.position.set(-0.48, 1.12, -0.76);
-    portMullionRailLower.rotation.set(0, 0.16, 0);
+    portMullionRailLower.position.set(-1.12, 1.12, -0.72);
+    portMullionRailLower.rotation.set(0, 0.22, 0);
     cupolaGroup.add(portMullionRailLower);
 
     const starMullionRail = buildCurvedGrabRail(0.36);
     starMullionRail.name = 'StarMullionGrabRail';
-    starMullionRail.position.set(0.48, 1.48, -0.76);
-    starMullionRail.rotation.set(0, -0.16, 0);
+    starMullionRail.position.set(1.12, 1.48, -0.72);
+    starMullionRail.rotation.set(0, -0.22, 0);
     cupolaGroup.add(starMullionRail);
 
     const starMullionRailLower = buildCurvedGrabRail(0.36);
     starMullionRailLower.name = 'StarMullionGrabRail_Lower';
-    starMullionRailLower.position.set(0.48, 1.12, -0.76);
-    starMullionRailLower.rotation.set(0, -0.16, 0);
+    starMullionRailLower.position.set(1.12, 1.12, -0.72);
+    starMullionRailLower.rotation.set(0, -0.22, 0);
     cupolaGroup.add(starMullionRailLower);
 
     // Outer frame grab rails mounted flush to window outer jambs
@@ -1222,9 +1575,24 @@ export function createOrbitalConsoleAsset(): Object3D {
     consoleDesk.name = 'ConsoleDeskAssembly';
     consoleDesk.add(baseGroup, deckGroup);
     mergeStaticMeshesByMaterial(consoleDesk, [
-        'SensorToggleSwitch',
         'SensorToggleStem',
         'SensorSwitchLed',
+        'TactileBtn_SensorMode',
+        'TactileBtn_ScanTrigger',
+        'TactileBtn_Compress',
+        'TactileBtn_Transmit',
+        'TacticalRadarSweepBlade',
+        'ProcessingCradleAssembly',
+        'CradleClampLeft',
+        'CradleClampRight',
+        'CradleInductionRing',
+        'DownlinkSlotWaveguide_1',
+        'DownlinkSlotWaveguide_2',
+        'DownlinkSlotWaveguide_3',
+        'DownlinkSlotProgress_1',
+        'DownlinkSlotProgress_2',
+        'DownlinkSlotProgress_3',
+        'LeverArmAssembly',
     ]);
     root.add(consoleDesk);
 
@@ -1234,11 +1602,6 @@ export function createOrbitalConsoleAsset(): Object3D {
     cabinEnclosureShell.add(cabinFloorGroup, cabinWallsGroup, cabinCeilingGroup, cupolaGroup);
     mergeStaticMeshesByMaterial(cabinEnclosureShell, [
         'StarboardPlanetaryHorizonVista',
-        'StarboardAtmosphereGlowArc',
-        'PortOuterGrabRail',
-        'StarOuterGrabRail',
-        'SillBrandBadgePlate',
-        'SillBrandBadgeGlow',
     ]);
     root.add(cabinEnclosureShell);
     root.userData.hasCanopyBrowStrut = true;
