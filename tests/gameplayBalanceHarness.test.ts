@@ -17,7 +17,10 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { MISSION_SCENARIOS } from '../src/mission/missionConfig';
 import { MissionEngine } from '../src/mission/missionEngine';
 import { getMissionBenchmark } from '../src/mission/missionPlanner';
