@@ -44,8 +44,8 @@ export const DIALOGUE_CATALOG: Record<VoiceDialogueId, DialogueLine> = {
   PASS_START: {
     id: 'PASS_START',
     spoken:
-      'Orbit Zero online. Category 4 monsoon breached Indus levees—120,000 civilians trapped. 55 Watt-hours remaining. Select a sector on the globe to begin.',
-    subtitle: '[ARIA-7] Indus levees breached. 55 Wh online. Select target sector on globe.',
+      'Orbit Zero online. Simulated telemetry alert: Category 4 monsoon breached Indus levees. 55 Watt-hours remaining. Select a sector on the globe to begin.',
+    subtitle: '[ARIA-7] Indus levees breached [SIMULATED]. 55 Wh online. Select target sector on globe.',
     priority: 'HIGH',
     cooldownSec: 8,
   },
@@ -84,8 +84,8 @@ export const DIALOGUE_CATALOG: Record<VoiceDialogueId, DialogueLine> = {
   SECTOR_E_SAR_ADVISORY: {
     id: 'SECTOR_E_SAR_ADVISORY',
     spoken:
-      'Shelter ridge locked. Steep topography causes radar layover distortion. Optical recommended if cloud deck allows.',
-    subtitle: '[ARIA-7] ADVISORY: Radar layover risk on ridge slope. Optical recommended.',
+      'Shelter ridge locked under dense storm cover. Active SAR radar penetrates the cloud deck; note steep terrain layover near Kilometer 4.',
+    subtitle: '[ARIA-7] ADVISORY: Storm cover over ridge. Use Active SAR (note slope layover).',
     priority: 'LOW',
     cooldownSec: 6,
   },
@@ -93,7 +93,7 @@ export const DIALOGUE_CATALOG: Record<VoiceDialogueId, DialogueLine> = {
     id: 'QUEUE_OVERFLOW',
     spoken:
       'Warning! Total downlink time exceeds our 10-second Karachi horizon window! Drag raw data cubes into the Amber Cradle to run onboard compression.',
-    subtitle: '[ARIA-7] DOWNLINK OVERFLOW: Queue exceeds 10.0s window! Compress packets in Amber Cradle.',
+    subtitle: '[ARIA-7] DOWNLINK OVERFLOW: Queue exceeds the downlink window! Compress packets in Amber Cradle.',
     priority: 'CRITICAL',
     cooldownSec: 6,
   },
@@ -108,8 +108,8 @@ export const DIALOGUE_CATALOG: Record<VoiceDialogueId, DialogueLine> = {
   DEBRIEF_VICTORY: {
     id: 'DEBRIEF_VICTORY',
     spoken:
-      'Outstanding triage, Operator! Karachi rescue teams have clear road vectors. 120,000 citizens evacuated. Mission Grade: S-Rank.',
-    subtitle: '[ARIA-7] MISSION ACCOMPLISHED: 120,000 evacuated. S-Rank orbital mastery.',
+      'Outstanding triage, Operator! Karachi response teams received all verified corridor vectors before horizon cutoff. Mission Grade: S-Rank.',
+    subtitle: '[ARIA-7] MISSION ACCOMPLISHED: All priority ground requests verified. S-Rank orbital mastery.',
     priority: 'HIGH',
     cooldownSec: 10,
   },
@@ -158,6 +158,8 @@ export class VoiceCommander {
   private isMuted = false;
   private cooldownTimestamps = new Map<VoiceDialogueId, number>();
   private speechTimeoutId: number | null = null;
+  private radioTransientTimeoutId: number | null = null;
+  private advanceQueueTimeoutId: number | null = null;
   private subtitleFadeTimeoutId: number | null = null;
   private subtitleBarEl: HTMLDivElement | null = null;
   private subtitleTextEl: HTMLSpanElement | null = null;
@@ -281,7 +283,12 @@ export class VoiceCommander {
 
     // Pre-emption logic:
     // If incoming line has higher priority than currently active speech, pre-empt!
-    if (this.activeLine && PRIORITY_RANK[line.priority] > PRIORITY_RANK[this.activeLine.priority]) {
+    // Also: a new CRITICAL line (e.g. QUEUE_OVERFLOW) pre-empts any active line of different ID immediately.
+    if (
+      this.activeLine &&
+      (PRIORITY_RANK[line.priority] > PRIORITY_RANK[this.activeLine.priority] ||
+        (line.priority === 'CRITICAL' && this.activeLine.id !== line.id))
+    ) {
       this.stopCurrentSpeech();
       this.queue.unshift(line);
       this.advanceQueue();
@@ -302,6 +309,78 @@ export class VoiceCommander {
       this.advanceQueue();
     }
     return true;
+  }
+
+  /**
+   * Withdraw a state-dependent line whose triggering condition no longer holds
+   * (e.g. QUEUE_OVERFLOW after compression brings the queue back inside the window).
+   * Removes it from the pending queue and, if it is currently on screen/speaking,
+   * stops speech and hides the subtitle immediately.
+   * Returns true if anything was withdrawn.
+   */
+  public retract(dialogueId: VoiceDialogueId): boolean {
+    let removed = false;
+    const before = this.queue.length;
+    this.queue = this.queue.filter((q) => q.id !== dialogueId);
+    if (this.queue.length !== before) removed = true;
+
+    if (this.activeLine && this.activeLine.id === dialogueId) {
+      this.stopCurrentSpeech();
+      this.activeLine = null;
+      if (this.subtitleFadeTimeoutId !== null) {
+        clearTimeout(this.subtitleFadeTimeoutId);
+        this.subtitleFadeTimeoutId = null;
+      }
+      this.hideSubtitle();
+      removed = true;
+      this.advanceQueue();
+    }
+    return removed;
+  }
+
+  /** Clear all pending/active dialogue and cooldowns (mission restart / scenario switch). */
+  public reset(): void {
+    this.stopCurrentSpeech();
+    this.queue = [];
+    this.activeLine = null;
+    this.cooldownTimestamps.clear();
+    if (this.subtitleFadeTimeoutId !== null) {
+      clearTimeout(this.subtitleFadeTimeoutId);
+      this.subtitleFadeTimeoutId = null;
+    }
+    this.hideSubtitle();
+  }
+
+  public speakDirect(spoken: string, subtitle: string, priority: VoicePriority = 'HIGH'): void {
+    const customLine: DialogueLine = {
+      id: 'PASS_START' as VoiceDialogueId,
+      spoken,
+      subtitle,
+      priority,
+      rate: 1.08,
+      pitch: 0.95,
+      cooldownSec: 2,
+    };
+
+    if (this.activeLine && PRIORITY_RANK[priority] > PRIORITY_RANK[this.activeLine.priority]) {
+      this.stopCurrentSpeech();
+      this.queue.unshift(customLine);
+      this.advanceQueue();
+      return;
+    }
+
+    const insertIdx = this.queue.findIndex(
+      (q) => PRIORITY_RANK[q.priority] < PRIORITY_RANK[priority],
+    );
+    if (insertIdx === -1) {
+      this.queue.push(customLine);
+    } else {
+      this.queue.splice(insertIdx, 0, customLine);
+    }
+
+    if (!this.isSpeaking) {
+      this.advanceQueue();
+    }
   }
 
   private advanceQueue(): void {
@@ -374,7 +453,11 @@ export class VoiceCommander {
       }
     };
 
-    setTimeout(startSpeech, 140);
+    if (this.radioTransientTimeoutId !== null) {
+      clearTimeout(this.radioTransientTimeoutId);
+      this.radioTransientTimeoutId = null;
+    }
+    this.radioTransientTimeoutId = setTimeout(startSpeech, 140) as unknown as number;
   }
 
   private fallbackTimer(line: DialogueLine): void {
@@ -412,12 +495,24 @@ export class VoiceCommander {
     }, 2800) as unknown as number;
 
     // Short gap before next transmission
-    setTimeout(() => {
+    if (this.advanceQueueTimeoutId !== null) {
+      clearTimeout(this.advanceQueueTimeoutId);
+    }
+    this.advanceQueueTimeoutId = setTimeout(() => {
+      this.advanceQueueTimeoutId = null;
       this.advanceQueue();
-    }, 400);
+    }, 400) as unknown as number;
   }
 
   private stopCurrentSpeech(): void {
+    if (this.radioTransientTimeoutId !== null) {
+      clearTimeout(this.radioTransientTimeoutId);
+      this.radioTransientTimeoutId = null;
+    }
+    if (this.advanceQueueTimeoutId !== null) {
+      clearTimeout(this.advanceQueueTimeoutId);
+      this.advanceQueueTimeoutId = null;
+    }
     if (this.speechTimeoutId !== null) {
       clearTimeout(this.speechTimeoutId);
       this.speechTimeoutId = null;
