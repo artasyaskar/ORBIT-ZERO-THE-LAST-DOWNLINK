@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CAMPAIGN_OPERATIONS,
+  computeTransmissionSeconds,
   CONFIDENCE_BADGES,
+  DOWNLINK_THROUGHPUT_MBPS,
   GROUND_REQUEST_ORDER,
   GROUND_REQUESTS,
   MISSION_BUDGET,
@@ -9,6 +12,7 @@ import {
   SECTORS,
 } from '../src/mission/missionConfig';
 import { MissionEngine } from '../src/mission/missionEngine';
+import { TutorialEngine } from '../src/mission/tutorialEngine';
 import type {
   ConfidenceLevel,
   GroundRequestId,
@@ -840,6 +844,574 @@ describe('ORBIT ZERO - MissionEngine Deterministic Triage Simulation', () => {
       expect(st.packets.length).toBe(0);
       expect(st.queuePacketIds.length).toBe(0);
       expect(st.debrief).toBeNull();
+    });
+
+    it('10.9 initializes procedural crisis passes seamlessly', () => {
+      const engine = new MissionEngine();
+      const state = engine.startProceduralCrisis('COMPETITION_SEED_2026');
+      expect(state.phase).toBe('OPERATIONS');
+      expect(engine.getActiveThreat()).not.toBeNull();
+      expect(engine.getActiveThreat()?.category).toBeDefined();
+      expect(state.power).toBeGreaterThanOrEqual(50);
+      expect(state.downlinkWindowSec).toBeGreaterThanOrEqual(9.0);
+    });
+  });
+
+  describe('11. Three-Sensor Architecture (OPTICAL / THERMAL / RADAR), Campaign Operations & TutorialEngine', () => {
+    it('11.1 verifies canonical campaign order: FIRELINE_PASS -> STANDARD_INDUS_PASS -> AFTERSHOCK_PASS', () => {
+      expect(CAMPAIGN_OPERATIONS[0]).toBe('FIRELINE_PASS');
+      expect(CAMPAIGN_OPERATIONS[1]).toBe('STANDARD_INDUS_PASS');
+      expect(CAMPAIGN_OPERATIONS[2]).toBe('AFTERSHOCK_PASS');
+      expect(MISSION_SCENARIOS.FIRELINE_PASS.operationCode).toBe('OP 01: FIRELINE');
+      expect(MISSION_SCENARIOS.STANDARD_INDUS_PASS.operationCode).toBe('OP 02: MONSOON SHIELD');
+      expect(MISSION_SCENARIOS.AFTERSHOCK_PASS.operationCode).toBe('OP 03: AFTERSHOCK');
+    });
+
+    it('11.2 supports THERMAL sensor scans (11 Wh, 3 STR, 4.2s Tx) and THERMAL_RADIOMETRIC_ENCODING compression', () => {
+      const engine = new MissionEngine('FIRELINE_PASS');
+      expect(engine.getState().power).toBe(52);
+
+      const modeState = engine.setSensorMode('THERMAL');
+      expect(modeState.lastActionOk).toBe(true);
+      expect(engine.getState().activeSensorMode).toBe('THERMAL');
+
+      const scanB = engine.scanSector('B', 'THERMAL');
+      expect(scanB.ok).toBe(true);
+      expect(scanB.packet?.sensorMode).toBe('THERMAL');
+      expect(scanB.packet?.confidence).toBe('CONFIRMED');
+      expect(scanB.packet?.transmitSec).toBe(4.2);
+      expect(engine.getState().power).toBe(41); // 52 - 11
+
+      const procB = engine.processPacket(scanB.packet!.id);
+      expect(procB.ok).toBe(true);
+      expect(procB.packet?.compressionAlgorithm).toBe('THERMAL_RADIOMETRIC_ENCODING');
+      expect(procB.packet?.storageCost).toBe(1);
+      expect(procB.packet?.transmitSec).toBe(1.8);
+    });
+
+    it('11.3 proves OPERATION 01: FIRELINE (FIRELINE_PASS) is 100% deterministically solvable for S-Rank / GOLD certification', () => {
+      const engine = new MissionEngine('FIRELINE_PASS');
+      const pktB = engine.scanSector('B', 'THERMAL').packet!; // 11 Wh -> 41 Wh
+      const pktC = engine.scanSector('C', 'OPTICAL').packet!; // 8 Wh -> 33 Wh
+      const pktE = engine.scanSector('E', 'THERMAL').packet!; // 11 Wh -> 22 Wh
+
+      expect(pktB.confidence).toBe('CONFIRMED');
+      expect(pktC.confidence).toBe('CONFIRMED');
+      expect(pktE.confidence).toBe('CONFIRMED');
+
+      engine.processPacket(pktB.id); // 6 Wh -> 16 Wh
+      engine.processPacket(pktE.id); // 6 Wh -> 10 Wh
+
+      engine.queuePacket(pktB.id);
+      engine.queuePacket(pktC.id);
+      engine.queuePacket(pktE.id);
+
+      const debrief = engine.commitDownlink()!;
+      expect(debrief.totalScore).toBe(100);
+      expect(debrief.efficiencyGrade).toBe('S');
+      expect(debrief.outcome).toBe('SUCCESS');
+      expect(debrief.certification).toBe('GOLD');
+    });
+
+    it('11.4 proves OPERATION 03: AFTERSHOCK (AFTERSHOCK_PASS) upgrades PROBABLE seismic scans to CONFIRMED via Cradle Change Detection', () => {
+      const engine = new MissionEngine('AFTERSHOCK_PASS');
+      expect(engine.getState().maxStorage).toBe(6);
+
+      // Sector E RADAR starts as PROBABLE before Pre/Post-Event Change Detection
+      const pktE = engine.scanSector('E', 'RADAR').packet!;
+      expect(pktE.confidence).toBe('PROBABLE');
+
+      // Processing in Cradle runs MULTI_TEMPORAL_CHANGE_DETECTION and upgrades to CONFIRMED!
+      const procE = engine.processPacket(pktE.id);
+      expect(procE.ok).toBe(true);
+      expect(procE.packet?.confidence).toBe('CONFIRMED');
+      expect(procE.packet?.compressionAlgorithm).toBe('MULTI_TEMPORAL_CHANGE_DETECTION');
+      expect(procE.packet?.storageCost).toBe(1);
+
+      // Sector B RADAR is CONFIRMED and compressed to fit 6 STR partition
+      const pktB = engine.scanSector('B', 'RADAR').packet!;
+      expect(pktB.confidence).toBe('CONFIRMED');
+      const procB = engine.processPacket(pktB.id);
+      expect(procB.ok).toBe(true);
+      expect(procB.packet?.storageCost).toBe(1);
+
+      // Sector C OPTICAL is CONFIRMED under clear sky
+      const pktC = engine.scanSector('C', 'OPTICAL').packet!;
+      expect(pktC.confidence).toBe('CONFIRMED');
+
+      engine.queuePacket(pktE.id);
+      engine.queuePacket(pktB.id);
+      engine.queuePacket(pktC.id);
+
+      const debrief = engine.commitDownlink()!;
+      expect(debrief.requestsVerifiedCount).toBe(3);
+      expect(debrief.totalScore).toBe(100);
+      expect(debrief.outcome).toBe('SUCCESS');
+      expect(debrief.certification).toBe('GOLD');
+    });
+
+    it('11.5 progresses TutorialEngine deterministically across all 9 steps of Operation 00: Orbital Academy', () => {
+      const tutorial = new TutorialEngine();
+      tutorial.start();
+      expect(tutorial.getState().currentStepId).toBe('STEP_1_ENVIRONMENT');
+
+      const engine = new MissionEngine('FIRELINE_PASS');
+      tutorial.notifyGlobeInteraction();
+      engine.selectSector('A');
+      tutorial.syncWithMissionState(engine.getState());
+      expect(tutorial.getState().currentStepId).toBe('STEP_2_POINT');
+
+      engine.selectSector('B');
+      tutorial.syncWithMissionState(engine.getState(), { type: 'SELECT_SECTOR', sectorId: 'B' });
+      expect(tutorial.getState().currentStepId).toBe('STEP_3_PINCH');
+
+      const pkt = engine.scanSector('B', 'THERMAL').packet!;
+      expect(engine.getState().selectedPacketId).toBe(pkt.id);
+      // Even though scanSector auto-sets selectedPacketId, TutorialEngine MUST stop at STEP_4_GRAB
+      tutorial.syncWithMissionState(engine.getState(), { type: 'SCAN', sectorId: 'B', sensorMode: 'THERMAL' });
+      expect(tutorial.getState().currentStepId).toBe('STEP_4_GRAB');
+
+      tutorial.notifyCubeGrabOrSelect(false);
+      tutorial.syncWithMissionState(engine.getState());
+      expect(tutorial.getState().currentStepId).toBe('STEP_5_INSPECT');
+
+      tutorial.notifyCubeGrabOrSelect(true);
+      tutorial.syncWithMissionState(engine.getState(), { type: 'SELECT_PACKET' });
+      expect(tutorial.getState().currentStepId).toBe('STEP_6_PROCESS');
+
+      engine.processPacket(pkt.id);
+      tutorial.syncWithMissionState(engine.getState());
+      expect(tutorial.getState().currentStepId).toBe('STEP_7_STAGE');
+
+      engine.queuePacket(pkt.id);
+      tutorial.syncWithMissionState(engine.getState());
+      expect(tutorial.getState().currentStepId).toBe('STEP_8_TRANSMIT');
+
+      engine.startDownlink();
+      tutorial.syncWithMissionState(engine.getState());
+      expect(tutorial.getState().currentStepId).toBe('STEP_9_DEBRIEF');
+
+      engine.commitDownlink();
+      tutorial.syncWithMissionState(engine.getState());
+      expect(tutorial.getState().currentStepId).toBe('COMPLETED');
+      expect(tutorial.isActive()).toBe(false);
+      expect(tutorial.getState().completedStepIds).toHaveLength(9);
+    });
+
+    it('11.6 enforces physical S-Band downlink throughput formula (t_tx = payloadMb / throughputMbps + overhead) and Wh/STR/MB consistency', () => {
+      expect(DOWNLINK_THROUGHPUT_MBPS).toBe(10.0);
+      expect(computeTransmissionSeconds(40.0, 10.0, 0.0)).toBe(4.0);
+      expect(computeTransmissionSeconds(42.0, 10.0, 0.0)).toBe(4.2);
+      expect(computeTransmissionSeconds(45.0, 10.0, 0.0)).toBe(4.5);
+      expect(computeTransmissionSeconds(18.0, 10.0, 0.0)).toBe(1.8);
+
+      const engine = new MissionEngine('FIRELINE_PASS');
+      const pktThermal = engine.scanSector('B', 'THERMAL').packet!;
+      expect(engine.getState().power).toBe(41); // 52 Wh - 11 Wh = 41 Wh
+      expect(pktThermal.storageCost).toBe(3);
+      expect(pktThermal.payloadMb).toBe(42.0);
+      expect(pktThermal.throughputMbps).toBe(10.0);
+      expect(pktThermal.transmitSec).toBe(4.2);
+
+      const proc = engine.processPacket(pktThermal.id);
+      expect(proc.ok).toBe(true);
+      expect(proc.packet?.storageCost).toBe(1);
+      expect(proc.packet?.payloadMb).toBe(18.0);
+      expect(proc.packet?.transmitSec).toBe(1.8);
+    });
+
+    it('11.7 populates NASA Earthdata SAR & NASA FIRMS thermal scientific caveats and observationConfidencePct', () => {
+      const fireEngine = new MissionEngine('FIRELINE_PASS');
+      const pktThermal = fireEngine.scanSector('B', 'THERMAL').packet!;
+      expect(pktThermal.observationConfidencePct).toBe(84);
+      expect(pktThermal.scientificCaveat).toContain('NOAA OSPO / NASA FIRMS Note');
+      expect(pktThermal.scientificCaveat).toContain('penetrates smoke');
+
+      const pktThermalE = fireEngine.scanSector('E', 'THERMAL').packet!;
+      expect(pktThermalE.observationConfidencePct).toBe(92);
+      expect(pktThermalE.scientificCaveat).toContain('NOAA OSPO / NASA FIRMS Note');
+
+      const floodEngine = new MissionEngine('STANDARD_INDUS_PASS');
+      const pktThermalCloud = floodEngine.scanSector('B', 'THERMAL').packet!;
+      expect(pktThermalCloud.confidence).toBe('UNVERIFIED');
+      expect(pktThermalCloud.scientificCaveat).toContain('optically thick water-droplet storm clouds');
+
+      const pktSarFlood = floodEngine.scanSector('B', 'RADAR').packet!;
+      expect(pktSarFlood.observationConfidencePct).toBe(91);
+      expect(pktSarFlood.scientificCaveat).toContain('NASA SAR Note');
+      expect(pktSarFlood.scientificCaveat).toContain('cannot measure water depth directly');
+
+      const pktSarBridge = floodEngine.scanSector('C', 'RADAR').packet!;
+      expect(pktSarBridge.confidence).toBe('PROBABLE');
+      expect(pktSarBridge.observationConfidencePct).toBe(68);
+      expect(pktSarBridge.scientificCaveat).toContain('dihedral corner reflectors');
+
+      const quakeEngine = new MissionEngine('AFTERSHOCK_PASS');
+      const pktQuakeE = quakeEngine.scanSector('E', 'RADAR').packet!;
+      expect(pktQuakeE.confidence).toBe('PROBABLE');
+      expect(pktQuakeE.observationConfidencePct).toBe(68);
+
+      const upgraded = quakeEngine.processPacket(pktQuakeE.id).packet!;
+      expect(upgraded.confidence).toBe('CONFIRMED');
+      expect(upgraded.observationConfidencePct).toBe(90);
+      expect(upgraded.snrDb).toBe(23.3);
+      expect(upgraded.scientificCaveat).toContain(
+        'Potential surface-change evidence detected through pre-event and post-event SAR backscatter comparison',
+      );
+    });
+
+    it('11.8 diagnoses failure reasons (WRONG_SENSOR_FOR_WEATHER, WINDOW_CUTOFF_DROPPED_PACKETS) in DebriefReport', () => {
+      // Case A: Scanning cloud-covered Sector B with OPTICAL -> UNVERIFIED + FAILED
+      const failEngine = new MissionEngine('STANDARD_INDUS_PASS');
+      const pktWrong = failEngine.scanSector('B', 'OPTICAL').packet!;
+      expect(pktWrong.confidence).toBe('UNVERIFIED');
+      failEngine.queuePacket(pktWrong.id);
+      const failDebrief = failEngine.commitDownlink()!;
+      expect(failDebrief.outcome).toBe('FAILED');
+      expect(failDebrief.failureReasonCode).toBe('WRONG_SENSOR_FOR_WEATHER');
+      expect(failDebrief.failureExplanation).toContain('SENSOR-ATMOSPHERE MISMATCH');
+
+      // Case B: Queueing 3 uncompressed cubes (4.5s + 4.0s + 4.5s = 13.0s > 10.0s) -> 3rd packet dropped -> PARTIAL_SUCCESS
+      const partialEngine = new MissionEngine('STANDARD_INDUS_PASS');
+      const pB = partialEngine.scanSector('B', 'RADAR').packet!;
+      const pC = partialEngine.scanSector('C', 'OPTICAL').packet!;
+      const pE = partialEngine.scanSector('E', 'RADAR').packet!;
+      partialEngine.queuePacket(pB.id);
+      partialEngine.queuePacket(pC.id);
+      partialEngine.queuePacket(pE.id);
+      const partialDebrief = partialEngine.commitDownlink()!;
+      expect(partialDebrief.outcome).toBe('PARTIAL_SUCCESS');
+      expect(partialDebrief.failureReasonCode).toBe('WINDOW_CUTOFF_DROPPED_PACKETS');
+      expect(partialDebrief.failureExplanation).toContain('WINDOW CUTOFF OVERFLOW');
+      expect(partialDebrief.transmittedPayloadMb).toBe(85);
+      expect(partialDebrief.downlinkThroughputMbps).toBe(10.0);
+    });
+
+    it('11.9 audits all 6 FIRELINE_PASS compression strategies (A-F) proving 124 MB raw overflow and SILVER vs GOLD compression trade-off', () => {
+      // Strategy A: 0 compressions (B: THERMAL 42 MB + C: OPTICAL 40 MB + E: THERMAL 42 MB = 124 MB / 12.4s > 10.0s)
+      const engA = new MissionEngine('FIRELINE_PASS');
+      const aB = engA.scanSector('B', 'THERMAL').packet!;
+      const aC = engA.scanSector('C', 'OPTICAL').packet!;
+      const aE = engA.scanSector('E', 'THERMAL').packet!;
+      engA.queuePacket(aB.id);
+      engA.queuePacket(aC.id);
+      engA.queuePacket(aE.id);
+      expect(engA.getState().downlinkCommittedSec).toBe(12.4);
+      const debA = engA.commitDownlink()!;
+      expect(debA.droppedPacketIds).toHaveLength(1);
+      expect(debA.totalScore).toBe(60);
+      expect(debA.outcome).toBe('PARTIAL_SUCCESS');
+      expect(debA.certification).toBe('BRONZE');
+
+      // Strategy B: 1 compression on Optical C only (42 + 18 + 42 = 102 MB / 10.2s > 10.0s) -> drops 3rd packet
+      const engB = new MissionEngine('FIRELINE_PASS');
+      const bB = engB.scanSector('B', 'THERMAL').packet!;
+      const bC = engB.scanSector('C', 'OPTICAL').packet!;
+      const bE = engB.scanSector('E', 'THERMAL').packet!;
+      engB.processPacket(bC.id);
+      engB.queuePacket(bB.id);
+      engB.queuePacket(bC.id);
+      engB.queuePacket(bE.id);
+      expect(engB.getState().downlinkCommittedSec).toBe(10.2);
+      const debB = engB.commitDownlink()!;
+      expect(debB.droppedPacketIds).toHaveLength(1);
+      expect(debB.totalScore).toBe(60);
+      expect(debB.outcome).toBe('PARTIAL_SUCCESS');
+
+      // Strategy C: 1 compression on Thermal B (18 + 40 + 42 = 100 MB / 10.0s, 0.0s safety margin, 36 Wh used) -> 100/100 SILVER (Grade A)
+      const engC = new MissionEngine('FIRELINE_PASS');
+      const cB = engC.scanSector('B', 'THERMAL').packet!;
+      const cC = engC.scanSector('C', 'OPTICAL').packet!;
+      const cE = engC.scanSector('E', 'THERMAL').packet!;
+      engC.processPacket(cB.id);
+      engC.queuePacket(cB.id);
+      engC.queuePacket(cC.id);
+      engC.queuePacket(cE.id);
+      expect(engC.getState().downlinkCommittedSec).toBe(10.0);
+      const debC = engC.commitDownlink()!;
+      expect(debC.droppedPacketIds).toHaveLength(0);
+      expect(debC.totalScore).toBe(100);
+      expect(debC.outcome).toBe('SUCCESS');
+      expect(debC.windowMarginSec).toBe(0);
+      expect(debC.efficiencyGrade).toBe('A');
+      expect(debC.certification).toBe('SILVER');
+
+      // Strategy D: 2 compressions on Thermal B + Optical C (18 + 18 + 42 = 78 MB / 7.8s, 2.2s safety margin, 42 Wh used) -> 100/100 GOLD (Grade S)
+      const engD = new MissionEngine('FIRELINE_PASS');
+      const dB = engD.scanSector('B', 'THERMAL').packet!;
+      const dC = engD.scanSector('C', 'OPTICAL').packet!;
+      const dE = engD.scanSector('E', 'THERMAL').packet!;
+      engD.processPacket(dB.id);
+      engD.processPacket(dC.id);
+      engD.queuePacket(dB.id);
+      engD.queuePacket(dC.id);
+      engD.queuePacket(dE.id);
+      expect(engD.getState().downlinkCommittedSec).toBe(7.8);
+      const debD = engD.commitDownlink()!;
+      expect(debD.totalScore).toBe(100);
+      expect(debD.outcome).toBe('SUCCESS');
+      expect(debD.efficiencyGrade).toBe('S');
+      expect(debD.certification).toBe('GOLD');
+
+      // Strategy E: 3 compressions on B + C + E (18 + 18 + 18 = 54 MB / 5.4s, 48 Wh used) -> 100/100 GOLD (Grade S)
+      const engE = new MissionEngine('FIRELINE_PASS');
+      const eB = engE.scanSector('B', 'THERMAL').packet!;
+      const eC = engE.scanSector('C', 'OPTICAL').packet!;
+      const eE = engE.scanSector('E', 'THERMAL').packet!;
+      engE.processPacket(eB.id);
+      engE.processPacket(eC.id);
+      engE.processPacket(eE.id);
+      engE.queuePacket(eB.id);
+      engE.queuePacket(eC.id);
+      engE.queuePacket(eE.id);
+      expect(engE.getState().downlinkCommittedSec).toBe(5.4);
+      const debE = engE.commitDownlink()!;
+      expect(debE.totalScore).toBe(100);
+      expect(debE.certification).toBe('GOLD');
+
+      // Strategy F: Only 2 raw scans B + C (42 + 40 = 82 MB / 8.2s) -> misses REQ_3 on Sector E -> 65/100 PARTIAL_SUCCESS
+      const engF = new MissionEngine('FIRELINE_PASS');
+      const fB = engF.scanSector('B', 'THERMAL').packet!;
+      const fC = engF.scanSector('C', 'OPTICAL').packet!;
+      engF.queuePacket(fB.id);
+      engF.queuePacket(fC.id);
+      expect(engF.getState().downlinkCommittedSec).toBe(8.2);
+      const debF = engF.commitDownlink()!;
+      expect(debF.requestsVerifiedCount).toBe(2);
+      expect(debF.requestsUnverifiedCount).toBe(1);
+      expect(debF.totalScore).toBe(65);
+      expect(debF.outcome).toBe('PARTIAL_SUCCESS');
+    });
+
+    it('11.10 restricts MULTI_TEMPORAL_CHANGE_DETECTION upgrade to RADAR baseline sectors and models Sector D thermal false-positives', () => {
+      const quakeEngine = new MissionEngine('AFTERSHOCK_PASS');
+      // Sector C THERMAL is PROBABLE due to 20m coarse resolution; compressing in Cradle reduces size (3 -> 1 STR) without falsely upgrading to CONFIRMED
+      const pktThermalC = quakeEngine.scanSector('C', 'THERMAL').packet!;
+      expect(pktThermalC.confidence).toBe('PROBABLE');
+      const procThermalC = quakeEngine.processPacket(pktThermalC.id).packet!;
+      expect(procThermalC.storageCost).toBe(1);
+      expect(procThermalC.confidence).toBe('PROBABLE');
+      expect(procThermalC.compressionAlgorithm).toBe('THERMAL_RADIOMETRIC_ENCODING');
+
+      // Sector D in FIRELINE_PASS models solar-heated basalt & industrial brick kiln thermal false-positives (15% non-wildfire confidence)
+      const fireEngine = new MissionEngine('FIRELINE_PASS');
+      const pktFalsePos = fireEngine.scanSector('D', 'THERMAL').packet!;
+      expect(pktFalsePos.confidence).toBe('UNVERIFIED');
+      expect(pktFalsePos.observationConfidencePct).toBe(15);
+      expect(pktFalsePos.satisfiesRequestId).toBeNull();
+      expect(pktFalsePos.phenomenologyTag).toBe('THERMAL_SOLAR_KILN_FALSE_POSITIVE');
+    });
+
+    it('11.11 enforces VR hand-gesture provenance in TutorialEngine when vrMode=true (rejecting desktop shortcuts)', () => {
+      const tutorial = new TutorialEngine();
+      tutorial.start(true); // VR hand mode active
+      expect(tutorial.getState().vrMode).toBe(true);
+      expect(tutorial.getState().currentStepId).toBe('STEP_1_ENVIRONMENT');
+
+      const engine = new MissionEngine('FIRELINE_PASS');
+
+      // Desktop notifications must be rejected when vrMode=true
+      tutorial.notifyGlobeInteraction('desktop');
+      tutorial.syncWithMissionState(engine.getState(), undefined, 'desktop');
+      expect(tutorial.getState().currentStepId).toBe('STEP_1_ENVIRONMENT');
+
+      // XR hand globe touch advances STEP_1_ENVIRONMENT -> STEP_2_POINT
+      tutorial.notifyGlobeInteraction('xr-hand');
+      tutorial.syncWithMissionState(engine.getState(), undefined, 'xr-hand');
+      expect(tutorial.getState().currentStepId).toBe('STEP_2_POINT');
+
+      // Desktop selectSector('B') must not advance STEP_2_POINT in vrMode
+      engine.selectSector('B');
+      tutorial.syncWithMissionState(engine.getState(), { type: 'SELECT_SECTOR', sectorId: 'B' }, 'desktop');
+      expect(tutorial.getState().currentStepId).toBe('STEP_2_POINT');
+
+      // XR hand pointing at Sector B advances STEP_2_POINT -> STEP_3_PINCH
+      tutorial.notifySectorPointed('B', 'xr-hand');
+      tutorial.syncWithMissionState(engine.getState(), { type: 'SELECT_SECTOR', sectorId: 'B' }, 'xr-hand');
+      expect(tutorial.getState().currentStepId).toBe('STEP_3_PINCH');
+
+      // Scanning via desktop must not advance STEP_3_PINCH in vrMode
+      const pkt = engine.scanSector('B', 'THERMAL').packet!;
+      tutorial.syncWithMissionState(engine.getState(), { type: 'SCAN', sectorId: 'B', sensorMode: 'THERMAL' }, 'desktop');
+      expect(tutorial.getState().currentStepId).toBe('STEP_3_PINCH');
+
+      // XR hand pinch scan advances STEP_3_PINCH -> STEP_4_GRAB (and does NOT skip STEP_4_GRAB!)
+      tutorial.notifyPinchScan('xr-hand');
+      tutorial.syncWithMissionState(engine.getState(), { type: 'SCAN', sectorId: 'B', sensorMode: 'THERMAL' }, 'xr-hand');
+      expect(tutorial.getState().currentStepId).toBe('STEP_4_GRAB');
+
+      // XR hand cube grab advances STEP_4_GRAB -> STEP_5_INSPECT
+      tutorial.notifyCubeGrabOrSelect(false, 'xr-hand');
+      tutorial.syncWithMissionState(engine.getState(), undefined, 'xr-hand');
+      expect(tutorial.getState().currentStepId).toBe('STEP_5_INSPECT');
+
+      // XR hand cube inspection while held advances STEP_5_INSPECT -> STEP_6_PROCESS
+      tutorial.notifyCubeInspected('xr-hand');
+      tutorial.syncWithMissionState(engine.getState(), undefined, 'xr-hand');
+      expect(tutorial.getState().currentStepId).toBe('STEP_6_PROCESS');
+
+      // Processing without XR hand cradle release must not advance STEP_6_PROCESS in vrMode
+      engine.processPacket(pkt.id);
+      tutorial.syncWithMissionState(engine.getState(), { type: 'PROCESS' }, 'desktop');
+      expect(tutorial.getState().currentStepId).toBe('STEP_6_PROCESS');
+
+      // XR hand cradle release advances STEP_6_PROCESS -> STEP_7_STAGE
+      tutorial.notifyCradleRelease('xr-hand');
+      tutorial.syncWithMissionState(engine.getState(), { type: 'PROCESS' }, 'xr-hand');
+      expect(tutorial.getState().currentStepId).toBe('STEP_7_STAGE');
+
+      // Queueing without XR hand downlink bay release must not advance STEP_7_STAGE in vrMode
+      engine.queuePacket(pkt.id);
+      tutorial.syncWithMissionState(engine.getState(), { type: 'QUEUE' }, 'desktop');
+      expect(tutorial.getState().currentStepId).toBe('STEP_7_STAGE');
+
+      // XR hand downlink bay release advances STEP_7_STAGE -> STEP_8_TRANSMIT
+      tutorial.notifyDownlinkBayRelease('xr-hand');
+      tutorial.syncWithMissionState(engine.getState(), { type: 'QUEUE' }, 'xr-hand');
+      expect(tutorial.getState().currentStepId).toBe('STEP_8_TRANSMIT');
+
+      // XR hand commit downlink advances STEP_8_TRANSMIT -> STEP_9_DEBRIEF -> COMPLETED
+      tutorial.notifyTransmitActivated('xr-hand');
+      engine.startDownlink();
+      tutorial.syncWithMissionState(engine.getState(), { type: 'COMMIT' }, 'xr-hand');
+      expect(tutorial.getState().currentStepId).toBe('STEP_9_DEBRIEF');
+
+      engine.commitDownlink();
+      tutorial.syncWithMissionState(engine.getState(), { type: 'COMMIT' }, 'xr-hand');
+      expect(tutorial.getState().currentStepId).toBe('COMPLETED');
+      expect(tutorial.getState().stepVerificationLog).toHaveLength(9);
+      expect(tutorial.getState().stepVerificationLog.slice(0, 8).every((e) => e.source === 'xr-hand')).toBe(true);
+    });
+
+    it('11.12 enumerates all 8 compression subsets (including C+E) and Sector D false-positive recovery on FIRELINE_PASS', () => {
+      // Complete 8-subset compression matrix on optimal scans B(THERMAL 42MB), C(OPTICAL 40MB), E(THERMAL 42MB)
+      const subsets: Array<{
+        label: string;
+        compress: Array<'B' | 'C' | 'E'>;
+        expectedMb: number;
+        expectedTxSec: number;
+        expectedPowerLeft: number;
+        expectedStorageUsed: number;
+        expectedScore: number;
+        expectedOutcome: string;
+        expectedGrade: string;
+        expectedCert: string;
+      }> = [
+        { label: 'None', compress: [], expectedMb: 124, expectedTxSec: 12.4, expectedPowerLeft: 22, expectedStorageUsed: 9, expectedScore: 60, expectedOutcome: 'PARTIAL_SUCCESS', expectedGrade: 'B', expectedCert: 'BRONZE' },
+        { label: 'B', compress: ['B'], expectedMb: 100, expectedTxSec: 10.0, expectedPowerLeft: 16, expectedStorageUsed: 7, expectedScore: 100, expectedOutcome: 'SUCCESS', expectedGrade: 'A', expectedCert: 'SILVER' },
+        { label: 'C', compress: ['C'], expectedMb: 102, expectedTxSec: 10.2, expectedPowerLeft: 16, expectedStorageUsed: 7, expectedScore: 60, expectedOutcome: 'PARTIAL_SUCCESS', expectedGrade: 'B', expectedCert: 'BRONZE' },
+        { label: 'E', compress: ['E'], expectedMb: 100, expectedTxSec: 10.0, expectedPowerLeft: 16, expectedStorageUsed: 7, expectedScore: 100, expectedOutcome: 'SUCCESS', expectedGrade: 'A', expectedCert: 'SILVER' },
+        { label: 'B+C', compress: ['B', 'C'], expectedMb: 78, expectedTxSec: 7.8, expectedPowerLeft: 10, expectedStorageUsed: 5, expectedScore: 100, expectedOutcome: 'SUCCESS', expectedGrade: 'S', expectedCert: 'GOLD' },
+        { label: 'B+E', compress: ['B', 'E'], expectedMb: 76, expectedTxSec: 7.6, expectedPowerLeft: 10, expectedStorageUsed: 5, expectedScore: 100, expectedOutcome: 'SUCCESS', expectedGrade: 'S', expectedCert: 'GOLD' },
+        { label: 'C+E', compress: ['C', 'E'], expectedMb: 78, expectedTxSec: 7.8, expectedPowerLeft: 10, expectedStorageUsed: 5, expectedScore: 100, expectedOutcome: 'SUCCESS', expectedGrade: 'S', expectedCert: 'GOLD' },
+        { label: 'B+C+E', compress: ['B', 'C', 'E'], expectedMb: 54, expectedTxSec: 5.4, expectedPowerLeft: 4, expectedStorageUsed: 3, expectedScore: 100, expectedOutcome: 'SUCCESS', expectedGrade: 'S', expectedCert: 'GOLD' },
+      ];
+
+      for (const s of subsets) {
+        const eng = new MissionEngine('FIRELINE_PASS');
+        const pkts = {
+          B: eng.scanSector('B', 'THERMAL').packet!,
+          C: eng.scanSector('C', 'OPTICAL').packet!,
+          E: eng.scanSector('E', 'THERMAL').packet!,
+        };
+        for (const sec of s.compress) {
+          eng.processPacket(pkts[sec].id);
+        }
+        eng.queuePacket(pkts.B.id);
+        eng.queuePacket(pkts.C.id);
+        eng.queuePacket(pkts.E.id);
+
+        const st = eng.getState();
+        expect(st.power).toBe(s.expectedPowerLeft);
+        expect(st.storageUsed).toBe(s.expectedStorageUsed);
+        expect(st.downlinkCommittedSec).toBe(s.expectedTxSec);
+
+        const deb = eng.commitDownlink()!;
+        expect(deb.totalScore).toBe(s.expectedScore);
+        expect(deb.outcome).toBe(s.expectedOutcome);
+        expect(deb.efficiencyGrade).toBe(s.expectedGrade);
+        expect(deb.certification).toBe(s.expectedCert);
+        if (s.label === 'B+E') {
+          expect(deb.deterministicRecommendation).toContain('strictly dominant 2-compression Pareto execution');
+        } else if (s.label === 'B+C' || s.label === 'C+E') {
+          expect(deb.deterministicRecommendation).toContain('compressing both 42 MB Thermal cubes B+E saves an extra 2.0 MB / 0.2s');
+        } else if (s.label === 'B+C+E') {
+          expect(deb.deterministicRecommendation).toContain('unused link capacity beyond the 2-cube optimum');
+        } else if (s.expectedGrade === 'A') {
+          expect(deb.deterministicRecommendation).toContain('zero buffer against S-Band horizon cutoff (Grade A / SILVER)');
+        }
+      }
+
+      // Reconcile 60/100 (3 raw cubes queued, 1 dropped at cutoff -> 30+30+0=60) vs 65/100 (2 raw cubes queued, 0 dropped -> 30+30+5=65)
+      const engTwoRaw = new MissionEngine('FIRELINE_PASS');
+      const bRaw = engTwoRaw.scanSector('B', 'THERMAL').packet!;
+      const cRaw = engTwoRaw.scanSector('C', 'OPTICAL').packet!;
+      engTwoRaw.queuePacket(bRaw.id);
+      engTwoRaw.queuePacket(cRaw.id);
+      const debTwoRaw = engTwoRaw.commitDownlink()!;
+      expect(debTwoRaw.outcome).toBe('PARTIAL_SUCCESS');
+      expect(debTwoRaw.droppedPacketIds).toHaveLength(0);
+      expect(debTwoRaw.totalScore).toBe(65); // 30 + 30 + 5 clean-window bonus
+
+      // Sector D Thermal False Positive cost & recovery analysis:
+      // If a player mistakenly scans Sector D with THERMAL (-11 Wh, +3 STR), discards it, and scans B(THERMAL)+C(OPTICAL)+E(THERMAL) (-30 Wh):
+      // Remaining power is 52 - 11 - 30 = 11 Wh -> only enough to compress 1 cube (-6 Wh -> 5 Wh left), capping at SILVER (Grade A, 10.0s)!
+      const engFalsePos = new MissionEngine('FIRELINE_PASS');
+      const dFalse = engFalsePos.scanSector('D', 'THERMAL').packet!;
+      expect(dFalse.satisfiesRequestId).toBeNull();
+      expect(dFalse.confidence).toBe('UNVERIFIED');
+      expect(dFalse.observationConfidencePct).toBe(15);
+      expect(engFalsePos.getState().power).toBe(41); // 52 - 11
+      engFalsePos.discardPacket(dFalse.id);
+      const bPkt = engFalsePos.scanSector('B', 'THERMAL').packet!;
+      const cPkt = engFalsePos.scanSector('C', 'OPTICAL').packet!;
+      const ePkt = engFalsePos.scanSector('E', 'THERMAL').packet!;
+      expect(engFalsePos.getState().power).toBe(11); // 41 - 30 = 11 Wh left
+      expect(engFalsePos.processPacket(bPkt.id).ok).toBe(true); // 11 - 6 = 5 Wh left
+      expect(engFalsePos.processPacket(ePkt.id).ok).toBe(false); // 5 Wh < 6 Wh required for 2nd compression!
+      engFalsePos.queuePacket(bPkt.id);
+      engFalsePos.queuePacket(cPkt.id);
+      engFalsePos.queuePacket(ePkt.id);
+      const debAfterFalsePos = engFalsePos.commitDownlink()!;
+      expect(debAfterFalsePos.totalScore).toBe(100);
+      expect(debAfterFalsePos.efficiencyGrade).toBe('A');
+      expect(debAfterFalsePos.certification).toBe('SILVER');
+    });
+
+    it('11.13 completes ORBITAL_ACADEMY single-target training with TRAINING COMPLETE — ORBITAL OPERATOR QUALIFIED and differentiated NOAA/FIRMS thermal confidence', () => {
+      const academy = new MissionEngine('ORBITAL_ACADEMY');
+      expect(academy.getState().scenarioId).toBe('ORBITAL_ACADEMY');
+      const scanB = academy.scanSector('B', 'THERMAL');
+      expect(scanB.ok).toBe(true);
+      expect(scanB.packet!.observationConfidencePct).toBe(84);
+      expect(academy.processPacket(scanB.packet!.id).ok).toBe(true);
+      expect(academy.queuePacket(scanB.packet!.id).ok).toBe(true);
+      const deb = academy.commitDownlink()!;
+      expect(deb.outcome).toBe('SUCCESS');
+      expect(deb.missionRank).toBe('TRAINING COMPLETE — ORBITAL OPERATOR QUALIFIED');
+      expect(deb.totalScore).toBe(100);
+      expect(deb.efficiencyGrade).toBe('A');
+      expect(deb.certification).toBe('SILVER');
+      expect(deb.failureReasonCode).toBe('NONE');
+
+      // Advancing from ORBITAL_ACADEMY transitions directly to OP 01: FIRELINE (FIRELINE_PASS)
+      const nextState = academy.cycleScenario();
+      expect(nextState.scenarioId).toBe('FIRELINE_PASS');
+
+      // Verify differentiated NOAA OSPO & NASA FIRMS thermal observation confidence across all 6 Fireline sectors
+      const expectedThermalPct: Record<'A' | 'B' | 'C' | 'D' | 'E' | 'F', number> = {
+        A: 18, // CONVECTIVE_CLOUD opaque meteorological cloud cover
+        B: 84, // DENSE_SMOKE active wildfire front (moderate plume attenuation)
+        C: 34, // CLEAR evacuation corridor (coarse 12.0 m thermal GSD)
+        D: 15, // CLEAR static industrial brick kiln & solar-heated basalt false positive
+        E: 92, // MODERATE_SMOKE active spot-fire cluster (high thermal contrast)
+        F: 28, // THIN_SMOKE ambient 301 K agricultural fields
+      };
+      for (const sec of ['A', 'B', 'C', 'D', 'E', 'F'] as const) {
+        const eng = new MissionEngine('FIRELINE_PASS');
+        const pkt = eng.scanSector(sec, 'THERMAL').packet!;
+        expect(pkt.observationConfidencePct).toBe(expectedThermalPct[sec]);
+      }
     });
   });
 });
