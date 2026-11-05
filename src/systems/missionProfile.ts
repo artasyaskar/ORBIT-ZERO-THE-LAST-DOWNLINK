@@ -36,7 +36,7 @@ export function createMissionProfile(): MissionProfile {
     version: 1,
     preferences: {
       guidance: 'GUIDED', dominantHand: 'RIGHT', oneHanded: false,
-      gazeAssist: true, tabletopMode: false,
+      gazeAssist: false, tabletopMode: false,
       largeText: false, highContrast: false, reducedMotion: false, captions: true, audioLevel: 0.65,
       seatOffset: [0, 0, 0],
     },
@@ -66,7 +66,14 @@ export function loadMissionProfile(): MissionProfile {
         Math.max(-0.8, Math.min(0.8, input.seatOffset[2])),
       ];
     }
-    for (const id of ['STANDARD_INDUS_PASS', 'MONSOON_SUPERCELL_PASS', 'SOLAR_BROWNOUT_PASS'] as const) {
+    for (const id of [
+      'STANDARD_INDUS_PASS',
+      'MONSOON_SUPERCELL_PASS',
+      'SOLAR_BROWNOUT_PASS',
+      'FIRELINE_PASS',
+      'AFTERSHOCK_PASS',
+      'DEFENSE_SHIELD_PASS',
+    ] as const) {
       const record = value.mastery[id];
       if (record && Number.isFinite(record.attempts) && record.attempts >= 0 &&
         Number.isFinite(record.bestScore) && record.bestScore >= 0 && record.bestScore <= 100 &&
@@ -121,7 +128,7 @@ export function recordMissionMastery(
       ? Math.max(previous.bestMarginSec, report.windowMarginSec) : previous.bestMarginSec,
     medals: [...new Set([...(previous?.medals ?? []), ...earned])],
   };
-  if (scenarioId === 'STANDARD_INDUS_PASS') profile.tutorialComplete = true;
+  if (scenarioId === 'STANDARD_INDUS_PASS' || scenarioId === 'FIRELINE_PASS') profile.tutorialComplete = true;
   return earned;
 }
 
