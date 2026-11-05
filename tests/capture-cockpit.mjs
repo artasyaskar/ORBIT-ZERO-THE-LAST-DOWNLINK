@@ -7,7 +7,7 @@ import { mkdir } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const artifactsDir = 'C:/Users/DELL/.gemini/antigravity/brain/6467a1ab-cbfa-4226-9429-64b42fd8f7af';
+const artifactsDir = 'C:/Users/DELL/.gemini/antigravity/brain/42f86843-55c9-4d1e-81b6-dc28fa54a640';
 const vite = join(root, 'node_modules', 'vite', 'bin', 'vite.js');
 
 const port = await new Promise((res, rej) => {
