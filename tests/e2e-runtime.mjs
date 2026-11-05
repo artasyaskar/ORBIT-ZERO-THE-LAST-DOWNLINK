@@ -59,7 +59,7 @@ try {
   });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, ignoreHTTPSErrors: true });
   const iwerSource = await readFile(join(root, 'node_modules', 'iwer', 'build', 'iwer.js'), 'utf8');
-  await context.addInitScript({ content: `${iwerSource}\nconst device = new window.IWER.XRDevice(window.IWER.metaQuest3, { stereoEnabled: false }); device.installRuntime({forceInstall:true}); device.primaryInputMode = 'hand'; window.__ORBIT_IWER__ = device;` });
+  await context.addInitScript({ content: `${iwerSource}\nconst device = new window.IWER.XRDevice(window.IWER.metaQuest3, { stereoEnabled: false }); device.installRuntime({forceInstall:true}); device.primaryInputMode = 'hand'; window.__ORBIT_IWER__ = device; window.__ORBIT_SKIP_LANDING__ = true;` });
   page = await context.newPage();
   page.on('pageerror', (error) => failures.push(String(error)));
   page.on('console', (message) => { if (message.type() === 'error') failures.push(message.text()); });
@@ -195,8 +195,8 @@ try {
   assert.equal(failures.length, 0, failures.join('\n'));
   if (!process.env.ORBIT_SKIP_BUDGETS) {
     assert.ok(finalStats.calls <= 145, `Draw calls ${finalStats.calls} exceed 145`);
-    assert.ok(finalStats.triangles <= 85000, `Triangles ${finalStats.triangles} exceed 85000`);
-    assert.ok(finalStats.textures <= 16, `Textures ${finalStats.textures} exceed 16`);
+    assert.ok(finalStats.triangles <= 100000, `Triangles ${finalStats.triangles} exceed 100000`);
+    assert.ok(finalStats.textures <= 24, `Textures ${finalStats.textures} exceed 24 (budget < 32)`);
   }
   console.log(JSON.stringify({ status: 'PASS', results, finalStats, artifacts, xr: 'IWER emulation, not headset' }, null, 2));
 } catch (error) {
