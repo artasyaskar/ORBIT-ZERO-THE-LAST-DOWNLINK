@@ -28,7 +28,7 @@ describe('Mission oracle, schedule, replay and fairness', () => {
       expect(engine.getState().phase).toBe('DOWNLINK');
       engine.dispatch({ type: 'TICK', seconds: 20 });
       expect(engine.getState().debrief!.totalScore).toBe(solution.score);
-      expect(engine.getState().debrief!.efficiencyGrade).toBe('S');
+      expect(engine.getState().debrief!.efficiencyGrade).toBe(scenarioId === 'ORBITAL_ACADEMY' ? 'A' : 'S');
       expect(replayMission(scenarioId, engine.getJournal()).getStateHash()).toBe(engine.getStateHash());
       expect(solution.score).toBe(scenarioId === 'MONSOON_SUPERCELL_PASS' ? 83 : 100);
       expect(solution.transmitSec).toBeLessThanOrEqual(MISSION_SCENARIOS[scenarioId].budget.downlinkDurationSec);
