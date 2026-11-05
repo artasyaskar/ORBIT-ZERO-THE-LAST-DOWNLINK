@@ -48,6 +48,7 @@ import {
 import { DesktopControlsManager } from './desktopControls';
 import {
   getScenarioSector,
+  getScenarioRequests,
   getRecommendedSensor,
   GROUND_REQUEST_ORDER,
   GROUND_REQUESTS,
@@ -57,6 +58,7 @@ import {
   SECTORS,
 } from '../mission/missionConfig';
 import { MissionEngine, replayMission } from '../mission/missionEngine';
+import { TutorialEngine } from '../mission/tutorialEngine';
 import { describeMissionPlan, getMissionBenchmark, getNextPlanAction, getQueueSchedule, solveMission } from '../mission/missionPlanner';
 import type { DataPacket, MissionScenarioId, MissionState, SectorId, SensorMode } from '../mission/types';
 import {
@@ -69,6 +71,7 @@ import { alignSpan } from '../scene-assets/lib/hardsurface';
 import { VRHandSimulator } from './vrHandSimulator';
 import { OrbitalAudioController, type OrbitalSoundCue } from './orbitalAudio';
 import { VoiceCommander, type VoiceDialogueId } from './voiceCommander';
+import { AgenticCoPilot, type AgenticIntervention } from './agenticCoPilot';
 import {
   getDailyPass, loadMissionProfile, recordDailyPass, recordMissionMastery, saveMissionProfile,
   type MissionPreferences,
@@ -76,25 +79,25 @@ import {
 import type { ActionResult, MissionAction, MissionSolution } from '../mission/types';
 
 const RAW_TRAY_POSITIONS: [number, number, number][] = [
-  [-0.10, 0.79, -0.44],
-  [0.00, 0.79, -0.44],
-  [0.10, 0.79, -0.44],
+  [-0.38, 0.792, -0.42],
+  [-0.31, 0.792, -0.42],
+  [-0.24, 0.792, -0.42],
 ];
 
 const DOWNLINK_BAY_POSITIONS: [number, number, number][] = [
-  [0.29, 0.79, -0.46],
-  [0.39, 0.79, -0.46],
-  [0.49, 0.79, -0.46],
+  [0.25, 0.79, -0.43],
+  [0.32, 0.79, -0.43],
+  [0.39, 0.79, -0.43],
 ];
 
 const STANDBY_CUBE_COLORS = [0x38bdf8, 0x38bdf8, 0xf59e0b];
 
-const SCANNER_HOME_POSITION = new Vector3(0.65, 0.22, 0.15);
-const GLOBE_CENTER_WORLD = new Vector3(0, 0.98, -0.58);
-const PROCESS_CRADLE_WORLD = new Vector3(0.24, 0.79, -0.55);
-const DISCARD_CHUTE_WORLD = new Vector3(0.45, 0.79, -0.44);
-const DOWNLINK_BAY_CENTER_WORLD = new Vector3(0.39, 0.79, -0.46);
-const RAW_TRAY_CENTER_WORLD = new Vector3(0.0, 0.79, -0.44);
+const SCANNER_HOME_POSITION = new Vector3(-0.44, 0.80, -0.30);
+const GLOBE_CENTER_WORLD = new Vector3(0, 0.98, -0.48);
+const PROCESS_CRADLE_WORLD = new Vector3(0.18, 0.79, -0.49);
+const DISCARD_CHUTE_WORLD = new Vector3(0.44, 0.79, -0.34);
+const DOWNLINK_BAY_CENTER_WORLD = new Vector3(0.32, 0.79, -0.43);
+const RAW_TRAY_CENTER_WORLD = new Vector3(0.0, 0.79, -0.42);
 
 // Target seated eye position in world space (0.44m back from origin, 1.20m seated eye height)
 const SEATED_TARGET_HEAD_WORLD = new Vector3(0, 1.20, 0.44);
@@ -104,6 +107,70 @@ interface CubeCanvasBinding {
   ctx: CanvasRenderingContext2D;
   texture: CanvasTexture;
   signature: string;
+}
+
+export interface XRHandTelemetryEvent {
+  timestampMs: number;
+  missionElapsedSec: number;
+  eventType:
+  | 'mode_change'
+  | 'connected'
+  | 'disconnected'
+  | 'globe_touch'
+  | 'point_hover'
+  | 'poke'
+  | 'selectstart'
+  | 'selectend'
+  | 'select'
+  | 'grabstart'
+  | 'grabmove'
+  | 'grabrelease'
+  | 'tracking_lost_recovery';
+  inputSource: 'hand';
+  handedness: 'left' | 'right';
+  connected: boolean;
+  poseId: string;
+  pinchValue: number;
+  position: [number, number, number];
+  indexTipPosition: [number, number, number];
+  graspPosition: [number, number, number];
+  targetType?:
+  | 'SECTOR'
+  | 'CONTROL_PAD'
+  | 'DATA_CUBE'
+  | 'SPATIAL_UI_BUTTON'
+  | 'DROP_ZONE'
+  | 'GLOBE'
+  | 'NONE';
+  targetId?: string;
+  actionOrOutcome?: string;
+}
+
+interface LiveXRHandSample {
+  device: 'hand-left' | 'hand-right';
+  handedness: 'left' | 'right';
+  connected: boolean;
+  poseId: string;
+  pinchValue: number;
+  pressed: boolean;
+  position: Vector3;
+  indexTip: Vector3;
+  thumbTip: Vector3;
+  graspPoint: Vector3;
+  fingerDir: Vector3;
+}
+
+interface Resolved3DHandTarget {
+  targetType: 'SECTOR' | 'CONTROL_PAD' | 'DATA_CUBE' | 'SPATIAL_UI_BUTTON' | 'GLOBE';
+  targetId: string;
+  distance: number;
+  worldPosition: Vector3;
+  sectorId?: SectorId;
+  controlAction?: string;
+  cubeEntity?: Entity;
+  slotIndex?: number;
+  panelId?: string;
+  buttonId?: string;
 }
 
 export class MissionControlSystem extends createSystem({
@@ -117,6 +184,7 @@ export class MissionControlSystem extends createSystem({
   controlGrabbed: { required: [ConsoleControlNode, Grabbed] },
 }) {
   private engine = new MissionEngine();
+  private tutorial = new TutorialEngine();
   private audio = new OrbitalAudioController();
   private materialCache = new WeakMap<Object3D, MeshStandardMaterial[]>();
   private cubeCanvasMap = new Map<number, CubeCanvasBinding>();
@@ -170,7 +238,7 @@ export class MissionControlSystem extends createSystem({
   private briefingPanel?: UIKitMLAsset;
   private telemetryPanel?: UIKitMLAsset;
   private debriefPanel?: UIKitMLAsset;
-  public spatialHudVisible = false;
+  public spatialHudVisible = true;
 
   // Desktop Controls & First-Time Player Experience
   private desktopControls?: DesktopControlsManager;
@@ -181,23 +249,74 @@ export class MissionControlSystem extends createSystem({
   // Phase 2: Commander ARIA-7 Holographic Voice Handler & Radio DSP
   private voiceCommander?: VoiceCommander;
 
+  // Deep Agentic Co-Pilot Telemetry & Spatial Delegation Engine ("Take It Away Test")
+  private coPilot!: AgenticCoPilot;
+
   // Phase 1: 3D Gimbal Globe Interactive Rotation & Focal Zoom
   private globeAngularVelocity = new Vector2(0, 0);
   private globeTargetQuaternion = new Quaternion();
   private globeCurrentQuaternion = new Quaternion();
-  private globeFocalDistance = -0.58;
-  private targetFocalDistance = -0.58;
+  private globeFocalDistance = -0.48;
+  private targetFocalDistance = -0.48;
   private isSlerpingToSector = false;
   private slerpProgress = 1.0;
   private slerpDuration = 0.65;
 
+  // WebXR Hand Joint & XRSession Input Pipeline (IWER 2.7.0 + Physical Meta Quest 3 / 3S)
+  private currentInputSource: 'xr-hand' | 'desktop' = 'desktop';
+  private boundXRSession: any = null;
+  private xrHandEventLog: XRHandTelemetryEvent[] = [];
+  private lastHandConnected: Record<'left' | 'right', boolean> = { left: false, right: false };
+  private lastHandPressed: Record<'left' | 'right', boolean> = { left: false, right: false };
+  private lastHandPointTarget: Record<'left' | 'right', string> = { left: '', right: '' };
+  private lastHandPokeTime = new Map<string, number>();
+  private lastHandGlobeTouchPos = new Map<'left' | 'right', Vector3>();
+  private activeXRHandGrabs = new Map<
+    'left' | 'right',
+    {
+      cubeEntity: Entity;
+      slotIndex: number;
+      packetId: string;
+      grabStartPos: Vector3;
+      lastGraspPos: Vector3;
+      inspectedNotified: boolean;
+    }
+  >();
+
+  private withInputSource<T>(source: 'xr-hand' | 'desktop', fn: () => T): T {
+    const prev = this.currentInputSource;
+    this.currentInputSource = source;
+    try {
+      return fn();
+    } finally {
+      this.currentInputSource = prev;
+    }
+  }
+
+  private isCubeGrabbedByXRHand(cubeEntity?: Entity): boolean {
+    if (!cubeEntity) return false;
+    for (const grab of this.activeXRHandGrabs.values()) {
+      if (grab.cubeEntity === cubeEntity) return true;
+    }
+    return false;
+  }
+
   init(): void {
+    if (typeof window !== 'undefined') {
+      const initialScenario = (window as any).__ORBIT_INITIAL_SCENARIO__ as MissionScenarioId | undefined;
+      if (initialScenario && MISSION_SCENARIOS[initialScenario]) {
+        this.engine.setScenario(initialScenario);
+      }
+      if ((window as any).__ORBIT_START_TUTORIAL__) {
+        this.tutorial.start(Boolean(this.world.renderer?.xr?.isPresenting));
+      }
+    }
     const inputSystem = this.world.getSystem(InputSystem);
     if (inputSystem) inputSystem.config.maintainScenePointers.value = true;
     this.scene.traverse((object) => {
       if (object instanceof Points || object instanceof Line ||
         /^(ScannerAimLaser|OrbitalScanSwathCone|DownlinkUplinkBeam|DownlinkPulseRing|DownlinkLaserCore|DownlinkLaserSheath|KarachiDishShockwave|.*DropHalo)/.test(object.name)) {
-        object.raycast = () => {};
+        object.raycast = () => { };
       }
     });
     this.audio.setVolume(this.profile.preferences.audioLevel);
@@ -217,6 +336,19 @@ export class MissionControlSystem extends createSystem({
       voiceEnabled: true,
     });
     this.cleanupFuncs.push(() => this.voiceCommander?.dispose());
+
+    // Deep Agentic Co-Pilot System Integration
+    this.coPilot = new AgenticCoPilot({
+      getState: () => this.engine.getState(),
+      applyAction: (action) => {
+        const res = this.applyAction(action);
+        this.syncAll();
+        return { ok: res.ok, message: res.message };
+      },
+      playCue: (cue) => this.playCue(cue as never),
+      voiceCommander: this.voiceCommander,
+      audio: this.audio,
+    });
     if (typeof navigator !== 'undefined' && 'xr' in navigator) {
       (navigator as any).xr?.isSessionSupported?.('immersive-ar').then((supported: boolean) => {
         this.isArSupported = Boolean(supported);
@@ -240,8 +372,9 @@ export class MissionControlSystem extends createSystem({
       globe.add(this.earthGlobeEnhancements);
     }
 
-    // Hide retired legacy console pads parked at [0, -10, 0] from rendering (eliminates 13 redundant draw calls)
-    const parkedPadIds = [
+    // Keep the 6 desk tactile pad ECS targets active for XR hand/ray interaction while stripping
+    // duplicate decorative child meshes (already rendered by orbital-console) to stay under Quest GPU budget.
+    const deskPadIds = [
       'pad-fire-swath',
       'pad-toggle-sensor',
       'pad-process-cradle',
@@ -249,62 +382,102 @@ export class MissionControlSystem extends createSystem({
       'pad-commit-downlink',
       'pad-discard-chute',
     ];
-    for (const id of parkedPadIds) {
-      const obj = this.world.getSceneObject(id);
-      if (obj) obj.visible = false;
-    }
+    const syncDeskPadsForXR = (isImmersive: boolean) => {
+      for (const id of deskPadIds) {
+        const obj = this.world.getSceneObject(id);
+        if (!obj) continue;
+        obj.visible = isImmersive;
+        if (isImmersive) {
+          let keptPrimaryMesh = false;
+          obj.traverse((child) => {
+            if (child instanceof Mesh) {
+              if (!keptPrimaryMesh) {
+                child.visible = true;
+                keptPrimaryMesh = true;
+              } else {
+                child.visible = false;
+              }
+            }
+          });
+        }
+      }
+    };
+    syncDeskPadsForXR(this.world.visibilityState.value !== VisibilityState.NonImmersive);
 
     // 1b. Bind Deep-Space Milky Way Cosmic Skybox Dome
     this.bindCosmicEnvironmentAndTextures();
 
-    // 2. Subscribe to 3D Sector Beacon activations (poke or ray-click)
+    // 2. Subscribe to 3D Sector Beacon activations (poke or ray-click when not driven by live XR hand joints)
     this.queries.sectorActivated.subscribe('qualify', (entity) => {
+      if (this.isLiveXRHandActive()) return;
       if (this.isAnyObjectGrabbed()) return;
       const sectorId = (entity.getValue(OrbitSectorNode, 'sectorId') || 'B') as SectorId;
-      this.handleSelectSector(sectorId);
+      const src = this.world.renderer.xr.isPresenting ? 'xr-hand' : 'desktop';
+      this.withInputSource(src, () => {
+        this.tutorial.notifySectorPointed(sectorId, src);
+        this.handleSelectSector(sectorId);
+      });
     });
 
     // 3. Subscribe to 3D Evidence Cube activations (poke/click selects cube)
     this.queries.cubeActivated.subscribe('qualify', (entity) => {
+      if (this.isLiveXRHandActive()) return;
       const slotIndex = entity.getValue(EvidenceCubeNode, 'slotIndex') ?? 0;
       const state = this.engine.getState();
       const pkt = state.packets[slotIndex];
       if (pkt) {
-        this.applyAction({ type: 'SELECT_PACKET', packetId: pkt.id });
-        this.playCue('SELECT_SECTOR');
-        this.syncAll();
+        const src = this.world.renderer.xr.isPresenting ? 'xr-hand' : 'desktop';
+        this.withInputSource(src, () => {
+          this.tutorial.notifyCubeGrabOrSelect(pkt.confidence !== 'UNVERIFIED', src);
+          this.applyAction({ type: 'SELECT_PACKET', packetId: pkt.id });
+          this.playCue('SELECT_SECTOR');
+          this.syncAll();
+        });
       }
     });
 
     // 4. Subscribe to 3D Evidence Cube grab start & release -> physical drop zone triage!
     this.queries.cubeGrabbed.subscribe('qualify', (entity) => {
+      if (this.isLiveXRHandActive()) return;
       if (this.suppressReleaseActions || this.engine.getState().phase !== 'OPERATIONS' || this.engine.getState().paused) {
         this.world.getSystem(GrabSystem)?.forceRelease(entity);
         return;
       }
       const slotIndex = entity.getValue(EvidenceCubeNode, 'slotIndex') ?? 0;
       const pkt = this.engine.getState().packets[slotIndex];
-      if (pkt) {
-        this.applyAction({ type: 'SELECT_PACKET', packetId: pkt.id });
-      }
-      this.playCue('CUBE_GRAB');
-      this.highlightDropZones(true);
-      this.syncAll();
+      const src = this.world.renderer.xr.isPresenting ? 'xr-hand' : 'desktop';
+      this.withInputSource(src, () => {
+        if (pkt) {
+          this.tutorial.notifyCubeGrabOrSelect(pkt.confidence !== 'UNVERIFIED', src);
+          this.applyAction({ type: 'SELECT_PACKET', packetId: pkt.id });
+        }
+        this.playCue('CUBE_GRAB');
+        this.highlightDropZones(true);
+        this.syncAll();
+      });
     });
 
     this.queries.cubeGrabbed.subscribe('disqualify', (entity) => {
-      this.highlightDropZones(false);
-      this.handleCubeReleased(entity);
+      if (this.isLiveXRHandActive()) return;
+      const src = this.world.renderer.xr.isPresenting ? 'xr-hand' : 'desktop';
+      this.withInputSource(src, () => {
+        this.highlightDropZones(false);
+        this.handleCubeReleased(entity);
+      });
     });
 
     // 5. Subscribe to 3D Console Control Pads & Scanner Tool
     this.queries.controlActivated.subscribe('qualify', (entity) => {
+      if (this.isLiveXRHandActive()) return;
       if (this.isAnyObjectGrabbed()) return;
       const action = entity.getValue(ConsoleControlNode, 'action') || 'SCAN';
       if (action === 'SCAN' && entity.hasComponent(Grabbed)) {
         return;
       }
-      this.handleControlAction(action);
+      const src = this.world.renderer.xr.isPresenting ? 'xr-hand' : 'desktop';
+      this.withInputSource(src, () => {
+        this.handleControlAction(action);
+      });
     });
 
     // 6. Subscribe to Scanner Tool grab start & release -> if released near the Globe or a Sector, scan it!
@@ -328,6 +501,9 @@ export class MissionControlSystem extends createSystem({
     this.cleanupFuncs.push(
       this.world.visibilityState.subscribe((visibilityState) => {
         const is2D = visibilityState === VisibilityState.NonImmersive;
+        this.tutorial.setVrMode(!is2D);
+        this.syncDeskPadsForXR(!is2D);
+        this.applyTabletopMode();
         if (is2D) {
           this.forceReleaseAllGrabs();
           this.player.position.set(0, 0, 0);
@@ -338,6 +514,7 @@ export class MissionControlSystem extends createSystem({
           const [ox, oy, oz] = this.profile.preferences.seatOffset;
           this.player.position.set(ox, oy, oz);
           this.configureIwerSeatedPoseIfPresent();
+          this.bindXRSessionHandEvents();
         }
       }),
     );
@@ -436,6 +613,7 @@ export class MissionControlSystem extends createSystem({
         getRuntimeStatus: () => ({ immersive: this.world.renderer.xr.isPresenting, phase: this.engine.getState().phase, caption: this.caption }),
         getControlScreenPosition: (panelId: string, elementId: string) => {
           if (this.world.renderer.xr.isPresenting) return null;
+          if (this.engine.getState().paused && elementId === 'Btn_Pause') return null;
           const panel = this.world.getSceneObject<UIKitMLAsset>(panelId);
           const element = panel?.getElementById<UIKit.Container>(elementId);
           const matrix = element?.globalMatrix.value;
@@ -446,10 +624,34 @@ export class MissionControlSystem extends createSystem({
           this.camera.updateWorldMatrix(true, false);
           const point = new Vector3().setFromMatrixPosition(matrix).applyMatrix4(root.matrix);
           if (root.parent) point.applyMatrix4(root.parent.matrixWorld);
+          const worldPoint = point.clone();
           point.project(this.camera);
           if (Math.abs(point.x) > 1 || Math.abs(point.y) > 1 || point.z < -1 || point.z > 1) return null;
           const bounds = this.world.renderer.domElement.getBoundingClientRect();
-          return { x: bounds.left + (point.x + 1) * bounds.width / 2, y: bounds.top + (1 - point.y) * bounds.height / 2 };
+          const screenX = bounds.left + ((point.x + 1) * bounds.width) / 2;
+          const screenY = bounds.top + ((1 - point.y) * bounds.height) / 2;
+
+          // Occlusion check: ensure ray isn't blocked by foreground spacecraft or hardware
+          const testRay = new Raycaster();
+          testRay.setFromCamera(new Vector2(point.x, point.y), this.camera);
+          const hits = testRay.intersectObjects([this.scene], true);
+          if (hits.length > 0) {
+            const firstHit = hits[0];
+            let isInsidePanel = false;
+            let curr: Object3D | null = firstHit.object;
+            while (curr) {
+              if (curr === panel) {
+                isInsidePanel = true;
+                break;
+              }
+              curr = curr.parent;
+            }
+            if (!isInsidePanel && firstHit.distance < this.camera.position.distanceTo(worldPoint) - 0.04) {
+              return null; // Control is visually blocked by foreground object
+            }
+          }
+
+          return { x: screenX, y: screenY };
         },
         probePointer: (x: number, y: number) => {
           const bounds = this.renderer.domElement.getBoundingClientRect();
@@ -467,7 +669,50 @@ export class MissionControlSystem extends createSystem({
         },
         selectSector: (id: SectorId) => this.handleSelectSector(id),
         toggleSensor: () => this.handleToggleSensor(),
+        setSensor: (mode: SensorMode) => {
+          this.applyAction({ type: 'SET_SENSOR', sensorMode: mode });
+          this.syncSensorSwitchHardware(this.engine.getState().activeSensorMode);
+          this.syncAll();
+          return this.engine.getState();
+        },
         scan: () => this.handleScan(),
+        tutorial: this.tutorial,
+        startTutorial: (vrMode?: boolean) => {
+          if (this.engine.getState().scenarioId !== 'ORBITAL_ACADEMY') {
+            this.dailyDate = null;
+            this.engine.setScenario('ORBITAL_ACADEMY');
+            this.handleRestartMission();
+          }
+          const isVr = typeof vrMode === 'boolean' ? vrMode : Boolean(this.world.renderer?.xr?.isPresenting);
+          this.tutorial.start(isVr);
+          this.syncAll();
+          return this.tutorial.getState();
+        },
+        skipTutorial: () => {
+          this.tutorial.skip();
+          this.syncAll();
+          return this.tutorial.getState();
+        },
+        getTutorialState: () => ({
+          ...this.tutorial.getState(),
+          stepSpec: this.tutorial.getCurrentStepSpec(),
+        }),
+        get3DTargetWorldPosition: (targetId: string) => this.get3DTargetWorldPosition(targetId),
+        getXRHandTelemetryLog: () => this.getXRHandTelemetryLog(),
+        clearXRHandTelemetryLog: () => this.clearXRHandTelemetryLog(),
+        getActiveXRHandGrabs: () =>
+          Array.from(this.activeXRHandGrabs.entries()).map(([handedness, g]) => ({
+            handedness,
+            slotIndex: g.slotIndex,
+            packetId: g.packetId,
+            cubeWorldPosition: g.cubeEntity.object3D
+              ? g.cubeEntity.object3D.getWorldPosition(new Vector3()).toArray()
+              : null,
+          })),
+        cycleCampaignOperation: () => {
+          this.cycleCampaignOperation();
+          return this.engine.getState();
+        },
         process: () => this.handleProcessSelected(),
         queue: () => this.handleQueueSelected(),
         reorderQueue: () => this.handleReorderQueue(),
@@ -483,6 +728,11 @@ export class MissionControlSystem extends createSystem({
           return this.engine.getState();
         },
         restart: () => this.handleRestartMission(),
+        startProceduralCrisis: (seed?: string | number) => this.startProceduralPass(seed),
+        executeCoPilotDelegation: () => this.handleAriaDelegate(),
+        getCoPilotIntervention: () => this.coPilot.getActiveIntervention(),
+        getTotalDelegations: () => this.coPilot.getTotalDelegations(),
+        handleMasterIgnition: () => this.handleMasterIgnition(),
         toggleSpatialHud: (active?: boolean) => this.toggleSpatialHud(active),
         getSpatialHudVisible: () => this.spatialHudVisible,
         calibrateSeatedView: () => this.calibrateSeatedView(),
@@ -502,11 +752,11 @@ export class MissionControlSystem extends createSystem({
           return globe ? globe.position.z : -0.58;
         },
         resetGlobeFocalDistance: () => {
-          this.targetFocalDistance = -0.58;
-          this.globeFocalDistance = -0.58;
+          this.targetFocalDistance = -0.48;
+          this.globeFocalDistance = -0.48;
           const globe = this.world.getSceneObject('earth-globe');
           if (globe) {
-            globe.position.z = -0.58;
+            globe.position.z = -0.48;
           }
         },
         getDrawCalls: () => this.world.renderer.info.render.calls,
@@ -558,6 +808,161 @@ export class MissionControlSystem extends createSystem({
           playerPosition: this.player.position.toArray(),
           cameraWorldPosition: this.camera.getWorldPosition(new Vector3()).toArray(),
         }),
+        /**
+         * Read-only scene census for profiling (tests/profile-scenes.mjs). Counts only
+         * visible renderable objects; also reports per-render-call statistics so that
+         * multi-pass rendering can be distinguished from scene complexity.
+         */
+        getSceneProfile: () => {
+          const meshes: any[] = [];
+          const lights: any[] = [];
+          let points = 0;
+          let pointCount = 0;
+          let instanced = 0;
+          let instancedTriangles = 0;
+          const geoms = new Set<any>();
+          const mats = new Set<any>();
+          const texs = new Set<any>();
+          let transparentMeshes = 0;
+          const isVisible = (o: any): boolean => {
+            for (let p = o; p; p = p.parent) if (p.visible === false) return false;
+            return true;
+          };
+          this.scene.traverse((o: any) => {
+            if (!isVisible(o)) return;
+            if (o.isLight) lights.push({ type: o.type, castShadow: !!o.castShadow });
+            if (o.isPoints) {
+              points++;
+              pointCount += o.geometry?.attributes?.position?.count ?? 0;
+            }
+            if (o.isMesh || o.isLine || o.isPoints || o.isSprite) {
+              meshes.push(o);
+              if (o.isInstancedMesh) {
+                instanced++;
+                const idx = o.geometry?.index?.count ?? o.geometry?.attributes?.position?.count ?? 0;
+                instancedTriangles += Math.floor(idx / 3) * (o.count ?? 0);
+              }
+              if (o.geometry) geoms.add(o.geometry);
+              const list = Array.isArray(o.material) ? o.material : [o.material];
+              let transparent = false;
+              for (const m of list) {
+                if (!m) continue;
+                mats.add(m);
+                if (m.transparent) transparent = true;
+                for (const key of Object.keys(m)) {
+                  const v = m[key];
+                  if (v && v.isTexture) texs.add(v);
+                }
+              }
+              if (transparent) transparentMeshes++;
+            }
+          });
+          let textureBytes = 0;
+          const textureList: any[] = [];
+          texs.forEach((t: any) => {
+            const img: any = t.image;
+            const w = img?.width ?? img?.videoWidth ?? 0;
+            const h = img?.height ?? img?.videoHeight ?? 0;
+            const bytes = Math.round(w * h * 4 * (t.generateMipmaps ? 1.33 : 1));
+            textureBytes += bytes;
+            textureList.push({ name: t.name || t.uuid.slice(0, 6), w, h, bytes });
+          });
+          textureList.sort((a, b) => b.bytes - a.bytes);
+          const lightSummary: Record<string, number> = {};
+          for (const l of lights) lightSummary[l.type] = (lightSummary[l.type] ?? 0) + 1;
+          return {
+            visibleRenderables: meshes.length,
+            instancedMeshes: instanced,
+            instancedTriangles,
+            uniqueGeometries: geoms.size,
+            uniqueMaterials: mats.size,
+            transparentRenderables: transparentMeshes,
+            referencedTextures: texs.size,
+            referencedTextureBytesApprox: textureBytes,
+            topTextures: textureList.slice(0, 5),
+            lights: lightSummary,
+            shadowCastingLights: lights.filter((l) => l.castShadow).length,
+            shadowMapEnabled: !!this.renderer.shadowMap.enabled,
+            pointsObjects: points,
+            pointVertices: pointCount,
+            pixelRatio: this.renderer.getPixelRatio(),
+            xrPresenting: !!this.renderer.xr.isPresenting,
+          };
+        },
+        /** Top visible triangle/draw-call contributors grouped by nearest named ancestor (profiling aid). */
+        getTopContributors: (limit = 15) => {
+          const groups = new Map<string, { calls: number; tris: number }>();
+          const isVisible = (o: any): boolean => {
+            for (let p = o; p; p = p.parent) if (p.visible === false) return false;
+            return true;
+          };
+          const labelOf = (o: any): string => {
+            const chain: string[] = [];
+            for (let p = o.parent; p; p = p.parent) if (p.name) chain.unshift(p.name);
+            return chain.slice(0, 2).join(' > ') || o.name || o.type;
+          };
+          this.scene.traverse((o: any) => {
+            if (!(o.isMesh || o.isLine || o.isPoints || o.isSprite) || !isVisible(o)) return;
+            const g = o.geometry;
+            const verts = g?.index?.count ?? g?.attributes?.position?.count ?? 0;
+            const tris = o.isMesh ? Math.floor(verts / 3) * (o.isInstancedMesh ? (o.count ?? 1) : 1) : 0;
+            const key = labelOf(o);
+            const e = groups.get(key) ?? { calls: 0, tris: 0 };
+            e.calls += Array.isArray(o.material) ? o.material.length : 1;
+            e.tris += tris;
+            groups.set(key, e);
+          });
+          return [...groups.entries()]
+            .map(([name, v]) => ({ name, ...v }))
+            .sort((a, b) => b.tris - a.tris)
+            .slice(0, limit);
+        },
+        /** Sample renderer.info over N animation frames and count render() invocations per frame. */
+        sampleFrameStats: (frames = 30) =>
+          new Promise<{
+            frames: number;
+            callsMin: number;
+            callsMax: number;
+            callsMedian: number;
+            trisMin: number;
+            trisMax: number;
+            trisMedian: number;
+            renderInvocationsPerFrame: number;
+            autoReset: boolean;
+          }>((resolve) => {
+            const r: any = this.renderer;
+            const origRender = r.render.bind(r);
+            let invocations = 0;
+            r.render = (...args: any[]) => {
+              invocations++;
+              return origRender(...args);
+            };
+            const calls: number[] = [];
+            const tris: number[] = [];
+            let n = 0;
+            const step = () => {
+              calls.push(r.info.render.calls);
+              tris.push(r.info.render.triangles);
+              if (++n >= frames) {
+                r.render = origRender;
+                const med = (a: number[]) => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)];
+                resolve({
+                  frames: n,
+                  callsMin: Math.min(...calls),
+                  callsMax: Math.max(...calls),
+                  callsMedian: med(calls),
+                  trisMin: Math.min(...tris),
+                  trisMax: Math.max(...tris),
+                  trisMedian: med(tris),
+                  renderInvocationsPerFrame: invocations / n,
+                  autoReset: r.info.autoReset,
+                });
+              } else {
+                requestAnimationFrame(step);
+              }
+            };
+            requestAnimationFrame(step);
+          }),
         setCameraView: (
           pos: [number, number, number],
           target: [number, number, number],
@@ -600,29 +1005,61 @@ export class MissionControlSystem extends createSystem({
 
     // Trigger Commander ARIA-7 Opening Tactical Pass Briefing
     window.setTimeout(() => {
-      this.voiceCommander?.trigger('PASS_START');
+      this.announceActiveScenarioPassStart();
     }, 600);
 
     this.syncAll();
   }
 
-  update(delta: number): void {
-    if (!this.hasHiddenParkedPads) {
-      this.hasHiddenParkedPads = true;
-      const parkedPadIds = [
-        'pad-fire-swath',
-        'pad-toggle-sensor',
-        'pad-process-cradle',
-        'pad-queue-downlink',
-        'pad-commit-downlink',
-        'pad-discard-chute',
-      ];
-      for (const id of parkedPadIds) {
-        const obj = this.world.getSceneObject(id);
-        if (obj) obj.visible = false;
+  private announceActiveScenarioPassStart(): void {
+    const st = this.engine.getState();
+    const sc = this.engine.getActiveScenario();
+    if (st.scenarioId === 'STANDARD_INDUS_PASS') {
+      this.voiceCommander?.trigger('PASS_START');
+    } else {
+      this.voiceCommander?.speakDirect(
+        `Orbit Zero online. ${sc.operationCode ?? sc.name} active. ${st.power} Watt-hours and ${st.maxStorage} Storage Units ready. Select a priority sector on the globe.`,
+        `[ARIA-7] ${sc.operationCode ?? sc.name} [SIMULATED]. ${st.power} Wh / ${st.maxStorage} STR online. Select sector on globe.`,
+        'HIGH',
+      );
+    }
+  }
+
+  private syncDeskPadsForXR(isImmersive: boolean): void {
+    const deskPadIds = [
+      'pad-fire-swath',
+      'pad-toggle-sensor',
+      'pad-process-cradle',
+      'pad-queue-downlink',
+      'pad-commit-downlink',
+      'pad-discard-chute',
+      'pad-recenter-desk',
+      'pad-master-power',
+      'pad-aria-delegate',
+    ];
+    for (const id of deskPadIds) {
+      const obj = this.world.getSceneObject(id);
+      if (!obj) continue;
+      obj.visible = isImmersive;
+      if (isImmersive) {
+        let keptPrimaryMesh = false;
+        obj.traverse((child) => {
+          if (child instanceof Mesh) {
+            if (!keptPrimaryMesh) {
+              child.visible = true;
+              keptPrimaryMesh = true;
+            } else {
+              child.visible = false;
+            }
+          }
+        });
       }
     }
+  }
 
+  update(delta: number): void {
+    this.syncDeskPadsForXR(this.world.renderer.xr.isPresenting);
+    this.updateXRHandInteractions(delta);
     this.frameSnapshot = this.engine.getState();
     if (this.frameSnapshot.paused) return;
     const simulationDelta = Math.max(0, delta);
@@ -639,7 +1076,79 @@ export class MissionControlSystem extends createSystem({
 
     this.animateCubeTransitions(delta);
 
+    // Deep Agentic Co-Pilot Telemetry & Spatial Delegation Loop
+    const intervention = this.coPilot.update(delta);
+    const gaugesAsset = this.world.getSceneObject('desk-gauges');
+    if (gaugesAsset) {
+      const beaconCap = gaugesAsset.getObjectByName('AriaBeaconCap');
+      if (beaconCap && beaconCap instanceof Mesh && beaconCap.material instanceof MeshStandardMaterial) {
+        if (intervention) {
+          const pulse = 1.0 + 0.65 * Math.sin(this.elapsedTime * 9.0);
+          beaconCap.material.emissiveIntensity = pulse * 2.2;
+          beaconCap.material.emissive.setHex(intervention.urgency === 'CRITICAL' ? 0xf59e0b : 0x38bdf8);
+        } else {
+          beaconCap.material.emissiveIntensity = 0.5;
+          beaconCap.material.emissive.setHex(0x0284c7);
+        }
+      }
+    }
+
     // Phase 5: In-Engine VR Hand & Ergonomic Simulator
+    if (this.frameSnapshot && this.frameSnapshot.phase === 'OPERATIONS') {
+      const solution = this.getSolution(this.frameSnapshot);
+      const next = getNextPlanAction(this.frameSnapshot, solution);
+      if (next) {
+        if (next.type === 'SCAN') {
+          if (this.frameSnapshot.selectedSectorId !== next.sectorId) {
+            const beaconObj = this.world.getSceneObject(`sector-${next.sectorId.toLowerCase()}`);
+            if (beaconObj) {
+              const pos = new Vector3();
+              beaconObj.getWorldPosition(pos);
+              this.vrHandSimulator.setDemoTarget(pos);
+            }
+          } else if (this.frameSnapshot.activeSensorMode !== next.sensorMode) {
+            const switchObj = this.world.getSceneObject('pad-toggle-sensor');
+            if (switchObj) {
+              const pos = new Vector3();
+              switchObj.getWorldPosition(pos);
+              this.vrHandSimulator.setDemoTarget(pos);
+            }
+          } else {
+            const plungerObj = this.world.getSceneObject('pad-fire-swath');
+            if (plungerObj) {
+              const pos = new Vector3();
+              plungerObj.getWorldPosition(pos);
+              this.vrHandSimulator.setDemoTarget(pos);
+            }
+          }
+        } else if (next.type === 'PROCESS') {
+          const cradleObj = this.world.getSceneObject('pad-process-cradle');
+          if (cradleObj) {
+            const pos = new Vector3();
+            cradleObj.getWorldPosition(pos);
+            this.vrHandSimulator.setDemoTarget(pos);
+          }
+        } else if (next.type === 'QUEUE') {
+          const bayObj = this.world.getSceneObject('pad-queue-downlink');
+          if (bayObj) {
+            const pos = new Vector3();
+            bayObj.getWorldPosition(pos);
+            this.vrHandSimulator.setDemoTarget(pos);
+          }
+        }
+      } else if (this.frameSnapshot.queuePacketIds.length > 0) {
+        const leverObj = this.world.getSceneObject('pad-commit-downlink');
+        if (leverObj) {
+          const pos = new Vector3();
+          leverObj.getWorldPosition(pos);
+          this.vrHandSimulator.setDemoTarget(pos);
+        }
+      } else {
+        this.vrHandSimulator.setDemoTarget(null);
+      }
+    } else {
+      this.vrHandSimulator.setDemoTarget(null);
+    }
     this.vrHandSimulator.update(delta, this.desktopControls?.getInteractionTargetPoint() ?? null);
 
     // Desktop Controls frame update (inertial spinning, slerp animations)
@@ -715,7 +1224,7 @@ export class MissionControlSystem extends createSystem({
           const progress = 1.0 - newTimer / 0.18;
           const depression = reducedMotion ? 0 : Math.sin(progress * Math.PI) * Math.exp(-1.8 * progress);
           cap.position.y = restY - depression * stroke;
-          
+
           // Diegetic console vibration pulse during button press (never camera)
           const consoleObj = this.world.getSceneObject('orbital-console');
           if (consoleObj && progress < 0.5) {
@@ -739,7 +1248,7 @@ export class MissionControlSystem extends createSystem({
       );
       if (cubeEntity?.object3D) {
         const cubeRoot = cubeEntity.object3D;
-        
+
         // Update cube internal glow based on confidence state
         let cubeGlowColor = 0xffffff;
         if (pkt.confidence === 'CONFIRMED') {
@@ -749,14 +1258,14 @@ export class MissionControlSystem extends createSystem({
         } else if (pkt.confidence === 'UNVERIFIED') {
           cubeGlowColor = 0xc0c0c0; // Dimmed gray
         }
-        
+
         const glowCore = cubeRoot.getObjectByName('CubeGlowCore');
         if (glowCore && glowCore instanceof Mesh && glowCore.material instanceof MeshStandardMaterial) {
           glowCore.material.emissive.setHex(cubeGlowColor);
-          glowCore.material.emissiveIntensity = pkt.confidence === 'PROBABLE' ? 
+          glowCore.material.emissiveIntensity = pkt.confidence === 'PROBABLE' ?
             0.8 + 0.4 * Math.sin(this.elapsedTime * 6) : 1.2; // Pulsing for PROBABLE
         }
-        
+
         // Animate 30% compression shrink when processed in cradle (4.5s → 1.8s transmission)
         if (pkt.processed && !pkt.queued) {
           const compressionProgress = Math.min(1, this.elapsedTime * 1.8);
@@ -867,6 +1376,16 @@ export class MissionControlSystem extends createSystem({
         starfield.rotation.y += (reducedMotion ? 0 : delta) * 0.0012;
         starfield.material.opacity = 0.90 + 0.07 * Math.sin(this.elapsedTime * 2.5);
       }
+      // Circular Holographic War Table Radar Sweep Blade
+      const sweepBlade = orbitalConsole.getObjectByName('TacticalRadarSweepBlade');
+      if (sweepBlade) {
+        sweepBlade.rotation.z += (reducedMotion ? 0 : delta) * 0.95;
+      }
+      // Floating 3D Flood Inundation Hologram (Subtle hover & pulse)
+      const floodHolo = orbitalConsole.getObjectByName('FloodInundationHoloRelief');
+      if (floodHolo) {
+        floodHolo.position.y = 0.24 + Math.sin(this.elapsedTime * 2.0) * 0.008;
+      }
     }
 
     // Phase 2: Commander ARIA-7 Voice Handler Tick & 3D Holographic AI Avatar Dynamic Animation
@@ -962,6 +1481,21 @@ export class MissionControlSystem extends createSystem({
         this.globeFocalDistance += (this.targetFocalDistance - this.globeFocalDistance) * (1.0 - Math.exp(-12.0 * delta));
         globe.position.z = this.globeFocalDistance;
       }
+
+      // VR-BUG-02 Fix: Keep all 6 interactive sector beacons (sector-a..f) locked to Earth Globe rotation & zoom
+      globe.updateMatrixWorld(true);
+      for (const sectorEntity of this.queries.sectors.entities) {
+        const sObj = sectorEntity.object3D;
+        if (!sObj) continue;
+        const sId = (sectorEntity.getValue(OrbitSectorNode, 'sectorId') || 'B') as SectorId;
+        const sDef = SECTOR_GEO_DEFINITIONS[sId];
+        if (!sDef) continue;
+        const localPos = latLonToGlobePoint(sDef.centerLatLon[0], sDef.centerLatLon[1], GLOBE_RADIUS * 1.002);
+        const worldPos = localPos.clone().applyMatrix4(globe.matrixWorld);
+        sObj.position.copy(worldPos);
+        const worldNormal = localPos.clone().normalize().applyQuaternion(globe.quaternion).normalize();
+        sObj.quaternion.setFromUnitVectors(this.worldUp, worldNormal);
+      }
       const cloudSphere = globe.getObjectByName('GlobeCloudSphere');
       if (cloudSphere) {
         cloudSphere.rotation.y += (reducedMotion ? 0 : delta) * 0.018;
@@ -1001,18 +1535,18 @@ export class MissionControlSystem extends createSystem({
         const hasSelected = this.desktopControls?.hasSelectedSector() ?? true;
         activeReticle.visible = hasSelected;
         if (hasSelected) {
-        const sectorDef = SECTOR_GEO_DEFINITIONS[selectedId];
-        if (sectorDef) {
-          const reticlePos = latLonToGlobePoint(
-            sectorDef.centerLatLon[0],
-            sectorDef.centerLatLon[1],
-            GLOBE_RADIUS * 1.018,
-          );
-          activeReticle.position.copy(reticlePos);
-          const normal = reticlePos.clone().normalize();
-          activeReticle.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), normal);
-          const pulseScale = 1.0 + 0.06 * Math.sin(this.elapsedTime * 4.0);
-          activeReticle.scale.set(pulseScale, pulseScale, pulseScale);
+          const sectorDef = SECTOR_GEO_DEFINITIONS[selectedId];
+          if (sectorDef) {
+            const reticlePos = latLonToGlobePoint(
+              sectorDef.centerLatLon[0],
+              sectorDef.centerLatLon[1],
+              GLOBE_RADIUS * 1.018,
+            );
+            activeReticle.position.copy(reticlePos);
+            const normal = reticlePos.clone().normalize();
+            activeReticle.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), normal);
+            const pulseScale = 1.0 + 0.06 * Math.sin(this.elapsedTime * 4.0);
+            activeReticle.scale.set(pulseScale, pulseScale, pulseScale);
           }
         }
       }
@@ -1025,11 +1559,11 @@ export class MissionControlSystem extends createSystem({
         const progress =
           currentPhase === 'DOWNLINK'
             ? 0.72 +
-              0.24 *
-                Math.min(
-                  1,
-                  (this.frameSnapshot.downlinkWindowSec - this.frameSnapshot.downlinkRemainingSec) / this.frameSnapshot.downlinkWindowSec,
-                )
+            0.24 *
+            Math.min(
+              1,
+              (this.frameSnapshot.downlinkWindowSec - this.frameSnapshot.downlinkRemainingSec) / this.frameSnapshot.downlinkWindowSec,
+            )
             : cycleProgress;
 
         const curLat = 40.0 + (14.0 - 40.0) * progress;
@@ -1085,7 +1619,12 @@ export class MissionControlSystem extends createSystem({
             this.scanBeamPulseTimer = Math.max(0, this.scanBeamPulseTimer - delta);
             const progress = 1.0 - this.scanBeamPulseTimer / 0.85;
             const opacity = Math.sin(progress * Math.PI) * 0.75;
-            const beamHex = this.scanBeamMode === 'OPTICAL' ? 0x38bdf8 : 0xf59e0b;
+            const beamHex =
+              this.scanBeamMode === 'OPTICAL'
+                ? 0x38bdf8
+                : this.scanBeamMode === 'THERMAL'
+                  ? 0xff6b2b
+                  : 0xf59e0b;
 
             swathCone.material.color.setHex(beamHex);
             swathCone.material.opacity = opacity;
@@ -1152,7 +1691,9 @@ export class MissionControlSystem extends createSystem({
           const hex =
             this.engine.getState().activeSensorMode === 'OPTICAL'
               ? 0x38bdf8
-              : 0xf59e0b;
+              : this.engine.getState().activeSensorMode === 'THERMAL'
+                ? 0xff6b2b
+                : 0xf59e0b;
           aimLaser.material.color.setHex(hex);
           aimLaser.material.opacity = 0.68;
           aimLaser.visible = true;
@@ -1255,16 +1796,23 @@ export class MissionControlSystem extends createSystem({
           this.playCue('PACKET_RECEIVED');
         }
         if (nextState.phase === 'DEBRIEF') {
+          if (this.tutorial.getState().active) {
+            this.tutorial.syncWithMissionState(
+              nextState,
+              { type: 'TICK' },
+              this.world.renderer.xr.isPresenting ? 'xr-hand' : 'desktop',
+            );
+          }
           this.playCue('HANDSHAKE_CONFIRM');
           if (nextState.debrief && nextState.debrief.totalScore >= nextState.debrief.achievableScore) {
             this.playCue('OPTIMAL_VICTORY');
             this.audio.playSuccessFanfare();
-            
+
             // ZERO PACKET LOSS achievement if all 3 packets transmitted
             if (nextState.debrief.transmittedPacketIds.length === 3) {
               this.desktopControls?.triggerAchievement('🛰️ ZERO PACKET LOSS', 'All 3 Verified Packets Delivered', '✨');
             }
-            
+
             this.voiceCommander?.trigger('DEBRIEF_VICTORY');
           } else {
             this.playCue('LINK_CUTOFF');
@@ -1422,7 +1970,12 @@ export class MissionControlSystem extends createSystem({
       if (next?.type === 'SCAN') {
         targetId = state.activeSensorMode !== next.sensorMode ? 'pad-toggle-sensor'
           : state.selectedSectorId !== next.sectorId ? `sector-${next.sectorId.toLowerCase()}` : 'scanner-tool';
-        color = next.sensorMode === 'RADAR' ? 0xfbbf24 : 0x38bdf8;
+        color =
+          next.sensorMode === 'RADAR'
+            ? 0xfbbf24
+            : next.sensorMode === 'THERMAL'
+              ? 0xff6b2b
+              : 0x38bdf8;
       } else if (next?.type === 'PROCESS') { targetId = 'pad-process-cradle'; color = 0xfbbf24; }
       else if (next?.type === 'DISCARD') { targetId = 'pad-discard-chute'; color = 0xf87171; }
       else if (next?.type === 'QUEUE' || next?.type === 'UNQUEUE') { targetId = 'pad-queue-downlink'; color = 0x38bdf8; }
@@ -1853,7 +2406,1003 @@ export class MissionControlSystem extends createSystem({
     return this.player.position.toArray();
   }
 
+  private recordXRHandEvent(
+    entry: Omit<XRHandTelemetryEvent, 'timestampMs' | 'missionElapsedSec'>,
+  ): void {
+    this.xrHandEventLog.push({
+      timestampMs: Date.now(),
+      missionElapsedSec: Number(this.missionElapsedTime.toFixed(3)),
+      ...entry,
+    });
+    if (this.xrHandEventLog.length > 500) {
+      this.xrHandEventLog.shift();
+    }
+  }
+
+  public getXRHandTelemetryLog(): XRHandTelemetryEvent[] {
+    return this.xrHandEventLog.map((e) => ({
+      ...e,
+      position: [...e.position] as [number, number, number],
+      indexTipPosition: [...e.indexTipPosition] as [number, number, number],
+      graspPosition: [...e.graspPosition] as [number, number, number],
+    }));
+  }
+
+  public clearXRHandTelemetryLog(): void {
+    this.xrHandEventLog = [];
+  }
+
+  private toVec3Tuple(v: Vector3): [number, number, number] {
+    return [
+      Number(v.x.toFixed(4)),
+      Number(v.y.toFixed(4)),
+      Number(v.z.toFixed(4)),
+    ];
+  }
+
+  private syncGlobeSectorBeaconPositions(): void {
+    const globe = this.world.getSceneObject('earth-globe');
+    if (!globe) return;
+    globe.updateMatrixWorld(true);
+    for (const sectorEntity of this.queries.sectors.entities) {
+      const sObj = sectorEntity.object3D;
+      if (!sObj) continue;
+      const sId = (sectorEntity.getValue(OrbitSectorNode, 'sectorId') || 'B') as SectorId;
+      const sDef = SECTOR_GEO_DEFINITIONS[sId];
+      if (!sDef) continue;
+      const localPos = latLonToGlobePoint(
+        sDef.centerLatLon[0],
+        sDef.centerLatLon[1],
+        GLOBE_RADIUS * 1.002,
+      );
+      const worldPos = localPos.clone().applyMatrix4(globe.matrixWorld);
+      sObj.position.copy(worldPos);
+      const worldNormal = localPos
+        .clone()
+        .normalize()
+        .applyQuaternion(globe.quaternion)
+        .normalize();
+      sObj.quaternion.setFromUnitVectors(this.worldUp, worldNormal);
+      sObj.updateMatrixWorld(true);
+    }
+  }
+
+  private getSpatialButtonWorldPosition(
+    panelId: string,
+    buttonId: string,
+  ): Vector3 | null {
+    const panel = this.world.getSceneObject<UIKitMLAsset>(panelId);
+    if (!panel || !panel.visible) return null;
+    const element = panel.getElementById<UIKit.Container>(buttonId);
+    if (!element) return null;
+
+    panel.updateMatrixWorld(true);
+    const matrix = (element as any)?.globalMatrix?.value;
+    const rootComp = (element as any)?.root?.value?.component;
+    if (matrix && rootComp) {
+      rootComp.parent?.updateWorldMatrix(true, false);
+      rootComp.updateMatrix();
+      const pt = new Vector3()
+        .setFromMatrixPosition(matrix)
+        .applyMatrix4(rootComp.matrix);
+      if (rootComp.parent) pt.applyMatrix4(rootComp.parent.matrixWorld);
+      if (pt.lengthSq() > 0.001) {
+        return pt;
+      }
+    }
+
+    // Deterministic fallback inside panel world space if UIKit layout matrix has not ticked yet
+    const fallbackOffsets: Record<string, [number, number, number]> = {
+      Btn_StartTutorial: [-0.08, -0.18, 0.02],
+      Btn_SelectCampaign: [0.08, -0.18, 0.02],
+      Btn_CycleSector: [-0.12, -0.10, 0.02],
+      Btn_ToggleSensor: [0.0, -0.10, 0.02],
+      Btn_ScanSector: [0.12, -0.10, 0.02],
+      Btn_CalibrateSeat: [0.0, -0.24, 0.02],
+      'xr-button': [-0.08, -0.24, 0.02],
+      'exit-button': [0.08, -0.24, 0.02],
+      Btn_ProcessCube: [-0.12, -0.12, 0.02],
+      Btn_QueueCube: [0.0, -0.12, 0.02],
+      Btn_DiscardCube: [0.12, -0.12, 0.02],
+      Btn_CycleCube: [-0.10, -0.20, 0.02],
+      Btn_Pause: [0.0, -0.20, 0.02],
+      Btn_Settings: [0.10, -0.20, 0.02],
+      Btn_ReorderQueue: [-0.12, -0.16, 0.02],
+      Btn_CommitDownlink: [0.0, -0.16, 0.02],
+      Btn_RestartMission: [-0.10, -0.22, 0.02],
+      Btn_NextMission: [0.10, -0.22, 0.02],
+      Btn_DailyPass: [-0.10, -0.26, 0.02],
+      Btn_ReplayDecision: [0.10, -0.26, 0.02],
+    };
+    const panelCenter = panel.getWorldPosition(new Vector3());
+    const off = fallbackOffsets[buttonId] ?? [0, 0, 0.02];
+    const worldOffset = new Vector3(off[0], off[1], off[2]).applyQuaternion(
+      panel.getWorldQuaternion(new Quaternion()),
+    );
+    return panelCenter.add(worldOffset);
+  }
+
+  public get3DTargetWorldPosition(
+    targetId: string,
+  ): { x: number; y: number; z: number } | null {
+    this.syncGlobeSectorBeaconPositions();
+
+    if (targetId === 'PROCESS_CRADLE') {
+      return {
+        x: PROCESS_CRADLE_WORLD.x,
+        y: PROCESS_CRADLE_WORLD.y,
+        z: PROCESS_CRADLE_WORLD.z,
+      };
+    }
+    if (targetId === 'DOWNLINK_BAY' || targetId === 'DOWNLINK_SLOT_1') {
+      const [x, y, z] = DOWNLINK_BAY_POSITIONS[0];
+      return { x, y, z };
+    }
+    if (targetId === 'DOWNLINK_SLOT_2') {
+      const [x, y, z] = DOWNLINK_BAY_POSITIONS[1];
+      return { x, y, z };
+    }
+    if (targetId === 'DOWNLINK_SLOT_3') {
+      const [x, y, z] = DOWNLINK_BAY_POSITIONS[2];
+      return { x, y, z };
+    }
+    if (targetId === 'DISCARD_CHUTE') {
+      return {
+        x: DISCARD_CHUTE_WORLD.x,
+        y: DISCARD_CHUTE_WORLD.y,
+        z: DISCARD_CHUTE_WORLD.z,
+      };
+    }
+    if (targetId === 'RAW_TRAY_1') {
+      const [x, y, z] = RAW_TRAY_POSITIONS[0];
+      return { x, y, z };
+    }
+    if (targetId === 'RAW_TRAY_2') {
+      const [x, y, z] = RAW_TRAY_POSITIONS[1];
+      return { x, y, z };
+    }
+    if (targetId === 'RAW_TRAY_3') {
+      const [x, y, z] = RAW_TRAY_POSITIONS[2];
+      return { x, y, z };
+    }
+    if (targetId === 'GLOBE_GIMBAL') {
+      return { x: 0.0, y: 1.08, z: -0.42 };
+    }
+    if (targetId.includes(':')) {
+      const [panelId, buttonId] = targetId.split(':');
+      const btnPos = this.getSpatialButtonWorldPosition(panelId, buttonId);
+      return btnPos ? { x: btnPos.x, y: btnPos.y, z: btnPos.z } : null;
+    }
+
+    const obj = this.world.getSceneObject(targetId);
+    if (!obj) return null;
+    obj.updateWorldMatrix(true, false);
+    const pos = obj.getWorldPosition(new Vector3());
+    return { x: pos.x, y: pos.y, z: pos.z };
+  }
+
+  private sampleLiveXRHandState(
+    handedness: 'left' | 'right',
+  ): LiveXRHandSample | null {
+    const deviceId = handedness === 'left' ? 'hand-left' : 'hand-right';
+    const iwer =
+      typeof window !== 'undefined'
+        ? ((window as any).__ORBIT_IWER__ ?? (window as any).IWER_DEVICE)
+        : null;
+
+    if (iwer?.remote?.executeGetHandState) {
+      if (iwer.primaryInputMode && iwer.primaryInputMode !== 'hand') {
+        return null;
+      }
+      try {
+        const raw = iwer.remote.executeGetHandState({ device: deviceId });
+        if (!raw) return null;
+        const offset = this.player.position;
+        const pos = new Vector3(
+          raw.position.x,
+          raw.position.y,
+          raw.position.z,
+        ).add(offset);
+        const indexTip = new Vector3(
+          raw.anchors['index-tip'].x,
+          raw.anchors['index-tip'].y,
+          raw.anchors['index-tip'].z,
+        ).add(offset);
+        const thumbTip = new Vector3(
+          raw.anchors['thumb-tip'].x,
+          raw.anchors['thumb-tip'].y,
+          raw.anchors['thumb-tip'].z,
+        ).add(offset);
+        const graspPoint = new Vector3(
+          raw.anchors['grasp'].x,
+          raw.anchors['grasp'].y,
+          raw.anchors['grasp'].z,
+        ).add(offset);
+        const fingerDir = new Vector3(
+          raw.axes?.fingers?.x ?? 0,
+          raw.axes?.fingers?.y ?? 0,
+          raw.axes?.fingers?.z ?? -1,
+        ).normalize();
+        const pinchValue = Number(raw.pinchValue ?? 0);
+        const pressed = Boolean(raw.pressed || pinchValue >= 0.9);
+        return {
+          device: deviceId,
+          handedness,
+          connected: Boolean(raw.connected),
+          poseId: String(raw.poseId || 'default'),
+          pinchValue,
+          pressed,
+          position: pos,
+          indexTip,
+          thumbTip,
+          graspPoint,
+          fingerDir,
+        };
+      } catch {
+        return null;
+      }
+    }
+
+    // Physical Meta Quest 3 / 3S WebXR Hand Tracking fallback via Three.js WebXRManager
+    const session = (this.world.renderer?.xr as any)?.getSession?.();
+    if (!session?.inputSources) return null;
+    let matchedSource: any = null;
+    for (const src of session.inputSources) {
+      if (src.handedness === handedness && src.hand) {
+        matchedSource = src;
+        break;
+      }
+    }
+    if (!matchedSource) {
+      return {
+        device: deviceId,
+        handedness,
+        connected: false,
+        poseId: 'default',
+        pinchValue: 0,
+        pressed: false,
+        position: new Vector3(),
+        indexTip: new Vector3(),
+        thumbTip: new Vector3(),
+        graspPoint: new Vector3(),
+        fingerDir: new Vector3(0, 0, -1),
+      };
+    }
+
+    const handIdx = handedness === 'left' ? 0 : 1;
+    const xrHandSpace = (this.world.renderer.xr as any)?.getHand?.(handIdx);
+    const joints = xrHandSpace?.joints;
+    const wristObj = joints?.['wrist'];
+    const indexTipObj = joints?.['index-finger-tip'];
+    const thumbTipObj = joints?.['thumb-tip'];
+
+    const pos = wristObj
+      ? wristObj.getWorldPosition(new Vector3())
+      : new Vector3();
+    const indexTip = indexTipObj
+      ? indexTipObj.getWorldPosition(new Vector3())
+      : pos.clone();
+    const thumbTip = thumbTipObj
+      ? thumbTipObj.getWorldPosition(new Vector3())
+      : pos.clone();
+    const graspPoint = indexTip.clone().lerp(thumbTip, 0.5);
+    const fingerDir = indexTip.clone().sub(pos).normalize();
+    if (fingerDir.lengthSq() < 0.001) fingerDir.set(0, 0, -1);
+
+    const pinchDist = indexTip.distanceTo(thumbTip);
+    const pinchValue = Math.max(
+      0,
+      Math.min(1, 1 - (pinchDist - 0.015) / 0.055),
+    );
+    const pressed = Boolean(
+      matchedSource.gamepad?.buttons?.[0]?.pressed || pinchValue >= 0.88,
+    );
+
+    return {
+      device: deviceId,
+      handedness,
+      connected: true,
+      poseId: pressed ? 'pinch' : 'point',
+      pinchValue,
+      pressed,
+      position: pos,
+      indexTip,
+      thumbTip,
+      graspPoint,
+      fingerDir,
+    };
+  }
+
+  private resolve3DTargetForHand(
+    sample: LiveXRHandSample,
+  ): Resolved3DHandTarget | null {
+    this.syncGlobeSectorBeaconPositions();
+
+    const pointToRay = (targetPos: Vector3) => {
+      const toTarget = targetPos.clone().sub(sample.indexTip);
+      const alongRay = toTarget.dot(sample.fingerDir);
+      if (alongRay <= 0) {
+        return { alongRay, perpDist: Infinity };
+      }
+      const closestOnRay = sample.indexTip
+        .clone()
+        .addScaledVector(sample.fingerDir, alongRay);
+      return {
+        alongRay,
+        perpDist: targetPos.distanceTo(closestOnRay),
+      };
+    };
+
+    const candidates: Resolved3DHandTarget[] = [];
+    const isPointPose = sample.poseId === 'point';
+
+    // 1. Check 3D Evidence Data Cubes for near-hand pinch-grab (< 7.5 cm in pinch pose, < 4.5 cm in point pose)
+    const cubeThreshold = isPointPose ? 0.045 : 0.085;
+    for (const cubeEntity of this.queries.cubes.entities) {
+      const obj = cubeEntity.object3D;
+      if (!obj) continue;
+      obj.updateWorldMatrix(true, false);
+      const cubePos = obj.getWorldPosition(new Vector3());
+      const dist = isPointPose
+        ? sample.indexTip.distanceTo(cubePos) + 0.015
+        : Math.min(
+          sample.graspPoint.distanceTo(cubePos),
+          sample.indexTip.distanceTo(cubePos),
+        );
+      const slotIndex = cubeEntity.getValue(EvidenceCubeNode, 'slotIndex') ?? 0;
+      if (dist <= cubeThreshold) {
+        candidates.push({
+          targetType: 'DATA_CUBE',
+          targetId: `evidence-cube-${slotIndex + 1}`,
+          distance: dist,
+          worldPosition: cubePos,
+          cubeEntity,
+          slotIndex,
+        });
+      }
+    }
+
+    if (!isPointPose && candidates.length > 0) {
+      candidates.sort((a, b) => a.distance - b.distance);
+      return candidates[0];
+    }
+
+    // 2. Check 3D Sector Beacons on the Earth Globe (near fingertip < 9.5 cm or pointed ray)
+    for (const sectorEntity of this.queries.sectors.entities) {
+      const sObj = sectorEntity.object3D;
+      if (!sObj) continue;
+      const sectorId = (sectorEntity.getValue(OrbitSectorNode, 'sectorId') ||
+        'B') as SectorId;
+      const sPos = sObj.getWorldPosition(new Vector3());
+      const directDist = Math.min(
+        sample.indexTip.distanceTo(sPos),
+        sample.graspPoint.distanceTo(sPos),
+      );
+      const rayInfo = pointToRay(sPos);
+      const effectiveDist =
+        directDist <= 0.095
+          ? directDist
+          : isPointPose &&
+            rayInfo.alongRay > 0 &&
+            rayInfo.alongRay <= 0.75 &&
+            rayInfo.perpDist <= 0.055
+            ? rayInfo.perpDist + 0.02
+            : Infinity;
+
+      if (effectiveDist < Infinity) {
+        candidates.push({
+          targetType: 'SECTOR',
+          targetId: `sector-${sectorId.toLowerCase()}`,
+          distance: effectiveDist,
+          worldPosition: sPos,
+          sectorId,
+        });
+      }
+    }
+
+    // 3. Check 3D Console Control Pads (< 9.5 cm direct or pointed ray)
+    const padNodes: Array<{ id: string; action: string }> = [
+      { id: 'pad-fire-swath', action: 'SCAN' },
+      { id: 'pad-toggle-sensor', action: 'TOGGLE_SENSOR' },
+      { id: 'pad-process-cradle', action: 'PROCESS' },
+      { id: 'pad-queue-downlink', action: 'QUEUE' },
+      { id: 'pad-commit-downlink', action: 'COMMIT_DOWNLINK' },
+      { id: 'pad-discard-chute', action: 'DISCARD' },
+      { id: 'pad-recenter-desk', action: 'RECENTER' },
+      { id: 'pad-master-power', action: 'MASTER_POWER' },
+      { id: 'pad-aria-delegate', action: 'ARIA_DELEGATE' },
+      { id: 'avatar-aria', action: 'ARIA_DELEGATE' },
+    ];
+    for (const pad of padNodes) {
+      const obj = this.world.getSceneObject(pad.id);
+      if (!obj) continue;
+      obj.updateWorldMatrix(true, false);
+      const pPos = obj.getWorldPosition(new Vector3());
+      const directDist = Math.min(
+        sample.indexTip.distanceTo(pPos),
+        sample.graspPoint.distanceTo(pPos),
+      );
+      const rayInfo = pointToRay(pPos);
+      const effectiveDist =
+        directDist <= 0.095
+          ? directDist
+          : isPointPose &&
+            rayInfo.alongRay > 0 &&
+            rayInfo.alongRay <= 0.85 &&
+            rayInfo.perpDist <= 0.055
+            ? rayInfo.perpDist + 0.02
+            : Infinity;
+      if (effectiveDist < Infinity) {
+        candidates.push({
+          targetType: 'CONTROL_PAD',
+          targetId: pad.id,
+          distance: effectiveDist,
+          worldPosition: pPos,
+          controlAction: pad.action,
+        });
+      }
+    }
+
+    // 4. Check 3D Spatial UIKitML Panel Buttons (direct fingertip proximity < 14 cm or pointed ray < 7.5 cm)
+    const panelButtons: Array<{ panelId: string; buttonId: string }> = [
+      { panelId: 'briefing-panel', buttonId: 'Btn_StartTutorial' },
+      { panelId: 'briefing-panel', buttonId: 'Btn_SelectCampaign' },
+      { panelId: 'briefing-panel', buttonId: 'Btn_CycleSector' },
+      { panelId: 'briefing-panel', buttonId: 'Btn_ToggleSensor' },
+      { panelId: 'briefing-panel', buttonId: 'Btn_ScanSector' },
+      { panelId: 'briefing-panel', buttonId: 'Btn_CalibrateSeat' },
+      { panelId: 'briefing-panel', buttonId: 'exit-button' },
+      { panelId: 'briefing-panel', buttonId: 'xr-button' },
+      { panelId: 'telemetry-hud', buttonId: 'Btn_Pause' },
+      { panelId: 'telemetry-hud', buttonId: 'Btn_ProcessCube' },
+      { panelId: 'telemetry-hud', buttonId: 'Btn_QueueCube' },
+      { panelId: 'telemetry-hud', buttonId: 'Btn_DiscardCube' },
+      { panelId: 'telemetry-hud', buttonId: 'Btn_CycleCube' },
+      { panelId: 'telemetry-hud', buttonId: 'Btn_Settings' },
+      { panelId: 'debrief-panel', buttonId: 'Btn_CommitDownlink' },
+      { panelId: 'debrief-panel', buttonId: 'Btn_RestartMission' },
+      { panelId: 'debrief-panel', buttonId: 'Btn_NextMission' },
+      { panelId: 'debrief-panel', buttonId: 'Btn_ReorderQueue' },
+      { panelId: 'debrief-panel', buttonId: 'Btn_DailyPass' },
+      { panelId: 'debrief-panel', buttonId: 'Btn_ReplayDecision' },
+    ];
+    for (const pb of panelButtons) {
+      const btnPos = this.getSpatialButtonWorldPosition(pb.panelId, pb.buttonId);
+      if (!btnPos) continue;
+      const directDist = Math.min(
+        sample.indexTip.distanceTo(btnPos),
+        sample.graspPoint.distanceTo(btnPos),
+      );
+      const rayInfo = pointToRay(btnPos);
+      const effectiveDist =
+        directDist <= 0.14
+          ? directDist
+          : rayInfo.alongRay > 0 &&
+            rayInfo.alongRay <= 1.45 &&
+            rayInfo.perpDist <= 0.075
+            ? rayInfo.perpDist + 0.03
+            : Infinity;
+      if (effectiveDist < Infinity) {
+        candidates.push({
+          targetType: 'SPATIAL_UI_BUTTON',
+          targetId: `${pb.panelId}:${pb.buttonId}`,
+          distance: effectiveDist,
+          worldPosition: btnPos,
+          panelId: pb.panelId,
+          buttonId: pb.buttonId,
+        });
+      }
+    }
+
+    if (candidates.length === 0) return null;
+    candidates.sort((a, b) => a.distance - b.distance);
+    return candidates[0];
+  }
+
+  private bindXRSessionHandEvents(): void {
+    const session = (this.world.renderer?.xr as any)?.getSession?.();
+    if (!session || this.boundXRSession === session) return;
+    this.boundXRSession = session;
+
+    const onSelectStart = (event: any) => {
+      const handedness =
+        event?.inputSource?.handedness === 'left' ? 'left' : 'right';
+      const sample = this.sampleLiveXRHandState(handedness);
+      if (!sample || !sample.connected) return;
+      if (!this.lastHandPressed[handedness]) {
+        this.lastHandPressed[handedness] = true;
+        this.handleXRHandPressStart(sample, 'selectstart');
+      }
+    };
+
+    const onSelectEnd = (event: any) => {
+      const handedness =
+        event?.inputSource?.handedness === 'left' ? 'left' : 'right';
+      const sample = this.sampleLiveXRHandState(handedness);
+      if (this.lastHandPressed[handedness]) {
+        this.lastHandPressed[handedness] = false;
+        if (!sample || !sample.connected) {
+          this.lastHandConnected[handedness] = false;
+          this.handleXRHandTrackingLost(handedness, sample ?? undefined);
+        } else {
+          this.handleXRHandPressEnd(sample, 'selectend');
+        }
+      }
+    };
+
+    const onSelect = (event: any) => {
+      const handedness =
+        event?.inputSource?.handedness === 'left' ? 'left' : 'right';
+      const sample = this.sampleLiveXRHandState(handedness);
+      if (!sample) return;
+      this.recordXRHandEvent({
+        eventType: 'select',
+        inputSource: 'hand',
+        handedness,
+        connected: sample.connected,
+        poseId: sample.poseId,
+        pinchValue: Number(sample.pinchValue.toFixed(3)),
+        position: this.toVec3Tuple(sample.position),
+        indexTipPosition: this.toVec3Tuple(sample.indexTip),
+        graspPosition: this.toVec3Tuple(sample.graspPoint),
+      });
+    };
+
+    const onInputSourcesChange = () => {
+      for (const side of ['left', 'right'] as const) {
+        const sample = this.sampleLiveXRHandState(side);
+        if (sample && !sample.connected && this.lastHandConnected[side]) {
+          this.lastHandConnected[side] = false;
+          this.handleXRHandTrackingLost(side, sample);
+        }
+      }
+    };
+
+    session.addEventListener?.('selectstart', onSelectStart);
+    session.addEventListener?.('selectend', onSelectEnd);
+    session.addEventListener?.('select', onSelect);
+    session.addEventListener?.('inputsourceschange', onInputSourcesChange);
+  }
+
+  private handleXRHandPressStart(
+    sample: LiveXRHandSample,
+    viaEvent: 'selectstart' | 'pinch_threshold' | 'poke',
+  ): void {
+    const resolved = this.resolve3DTargetForHand(sample);
+
+    this.recordXRHandEvent({
+      eventType: viaEvent === 'poke' ? 'poke' : 'selectstart',
+      inputSource: 'hand',
+      handedness: sample.handedness,
+      connected: sample.connected,
+      poseId: sample.poseId,
+      pinchValue: Number(sample.pinchValue.toFixed(3)),
+      position: this.toVec3Tuple(sample.position),
+      indexTipPosition: this.toVec3Tuple(sample.indexTip),
+      graspPosition: this.toVec3Tuple(sample.graspPoint),
+      targetType: resolved?.targetType ?? 'NONE',
+      targetId: resolved?.targetId ?? 'none',
+    });
+
+    if (!resolved) return;
+
+    this.withInputSource('xr-hand', () => {
+      if (
+        resolved.targetType === 'DATA_CUBE' &&
+        resolved.cubeEntity &&
+        typeof resolved.slotIndex === 'number'
+      ) {
+        if (
+          this.engine.getState().phase !== 'OPERATIONS' ||
+          this.engine.getState().paused
+        ) {
+          return;
+        }
+        const pkt = this.engine.getState().packets[resolved.slotIndex];
+        const obj = resolved.cubeEntity.object3D;
+        if (!obj) return;
+        this.activeXRHandGrabs.set(sample.handedness, {
+          cubeEntity: resolved.cubeEntity,
+          slotIndex: resolved.slotIndex,
+          packetId: pkt?.id ?? '',
+          grabStartPos: obj.position.clone(),
+          lastGraspPos: sample.graspPoint.clone(),
+          inspectedNotified: false,
+        });
+        if (pkt) {
+          this.tutorial.notifyCubeGrabOrSelect(
+            pkt.confidence !== 'UNVERIFIED',
+            'xr-hand',
+          );
+          this.applyAction({ type: 'SELECT_PACKET', packetId: pkt.id });
+        }
+        this.playCue('CUBE_GRAB');
+        this.highlightDropZones(true);
+        this.syncAll();
+
+        this.recordXRHandEvent({
+          eventType: 'grabstart',
+          inputSource: 'hand',
+          handedness: sample.handedness,
+          connected: sample.connected,
+          poseId: sample.poseId,
+          pinchValue: Number(sample.pinchValue.toFixed(3)),
+          position: this.toVec3Tuple(sample.position),
+          indexTipPosition: this.toVec3Tuple(sample.indexTip),
+          graspPosition: this.toVec3Tuple(sample.graspPoint),
+          targetType: 'DATA_CUBE',
+          targetId: resolved.targetId,
+          actionOrOutcome: `grabbed:${pkt?.id ?? 'standby'}`,
+        });
+        return;
+      }
+
+      if (resolved.targetType === 'SECTOR' && resolved.sectorId) {
+        if (this.isAnyObjectGrabbed()) return;
+        this.tutorial.notifySectorPointed(resolved.sectorId, 'xr-hand');
+        this.handleSelectSector(resolved.sectorId);
+        return;
+      }
+
+      if (resolved.targetType === 'CONTROL_PAD' && resolved.controlAction) {
+        if (this.isAnyObjectGrabbed()) return;
+        if (resolved.controlAction === 'SCAN') {
+          this.tutorial.notifyPinchScan('xr-hand');
+        }
+        if (resolved.controlAction === 'COMMIT_DOWNLINK') {
+          this.tutorial.notifyTransmitActivated('xr-hand');
+        }
+        this.handleControlAction(resolved.controlAction);
+        return;
+      }
+
+      if (
+        resolved.targetType === 'SPATIAL_UI_BUTTON' &&
+        resolved.panelId &&
+        resolved.buttonId
+      ) {
+        if (resolved.buttonId === 'Btn_ScanSector') {
+          this.tutorial.notifyPinchScan('xr-hand');
+        }
+        if (resolved.buttonId === 'Btn_CommitDownlink') {
+          this.tutorial.notifyTransmitActivated('xr-hand');
+        }
+        const panel = this.world.getSceneObject<UIKitMLAsset>(resolved.panelId);
+        const element = panel?.getElementById(resolved.buttonId);
+        if (element) {
+          element.dispatchEvent({ type: 'click' } as never);
+        }
+      }
+    });
+  }
+
+  private handleXRHandPressEnd(
+    sample: LiveXRHandSample,
+    viaEvent: 'selectend' | 'pinch_release',
+  ): void {
+    if (!sample.connected) {
+      this.lastHandConnected[sample.handedness] = false;
+      this.handleXRHandTrackingLost(sample.handedness, sample);
+      return;
+    }
+    const activeGrab = this.activeXRHandGrabs.get(sample.handedness);
+    this.recordXRHandEvent({
+      eventType: viaEvent === 'selectend' ? 'selectend' : 'grabrelease',
+      inputSource: 'hand',
+      handedness: sample.handedness,
+      connected: sample.connected,
+      poseId: sample.poseId,
+      pinchValue: Number(sample.pinchValue.toFixed(3)),
+      position: this.toVec3Tuple(sample.position),
+      indexTipPosition: this.toVec3Tuple(sample.indexTip),
+      graspPosition: this.toVec3Tuple(sample.graspPoint),
+      targetType: activeGrab ? 'DATA_CUBE' : 'NONE',
+      targetId: activeGrab ? `evidence-cube-${activeGrab.slotIndex + 1}` : 'none',
+    });
+
+    if (!activeGrab) {
+      let hadStaleGrab = false;
+      for (const cubeEntity of this.queries.cubes.entities) {
+        if (cubeEntity.hasComponent(Grabbed)) {
+          this.world.getSystem(GrabSystem)?.forceRelease(cubeEntity);
+          hadStaleGrab = true;
+        }
+      }
+      for (const ctrlEntity of this.queries.controls.entities) {
+        if (ctrlEntity.hasComponent(Grabbed)) {
+          this.world.getSystem(GrabSystem)?.forceRelease(ctrlEntity);
+        }
+      }
+      if (hadStaleGrab) {
+        const st = this.engine.getState();
+        this.syncCubeTransforms(st.packets, st);
+      }
+      return;
+    }
+
+    this.activeXRHandGrabs.delete(sample.handedness);
+    if (activeGrab.cubeEntity.hasComponent(Grabbed)) {
+      this.world.getSystem(GrabSystem)?.forceRelease(activeGrab.cubeEntity);
+    }
+    for (const ctrlEntity of this.queries.controls.entities) {
+      if (ctrlEntity.hasComponent(Grabbed)) {
+        this.world.getSystem(GrabSystem)?.forceRelease(ctrlEntity);
+      }
+    }
+    if (this.activeXRHandGrabs.size === 0) {
+      this.highlightDropZones(false);
+    }
+
+    const obj = activeGrab.cubeEntity.object3D;
+    if (obj) {
+      obj.position.copy(sample.graspPoint);
+      obj.updateMatrixWorld(true);
+    }
+
+    const distProcess = sample.graspPoint.distanceTo(PROCESS_CRADLE_WORLD);
+    const distDownlink = Math.min(
+      sample.graspPoint.distanceTo(DOWNLINK_BAY_CENTER_WORLD),
+      ...DOWNLINK_BAY_POSITIONS.map(([x, y, z]) =>
+        sample.graspPoint.distanceTo(new Vector3(x, y, z)),
+      ),
+    );
+    const distDiscard = sample.graspPoint.distanceTo(DISCARD_CHUTE_WORLD);
+    const zoneLabel =
+      distProcess < 0.15
+        ? 'PROCESS_CRADLE'
+        : distDownlink < 0.18
+          ? 'DOWNLINK_BAY'
+          : distDiscard < 0.15
+            ? 'DISCARD_CHUTE'
+            : 'TRAY_SNAP_RECOVERY';
+
+    this.withInputSource('xr-hand', () => {
+      this.handleCubeReleased(activeGrab.cubeEntity);
+    });
+
+    this.recordXRHandEvent({
+      eventType: 'grabrelease',
+      inputSource: 'hand',
+      handedness: sample.handedness,
+      connected: sample.connected,
+      poseId: sample.poseId,
+      pinchValue: Number(sample.pinchValue.toFixed(3)),
+      position: this.toVec3Tuple(sample.position),
+      indexTipPosition: this.toVec3Tuple(sample.indexTip),
+      graspPosition: this.toVec3Tuple(sample.graspPoint),
+      targetType: 'DROP_ZONE',
+      targetId: zoneLabel,
+      actionOrOutcome: `released:${activeGrab.packetId || 'cube'}->${zoneLabel}`,
+    });
+  }
+
+  private handleXRHandTrackingLost(
+    handedness: 'left' | 'right',
+    lastSample?: LiveXRHandSample,
+  ): void {
+    const activeGrab = this.activeXRHandGrabs.get(handedness);
+    this.lastHandPressed[handedness] = false;
+    this.lastHandGlobeTouchPos.delete(handedness);
+
+    if (activeGrab) {
+      this.activeXRHandGrabs.delete(handedness);
+      if (activeGrab.cubeEntity.hasComponent(Grabbed)) {
+        this.world.getSystem(GrabSystem)?.forceRelease(activeGrab.cubeEntity);
+      }
+      if (this.activeXRHandGrabs.size === 0) {
+        this.highlightDropZones(false);
+      }
+      // Snap dropped cube safely back to its assigned tray or downlink bay slot
+      const state = this.engine.getState();
+      this.syncCubeTransforms(state.packets, state);
+      const snappedPos = activeGrab.cubeEntity.object3D
+        ? this.toVec3Tuple(activeGrab.cubeEntity.object3D.position)
+        : ([0, 0, 0] as [number, number, number]);
+
+      this.recordXRHandEvent({
+        eventType: 'tracking_lost_recovery',
+        inputSource: 'hand',
+        handedness,
+        connected: false,
+        poseId: lastSample?.poseId ?? 'default',
+        pinchValue: 0,
+        position: lastSample ? this.toVec3Tuple(lastSample.position) : [0, 0, 0],
+        indexTipPosition: lastSample
+          ? this.toVec3Tuple(lastSample.indexTip)
+          : [0, 0, 0],
+        graspPosition: snappedPos,
+        targetType: 'DATA_CUBE',
+        targetId: `evidence-cube-${activeGrab.slotIndex + 1}`,
+        actionOrOutcome: `tracking_lost_snapped_to:[${snappedPos.join(',')}]`,
+      });
+    } else {
+      this.recordXRHandEvent({
+        eventType: 'disconnected',
+        inputSource: 'hand',
+        handedness,
+        connected: false,
+        poseId: lastSample?.poseId ?? 'default',
+        pinchValue: 0,
+        position: lastSample ? this.toVec3Tuple(lastSample.position) : [0, 0, 0],
+        indexTipPosition: lastSample
+          ? this.toVec3Tuple(lastSample.indexTip)
+          : [0, 0, 0],
+        graspPosition: lastSample
+          ? this.toVec3Tuple(lastSample.graspPoint)
+          : [0, 0, 0],
+      });
+    }
+  }
+
+  private updateXRHandInteractions(_delta: number): void {
+    const isImmersive = Boolean(this.world.renderer?.xr?.isPresenting);
+    if (!isImmersive) return;
+
+    this.bindXRSessionHandEvents();
+
+    for (const side of ['left', 'right'] as const) {
+      const sample = this.sampleLiveXRHandState(side);
+      if (!sample) continue;
+
+      // 1. Connection & Disconnection Transition Tracking
+      if (sample.connected && !this.lastHandConnected[side]) {
+        this.lastHandConnected[side] = true;
+        this.recordXRHandEvent({
+          eventType: 'connected',
+          inputSource: 'hand',
+          handedness: side,
+          connected: true,
+          poseId: sample.poseId,
+          pinchValue: Number(sample.pinchValue.toFixed(3)),
+          position: this.toVec3Tuple(sample.position),
+          indexTipPosition: this.toVec3Tuple(sample.indexTip),
+          graspPosition: this.toVec3Tuple(sample.graspPoint),
+        });
+      } else if (!sample.connected && this.lastHandConnected[side]) {
+        this.lastHandConnected[side] = false;
+        this.handleXRHandTrackingLost(side, sample);
+        continue;
+      }
+
+      if (!sample.connected) continue;
+
+      // 2. If currently holding a 3D Data Cube, move the cube 1:1 with the hand's 3D grasp anchor
+      const activeGrab = this.activeXRHandGrabs.get(side);
+      if (activeGrab) {
+        if (activeGrab.cubeEntity.hasComponent(Grabbed)) {
+          this.world.getSystem(GrabSystem)?.forceRelease(activeGrab.cubeEntity);
+        }
+        const obj = activeGrab.cubeEntity.object3D;
+        if (obj) {
+          obj.position.copy(sample.graspPoint);
+          obj.updateMatrixWorld(true);
+        }
+        const movedFromStart = sample.graspPoint.distanceTo(
+          activeGrab.grabStartPos,
+        );
+        if (movedFromStart >= 0.02 && !activeGrab.inspectedNotified) {
+          activeGrab.inspectedNotified = true;
+          this.withInputSource('xr-hand', () => {
+            this.tutorial.notifyCubeInspected('xr-hand');
+            if (this.tutorial.isActive()) {
+              this.tutorial.syncWithMissionState(
+                this.engine.getState(),
+                undefined,
+                'xr-hand',
+              );
+            }
+          });
+          this.recordXRHandEvent({
+            eventType: 'grabmove',
+            inputSource: 'hand',
+            handedness: side,
+            connected: true,
+            poseId: sample.poseId,
+            pinchValue: Number(sample.pinchValue.toFixed(3)),
+            position: this.toVec3Tuple(sample.position),
+            indexTipPosition: this.toVec3Tuple(sample.indexTip),
+            graspPosition: this.toVec3Tuple(sample.graspPoint),
+            targetType: 'DATA_CUBE',
+            targetId: `evidence-cube-${activeGrab.slotIndex + 1}`,
+            actionOrOutcome: `carried_${movedFromStart.toFixed(3)}m`,
+          });
+        }
+        activeGrab.lastGraspPos.copy(sample.graspPoint);
+      } else {
+        // 3. Check 3D Globe Gimbal touch / rotation & Point Hover when not holding a cube
+        const distToGlobe = sample.indexTip.distanceTo(GLOBE_CENTER_WORLD);
+        if (distToGlobe <= 0.30) {
+          const prevTouch = this.lastHandGlobeTouchPos.get(side);
+          if (!prevTouch) {
+            this.lastHandGlobeTouchPos.set(side, sample.indexTip.clone());
+            this.withInputSource('xr-hand', () => {
+              this.tutorial.notifyGlobeInteraction('xr-hand');
+              if (this.tutorial.isActive()) {
+                this.tutorial.syncWithMissionState(
+                  this.engine.getState(),
+                  undefined,
+                  'xr-hand',
+                );
+              }
+            });
+            this.recordXRHandEvent({
+              eventType: 'globe_touch',
+              inputSource: 'hand',
+              handedness: side,
+              connected: true,
+              poseId: sample.poseId,
+              pinchValue: Number(sample.pinchValue.toFixed(3)),
+              position: this.toVec3Tuple(sample.position),
+              indexTipPosition: this.toVec3Tuple(sample.indexTip),
+              graspPosition: this.toVec3Tuple(sample.graspPoint),
+              targetType: 'GLOBE',
+              targetId: 'earth-globe',
+            });
+          } else if (sample.pressed) {
+            const dx = sample.indexTip.x - prevTouch.x;
+            const dy = sample.indexTip.y - prevTouch.y;
+            if (Math.abs(dx) + Math.abs(dy) > 0.008 && !this.isSlerpingToSector) {
+              this.withInputSource('xr-hand', () => {
+                this.rotateGlobe(dx * 1.4, -dy * 1.0);
+              });
+              prevTouch.copy(sample.indexTip);
+            }
+          } else {
+            prevTouch.copy(sample.indexTip);
+          }
+        } else {
+          this.lastHandGlobeTouchPos.delete(side);
+        }
+
+        // 4. Resolve 3D target for pointing hover & direct index-tip poke
+        const resolved = this.resolve3DTargetForHand(sample);
+        if (resolved) {
+          if (this.lastHandPointTarget[side] !== resolved.targetId) {
+            this.lastHandPointTarget[side] = resolved.targetId;
+            if (resolved.targetType === 'SECTOR' && resolved.sectorId) {
+              this.gazeSectorId = resolved.sectorId;
+              this.withInputSource('xr-hand', () => {
+                this.tutorial.notifySectorPointed(resolved.sectorId!, 'xr-hand');
+              });
+            }
+            this.recordXRHandEvent({
+              eventType: 'point_hover',
+              inputSource: 'hand',
+              handedness: side,
+              connected: true,
+              poseId: sample.poseId,
+              pinchValue: Number(sample.pinchValue.toFixed(3)),
+              position: this.toVec3Tuple(sample.position),
+              indexTipPosition: this.toVec3Tuple(sample.indexTip),
+              graspPosition: this.toVec3Tuple(sample.graspPoint),
+              targetType: resolved.targetType,
+              targetId: resolved.targetId,
+            });
+          }
+        } else {
+          this.lastHandPointTarget[side] = '';
+        }
+      }
+
+      // 5. Poll pinch press / release transitions if XRSession selectstart/selectend did not already fire this frame
+      if (sample.pressed && !this.lastHandPressed[side]) {
+        this.lastHandPressed[side] = true;
+        this.handleXRHandPressStart(sample, 'pinch_threshold');
+      } else if (!sample.pressed && this.lastHandPressed[side]) {
+        this.lastHandPressed[side] = false;
+        this.handleXRHandPressEnd(sample, 'pinch_release');
+      }
+    }
+  }
+
+  private isLiveXRHandActive(): boolean {
+    if (!this.world.renderer?.xr?.isPresenting) return false;
+    return Boolean(this.lastHandConnected.left || this.lastHandConnected.right);
+  }
+
   private isAnyObjectGrabbed(): boolean {
+    if (this.activeXRHandGrabs.size > 0) return true;
+    if (this.isLiveXRHandActive()) return false;
     for (const cubeEntity of this.queries.cubes.entities) {
       if (cubeEntity.hasComponent(Grabbed)) return true;
     }
@@ -1865,6 +3414,7 @@ export class MissionControlSystem extends createSystem({
 
   private forceReleaseAllGrabs(): void {
     this.suppressReleaseActions = true;
+    this.activeXRHandGrabs.clear();
     const grabSystem = this.world.getSystem(GrabSystem);
     if (grabSystem) {
       for (const cubeEntity of this.queries.cubes.entities) {
@@ -1900,14 +3450,36 @@ export class MissionControlSystem extends createSystem({
       const el = panel?.getElementById(id);
       if (!el) return;
       el.name = id;
-      el.addEventListener('click', handler);
-      this.cleanupFuncs.push(() => el.removeEventListener('click', handler));
+      const onClick = (event?: any) => {
+        if (event && typeof event.pointerId === 'number') {
+          setTimeout(() => handler(), 0);
+        } else {
+          handler();
+        }
+      };
+      el.addEventListener('click', onClick);
+      this.cleanupFuncs.push(() => el.removeEventListener('click', onClick));
     };
 
     // Briefing Panel controls
     bindClick(this.briefingPanel, 'Btn_CycleSector', () => this.handleCycleSector());
     bindClick(this.briefingPanel, 'Btn_ToggleSensor', () => this.handleToggleSensor());
     bindClick(this.briefingPanel, 'Btn_ScanSector', () => this.handleScan());
+    bindClick(this.briefingPanel, 'Btn_SelectCampaign', () => this.cycleCampaignOperation());
+    bindClick(this.briefingPanel, 'Btn_StartTutorial', () => {
+      if (this.tutorial.isActive()) {
+        this.tutorial.skip();
+      } else {
+        if (this.engine.getState().scenarioId !== 'ORBITAL_ACADEMY') {
+          this.dailyDate = null;
+          this.engine.setScenario('ORBITAL_ACADEMY');
+          this.handleRestartMission();
+        }
+        this.tutorial.start(Boolean(this.world.renderer?.xr?.isPresenting));
+      }
+      this.playCue('SELECT_SECTOR');
+      this.syncAll();
+    });
     bindClick(this.briefingPanel, 'Btn_CalibrateSeat', () => {
       this.calibrateSeatedView();
     });
@@ -2005,10 +3577,10 @@ export class MissionControlSystem extends createSystem({
       this.briefingPanel.visible = show && !isDebrief;
     }
     if (this.telemetryPanel) {
-      this.telemetryPanel.visible = show;
+      this.telemetryPanel.visible = show && !isDebrief;
     }
     if (this.debriefPanel) {
-      this.debriefPanel.visible = show || isDebrief;
+      this.debriefPanel.visible = isDebrief;
     }
   }
 
@@ -2016,6 +3588,10 @@ export class MissionControlSystem extends createSystem({
     const globe = this.world.getSceneObject('earth-globe');
     if (!globe) return;
     this.isSlerpingToSector = false;
+    this.tutorial.notifyGlobeInteraction(this.currentInputSource);
+    if (this.tutorial.isActive()) {
+      this.tutorial.syncWithMissionState(this.engine.getState(), undefined, this.currentInputSource);
+    }
 
     // Yaw around world Up, pitch around world Right
     const qYaw = new Quaternion().setFromAxisAngle(this.worldUp, deltaYaw);
@@ -2057,19 +3633,10 @@ export class MissionControlSystem extends createSystem({
     this.playCue('SELECT_SECTOR');
     this.slerpGlobeToSector(sectorId);
     const state = this.engine.getState();
-    this.voiceCommander?.handleSectorSelection(sectorId, state.activeSensorMode);
-    
-    // Tactical coaching: warn if wrong sensor for sector conditions
-    if (sectorId === 'B' && state.activeSensorMode === 'OPTICAL') {
-      this.voiceCommander?.trigger('SECTOR_B_OPTICAL_WARNING');
-    } else if (sectorId === 'B' && state.activeSensorMode === 'RADAR') {
-      this.voiceCommander?.trigger('SECTOR_B_SAR_OPTIMAL');
-    } else if (sectorId === 'C' && state.activeSensorMode === 'RADAR') {
-      this.voiceCommander?.trigger('SECTOR_C_SAR_WARNING');
-    } else if (sectorId === 'C' && state.activeSensorMode === 'OPTICAL') {
-      this.voiceCommander?.trigger('SECTOR_C_OPTICAL_OPTIMAL');
+    if (state.scenarioId === 'STANDARD_INDUS_PASS') {
+      this.voiceCommander?.handleSectorSelection(sectorId, state.activeSensorMode);
     }
-    
+
     this.syncAll();
   }
 
@@ -2080,26 +3647,49 @@ export class MissionControlSystem extends createSystem({
     this.handleSelectSector(next);
   }
 
-  private handleToggleSensor(): void {
-    this.applyAction({ type: 'SET_SENSOR', sensorMode: this.engine.getState().activeSensorMode === 'RADAR' ? 'OPTICAL' : 'RADAR' });
-    this.playCue('TOGGLE_SENSOR');
-    const state = this.engine.getState();
-    const isRadar = state.activeSensorMode === 'RADAR';
-
-    // Animate physical 3D aerospace switch stem & micro-LED on flight deck
+  private syncSensorSwitchHardware(sensorMode: SensorMode): void {
     const consoleObj = this.world.getSceneObject('orbital-console');
     if (consoleObj) {
       const stem = consoleObj.getObjectByName('SensorToggleStem');
       if (stem) {
-        stem.rotation.x = isRadar ? -0.38 : 0.38;
+        stem.rotation.x =
+          sensorMode === 'RADAR'
+            ? -0.38
+            : sensorMode === 'THERMAL'
+              ? 0.0
+              : 0.38;
       }
       const led = consoleObj.getObjectByName('SensorSwitchLed');
       if (led instanceof Mesh && led.material instanceof MeshBasicMaterial) {
-        led.material.color.setHex(isRadar ? 0x10b981 : 0x38bdf8);
+        led.material.color.setHex(
+          sensorMode === 'RADAR'
+            ? 0x10b981
+            : sensorMode === 'THERMAL'
+              ? 0xff6b2b
+              : 0x38bdf8,
+        );
       }
     }
+  }
 
-    this.voiceCommander?.handleSectorSelection(state.selectedSectorId, state.activeSensorMode);
+  private handleToggleSensor(): void {
+    const scenario = this.engine.getActiveScenario();
+    const modes: SensorMode[] = scenario.availableSensors?.length
+      ? scenario.availableSensors
+      : ['RADAR', 'OPTICAL'];
+    const current = this.engine.getState().activeSensorMode;
+    const idx = modes.indexOf(current);
+    const nextMode = modes[(idx + 1) % modes.length];
+    this.applyAction({ type: 'SET_SENSOR', sensorMode: nextMode });
+    this.playCue('TOGGLE_SENSOR');
+    const state = this.engine.getState();
+
+    // Animate physical 3D aerospace switch stem & micro-LED on flight deck
+    this.syncSensorSwitchHardware(state.activeSensorMode);
+
+    if (state.scenarioId === 'STANDARD_INDUS_PASS') {
+      this.voiceCommander?.handleSectorSelection(state.selectedSectorId, state.activeSensorMode);
+    }
     this.syncAll();
   }
 
@@ -2114,21 +3704,25 @@ export class MissionControlSystem extends createSystem({
       this.scanBeamMode = mode;
       this.playCue(mode === 'OPTICAL' ? 'SCAN_OPTICAL' : 'SCAN_RADAR');
       this.audio.playSubBassPulse();
-      
+
       // Achievement triggers
       if (state.selectedSectorId === 'B' && mode === 'RADAR') {
         this.desktopControls?.triggerAchievement('⚡ CLOUD PIERCER', '5.4 GHz Microwave Backscatter Verified', '🔴');
       } else if (state.selectedSectorId === 'C' && mode === 'OPTICAL') {
         this.desktopControls?.triggerAchievement('🔭 SUB-METER LOCK', '0.75m GSD Zero Multipath Glare', '🟢');
+      } else if (mode === 'THERMAL') {
+        this.desktopControls?.triggerAchievement('🔥 PYROCLASTIC LOCK', 'MWIR/LWIR Thermal Radiometry Verified', '🟠');
       }
-      
+
       this.voiceCommander?.trigger('SCAN_ACQUIRED');
 
       // Immediately illuminate 3D observation swath cone
       const globe = this.world.getSceneObject('earth-globe');
       const swath = globe?.getObjectByName('OrbitalScanSwathCone');
       if (swath instanceof Mesh && swath.material instanceof MeshBasicMaterial) {
-        swath.material.color.setHex(mode === 'OPTICAL' ? 0x38bdf8 : 0xf59e0b);
+        swath.material.color.setHex(
+          mode === 'OPTICAL' ? 0x38bdf8 : mode === 'THERMAL' ? 0xff6b2b : 0xf59e0b,
+        );
         swath.material.opacity = 0.58;
         swath.visible = true;
       }
@@ -2145,7 +3739,7 @@ export class MissionControlSystem extends createSystem({
       this.cradlePulseTimer = 0.65;
       this.playCue('PROCESS_SUCCESS');
       this.audio.playCompressionChirp();
-      
+
       // Check if all packets fit now (Knapsack Optimizer achievement)
       const nextState = this.engine.getState();
       const queuedPackets = nextState.packets.filter((p) => nextState.queuePacketIds.includes(p.id));
@@ -2153,7 +3747,7 @@ export class MissionControlSystem extends createSystem({
       if (totalTx <= nextState.downlinkWindowSec && queuedPackets.length === 3) {
         this.desktopControls?.triggerAchievement('🧠 KNAPSACK OPTIMIZER', `13.0s → ${totalTx.toFixed(1)}s AI Feature Extraction`, '⚙️');
       }
-      
+
       this.voiceCommander?.trigger('PROCESS_SUCCESS');
     } else {
       this.playCue('ERROR_REJECT');
@@ -2222,6 +3816,7 @@ export class MissionControlSystem extends createSystem({
   private handleStartDownlink(): boolean {
     this.lastTransmittedCount = 0;
     this.downlinkUiSyncAccumulator = 0;
+    this.tutorial.notifyTransmitActivated(this.currentInputSource);
     const res = this.applyAction({ type: 'COMMIT' });
     if (res.ok) {
       this.forceReleaseAllGrabs();
@@ -2266,6 +3861,12 @@ export class MissionControlSystem extends createSystem({
     this.scanBeamPulseTimer = 0;
     this.cradlePulseTimer = 0;
     const globe = this.world.getSceneObject('earth-globe');
+    if (globe) {
+      this.targetFocalDistance = -0.48;
+      this.globeFocalDistance = -0.48;
+      globe.position.z = -0.48;
+      globe.updateMatrixWorld(true);
+    }
     const swath = globe?.getObjectByName('OrbitalScanSwathCone');
     if (swath) swath.visible = false;
     const downlinkLaserGroup = globe?.getObjectByName('DownlinkLaserBeamGroup');
@@ -2285,17 +3886,22 @@ export class MissionControlSystem extends createSystem({
     this.cubeTransitions.clear();
     this.solverSignature = '';
     this.engine.reset();
+    this.voiceCommander?.reset();
     this.playCue('MISSION_RESET');
-    this.voiceCommander?.trigger('PASS_START');
+    this.announceActiveScenarioPassStart();
     this.syncAll();
   }
 
   private applyAction(action: MissionAction): ActionResult {
     const result = this.engine.dispatch(action, this.missionElapsedTime);
-    return 'ok' in result ? result : {
+    const out: ActionResult = 'ok' in result ? result : {
       ok: result.lastActionOk, code: result.lastActionOk ? 'OK' : 'INVALID_PHASE',
       message: result.lastStatusMessage,
     };
+    if (out.ok && this.tutorial.getState().active) {
+      this.tutorial.syncWithMissionState(this.engine.getState(), action, this.currentInputSource);
+    }
+    return out;
   }
 
   private playCue(cue: OrbitalSoundCue): void {
@@ -2364,9 +3970,9 @@ export class MissionControlSystem extends createSystem({
       });
     }
     const scanner = this.world.getSceneObject('scanner-tool');
-    SCANNER_HOME_POSITION.x = preferences.dominantHand === 'LEFT' ? -0.65 : 0.65;
-    SCANNER_HOME_POSITION.y = 0.22;
-    SCANNER_HOME_POSITION.z = 0.15;
+    SCANNER_HOME_POSITION.x = preferences.dominantHand === 'LEFT' ? -0.44 : 0.44;
+    SCANNER_HOME_POSITION.y = 0.80;
+    SCANNER_HOME_POSITION.z = -0.30;
     const holster = this.world.getSceneObject('orbital-console')?.getObjectByName('ScannerHolster');
     if (holster) holster.position.x = SCANNER_HOME_POSITION.x;
     if (scanner && !this.isAnyObjectGrabbed()) scanner.position.copy(SCANNER_HOME_POSITION);
@@ -2375,6 +3981,7 @@ export class MissionControlSystem extends createSystem({
 
   public applyTabletopMode(): void {
     const isTabletop = this.profile.preferences.tabletopMode;
+    const isImmersive = Boolean(this.world.renderer?.xr?.isPresenting);
     const consoleObj = this.world.getSceneObject('orbital-console');
     if (consoleObj) {
       const cabinEnclosure = consoleObj.getObjectByName('CockpitEnclosureShell');
@@ -2388,6 +3995,10 @@ export class MissionControlSystem extends createSystem({
         this.briefingPanel.position.set(-0.92, 1.25, -1.36);
         this.briefingPanel.rotation.set(0, (32 * Math.PI) / 180, 0);
         this.briefingPanel.scale.setScalar(0.118);
+      } else if (isImmersive) {
+        this.briefingPanel.position.set(-0.88, 1.16, -0.98);
+        this.briefingPanel.rotation.set(0, (30 * Math.PI) / 180, 0);
+        this.briefingPanel.scale.setScalar(0.098);
       } else {
         this.briefingPanel.position.set(-0.74, 1.16, -1.04);
         this.briefingPanel.rotation.set(0, (26 * Math.PI) / 180, 0);
@@ -2399,6 +4010,10 @@ export class MissionControlSystem extends createSystem({
         this.telemetryPanel.position.set(0, 1.78, -1.48);
         this.telemetryPanel.rotation.set((14 * Math.PI) / 180, 0, 0);
         this.telemetryPanel.scale.setScalar(0.122);
+      } else if (isImmersive) {
+        this.telemetryPanel.position.set(0.88, 1.16, -0.98);
+        this.telemetryPanel.rotation.set(0, (-30 * Math.PI) / 180, 0);
+        this.telemetryPanel.scale.setScalar(0.098);
       } else {
         this.telemetryPanel.position.set(0, 1.67, -1.16);
         this.telemetryPanel.rotation.set((16 * Math.PI) / 180, 0, 0);
@@ -2410,6 +4025,10 @@ export class MissionControlSystem extends createSystem({
         this.debriefPanel.position.set(0.92, 1.25, -1.36);
         this.debriefPanel.rotation.set(0, (-32 * Math.PI) / 180, 0);
         this.debriefPanel.scale.setScalar(0.118);
+      } else if (isImmersive) {
+        this.debriefPanel.position.set(0.0, 1.18, -0.92);
+        this.debriefPanel.rotation.set((-4 * Math.PI) / 180, 0, 0);
+        this.debriefPanel.scale.setScalar(0.098);
       } else {
         this.debriefPanel.position.set(0.74, 1.16, -1.04);
         this.debriefPanel.rotation.set(0, (-26 * Math.PI) / 180, 0);
@@ -2426,7 +4045,7 @@ export class MissionControlSystem extends createSystem({
       CUBES: { pos: [-0.37, 0.98, -0.18], target: [-0.37, 0.79, -0.43], fov: 50 },
       CRADLE: { pos: [0.24, 0.96, -0.28], target: [0.24, 0.79, -0.55], fov: 50 },
       DOWNLINK: { pos: [0.39, 0.96, -0.22], target: [0.39, 0.79, -0.46], fov: 50 },
-      DEBRIEF: { pos: [0.35, 1.25, 0.15], target: [0.74, 1.16, -1.04], fov: 60 },
+      DEBRIEF: { pos: [0.0, 1.18, 0.22], target: [0.0, 1.18, -0.92], fov: 60 },
     };
     const cfg = presets[preset] ?? presets.HERO;
     this.camera.position.set(...cfg.pos);
@@ -2441,12 +4060,12 @@ export class MissionControlSystem extends createSystem({
   private cycleEvidence(): void {
     const state = this.engine.getState();
     if (!state.packets.length) return;
-    
+
     // Find the current position in the packets array
     const index = state.packets.findIndex((packet) => packet.id === state.selectedPacketId);
     // If not found (empty selection), start from 0; otherwise move to next
     const nextIndex = index < 0 ? 0 : (index + 1) % state.packets.length;
-    
+
     const nextPacket = state.packets[nextIndex];
     this.applyAction({ type: 'SELECT_PACKET', packetId: nextPacket.id });
     this.syncAll();
@@ -2454,9 +4073,24 @@ export class MissionControlSystem extends createSystem({
 
   private nextMission(): void {
     if (this.engine.getState().phase === 'DOWNLINK') return;
+    if (this.engine.getState().scenarioId === 'ORBITAL_ACADEMY' && this.tutorial.isActive()) {
+      this.tutorial.skip();
+    }
     this.forceReleaseAllGrabs();
     this.dailyDate = null;
     this.engine.cycleScenario();
+    this.handleRestartMission();
+  }
+
+  public cycleCampaignOperation(): void {
+    if (this.engine.getState().phase === 'DOWNLINK') return;
+    if (this.engine.getState().scenarioId === 'ORBITAL_ACADEMY' && this.tutorial.isActive()) {
+      this.tutorial.skip();
+    }
+    this.forceReleaseAllGrabs();
+    this.dailyDate = null;
+    this.engine.cycleCampaignOperation();
+    this.playCue('SCENARIO_CYCLE');
     this.handleRestartMission();
   }
 
@@ -2504,13 +4138,12 @@ export class MissionControlSystem extends createSystem({
       Lbl_Captions: `CAPTIONS: ${p.captions ? 'ON' : 'OFF'}`,
       Lbl_AudioLevel: `AUDIO: ${Math.round(p.audioLevel * 100)}%`,
       Lbl_GazeAssist: `HEAD POINT ASSIST: ${p.gazeAssist ? 'ON' : 'OFF'}`,
-      Lbl_TabletopMode: `MR TABLETOP: ${
-        p.tabletopMode
+      Lbl_TabletopMode: `MR TABLETOP: ${p.tabletopMode
           ? this.isArSupported
             ? 'ON (PASSTHROUGH)'
             : 'ON (CUPOLA VR)'
           : 'OFF'
-      }`,
+        }`,
     };
     for (const [id, text] of Object.entries(labels)) this.setText(this.telemetryPanel, id, text);
     this.setText(this.telemetryPanel, 'AudioCaption', p.captions ? this.caption || 'GROUND CONTROL: one pass, three requests, one final downlink.' : '');
@@ -2531,6 +4164,11 @@ export class MissionControlSystem extends createSystem({
       QUEUE: 'pad-queue-downlink',
       COMMIT_DOWNLINK: 'pad-commit-downlink',
       DISCARD: 'pad-discard-chute',
+      RECENTER: 'pad-recenter-desk',
+      MASTER_POWER: 'pad-master-power',
+      IGNITION: 'pad-master-power',
+      ARIA_DELEGATE: 'pad-aria-delegate',
+      DELEGATE: 'pad-aria-delegate',
     };
     const targetPadId = padMap[action];
     if (targetPadId) {
@@ -2562,7 +4200,57 @@ export class MissionControlSystem extends createSystem({
       case 'COMMIT_DOWNLINK':
         this.handleCommitDownlinkButton();
         break;
+      case 'RECENTER':
+        this.calibrateSeatedView();
+        break;
+      case 'MASTER_POWER':
+      case 'IGNITION':
+        this.handleMasterIgnition();
+        break;
+      case 'ARIA_DELEGATE':
+      case 'DELEGATE':
+        this.handleAriaDelegate();
+        break;
+      case 'PROCEDURAL_CRISIS':
+      case 'NEW_PROCEDURAL_PASS':
+        this.startProceduralPass();
+        break;
     }
+  }
+
+  public handleMasterIgnition(): void {
+    this.audio.playMechanicalSwitchClick(true);
+    this.playCue('SELECT_SECTOR');
+    this.voiceCommander?.trigger('PASS_START');
+    this.syncAll();
+  }
+
+  public handleAriaDelegate(): void {
+    const res = this.coPilot.executeActiveIntervention();
+    if (res.ok) {
+      this.playCue('PROCESS_SUCCESS');
+      this.syncAll();
+    } else {
+      this.playCue('ERROR_REJECT');
+    }
+  }
+
+  public startProceduralPass(seedInput?: string | number): void {
+    this.engine.startProceduralCrisis(seedInput ?? Date.now());
+    this.recordedDebrief = false;
+    this.earnedMedals = [];
+    this.replayIndex = -1;
+    this.lastTransmittedCount = 0;
+    this.audio.playRadioSquelchBurst();
+    const threat = this.engine.getActiveThreat();
+    if (threat) {
+      this.voiceCommander?.speakDirect(
+        `Emergency alert: ${threat.name} active. ${threat.description} Triage priority sectors immediately.`,
+        `[ARIA-7] ${threat.name}: ${threat.description}`,
+        'CRITICAL',
+      );
+    }
+    this.syncAll();
   }
 
   private handleTrigger3DNodeById(nodeId: string): boolean {
@@ -2591,6 +4279,7 @@ export class MissionControlSystem extends createSystem({
         const slotIndex = cubeEntity.getValue(EvidenceCubeNode, 'slotIndex') ?? 0;
         const pkt = this.engine.getState().packets[slotIndex];
         if (pkt) {
+          this.tutorial.notifyCubeGrabOrSelect(pkt.confidence !== 'UNVERIFIED');
           this.applyAction({ type: 'SELECT_PACKET', packetId: pkt.id });
           this.playCue('SELECT_SECTOR');
           this.syncAll();
@@ -2610,6 +4299,10 @@ export class MissionControlSystem extends createSystem({
       (e) => (e.getValue(EvidenceCubeNode, 'slotIndex') ?? -1) === slotIndex,
     );
     if (!cubeEntity?.object3D) return false;
+    const pkt = this.engine.getState().packets[slotIndex];
+    if (pkt) {
+      this.tutorial.notifyCubeGrabOrSelect(pkt.confidence !== 'UNVERIFIED');
+    }
 
     const targetPos =
       targetZone === 'PROCESS'
@@ -2726,11 +4419,13 @@ export class MissionControlSystem extends createSystem({
     }
     if (closestTarget === 'PROCESS') {
       this.playCue('CUBE_DOCK');
+      this.tutorial.notifyCradleRelease(this.currentInputSource);
       this.handleProcessSelected();
       return;
     }
     if (closestTarget === 'DOWNLINK') {
       this.playCue('CUBE_DOCK');
+      this.tutorial.notifyDownlinkBayRelease(this.currentInputSource);
       if (!pkt.queued) {
         const res = this.applyAction({ type: 'QUEUE', packetId: pkt.id, slotIndex: closestSlotIdx >= 0 ? closestSlotIdx : undefined });
         this.playCue(res.ok ? 'QUEUE_SLOT' : 'ERROR_REJECT');
@@ -2811,13 +4506,23 @@ export class MissionControlSystem extends createSystem({
     const state = this.engine.getState();
     const globe = this.world.getSceneObject('earth-globe');
 
+    // Single source of truth: engine's committed downlink time vs. the active window.
+    // Withdraw the one-shot QUEUE_OVERFLOW advisory as soon as it is no longer true.
+    if (state.downlinkCommittedSec <= state.downlinkWindowSec + 0.01) {
+      this.voiceCommander?.retract('QUEUE_OVERFLOW');
+    }
+
     // 1. Update 3D Sector Beacons & Surface-Conforming Spherical Sector Polygons on the Globe
     for (const sectorEntity of this.queries.sectors.entities) {
       const sectorId = (sectorEntity.getValue(OrbitSectorNode, 'sectorId') ||
         'B') as SectorId;
       const isSelected = sectorId === state.selectedSectorId;
       const isGazed = sectorId === this.gazeSectorId;
-      const sectorCfg = getScenarioSector(state.scenarioId, sectorId);
+      const sectorCfg = getScenarioSector(
+        state.scenarioId,
+        sectorId,
+        this.engine.getActiveScenario(),
+      );
       const obj = sectorEntity.object3D;
       if (!obj) continue;
 
@@ -2830,8 +4535,8 @@ export class MissionControlSystem extends createSystem({
       if (isScanned) {
         if (scannedPkt.confidence === 'CONFIRMED') {
           hex = scannedPkt.headline.toLowerCase().includes('inundation') ||
-                scannedPkt.headline.toLowerCase().includes('breach') ||
-                scannedPkt.headline.toLowerCase().includes('washed')
+            scannedPkt.headline.toLowerCase().includes('breach') ||
+            scannedPkt.headline.toLowerCase().includes('washed')
             ? 0x0284c7 // Deep sapphire for confirmed floodwater
             : 0x10b981; // Emerald for confirmed intact/clear crossing
         } else if (scannedPkt.confidence === 'PROBABLE') {
@@ -2844,7 +4549,7 @@ export class MissionControlSystem extends createSystem({
           ? 0x10b981
           : isGazed
             ? 0x67e8f9
-            : sectorCfg.cloudCover === 'DENSE_STORM'
+            : sectorCfg.cloudCover !== 'CLEAR'
               ? 0xf59e0b
               : 0x38bdf8;
       }
@@ -2871,7 +4576,7 @@ export class MissionControlSystem extends createSystem({
             ? 0.28
             : isScanned
               ? 0.22
-              : sectorCfg.cloudCover === 'DENSE_STORM'
+              : sectorCfg.cloudCover !== 'CLEAR'
                 ? 0.08
                 : 0.035;
         }
@@ -2880,15 +4585,17 @@ export class MissionControlSystem extends createSystem({
           stormCap instanceof Mesh &&
           stormCap.material instanceof MeshStandardMaterial
         ) {
-          stormCap.visible = sectorCfg.cloudCover === 'DENSE_STORM';
+          stormCap.visible = sectorCfg.cloudCover !== 'CLEAR';
           if (isScanned) {
-            if (scannedPkt.sensorMode === 'RADAR') {
-              // Microwave radar penetrated the storm wall: cloud becomes semi-transparent
+            if (scannedPkt.sensorMode === 'RADAR' || scannedPkt.sensorMode === 'THERMAL') {
+              // Microwave radar or MWIR/LWIR thermal penetrated the obscuration layer
               stormCap.material.opacity = 0.24;
-              stormCap.material.emissive.setHex(0x38bdf8);
+              stormCap.material.emissive.setHex(
+                scannedPkt.sensorMode === 'THERMAL' ? 0xff6b2b : 0x38bdf8,
+              );
               stormCap.material.emissiveIntensity = 0.55;
             } else {
-              // Optical failed against cloud deck: high-albedo cloud reflection glare
+              // Optical failed against cloud/smoke deck: high-albedo reflection glare
               stormCap.material.opacity = 0.92;
               stormCap.material.color.setHex(0xe2e8f0);
               stormCap.material.emissive.setHex(0xef4444);
@@ -2906,7 +4613,12 @@ export class MissionControlSystem extends createSystem({
     // 2. Update Scanner Tool & 3U CubeSat payload aperture colors for active sensor mode
     const scannerObj = this.world.getSceneObject('scanner-tool');
     if (scannerObj) {
-      const sensorHex = state.activeSensorMode === 'OPTICAL' ? 0x38bdf8 : 0xf59e0b;
+      const sensorHex =
+        state.activeSensorMode === 'OPTICAL'
+          ? 0x38bdf8
+          : state.activeSensorMode === 'THERMAL'
+            ? 0xff6b2b
+            : 0xf59e0b;
       this.setObjectTint(scannerObj, sensorHex, 0.95);
     }
 
@@ -3001,9 +4713,13 @@ export class MissionControlSystem extends createSystem({
     // 4. Update the 3 Spatial UIKitML Panels
     if (state.debrief && !this.recordedDebrief) {
       this.recordedDebrief = true;
-      this.earnedMedals = recordMissionMastery(this.profile, state.scenarioId, state.debrief);
-      if (this.dailyDate) recordDailyPass(this.profile, this.dailyDate, state.debrief.totalScore);
-      saveMissionProfile(this.profile);
+      if (state.scenarioId !== 'ORBITAL_ACADEMY') {
+        this.earnedMedals = recordMissionMastery(this.profile, state.scenarioId, state.debrief);
+        if (this.dailyDate) recordDailyPass(this.profile, this.dailyDate, state.debrief.totalScore);
+        saveMissionProfile(this.profile);
+      } else {
+        this.earnedMedals = ['ORBITAL WORKSTATION QUALIFIED'];
+      }
     }
     this.syncBriefingPanel();
     this.syncTelemetryPanel();
@@ -3020,7 +4736,7 @@ export class MissionControlSystem extends createSystem({
       transition.remaining = Math.max(0, transition.remaining - delta);
       const entity = [...this.queries.cubes.entities].find((cube) => cube.getValue(EvidenceCubeNode, 'packetId') === packetId);
       const object = entity?.object3D;
-      if (!object || entity?.hasComponent(Grabbed)) {
+      if (!object || entity?.hasComponent(Grabbed) || this.isCubeGrabbedByXRHand(entity)) {
         this.cubeTransitions.delete(packetId);
         continue;
       }
@@ -3072,7 +4788,16 @@ export class MissionControlSystem extends createSystem({
       const obj = cubeEntity.object3D;
       if (!obj) continue;
 
-      const isCurrentlyGrabbed = cubeEntity.hasComponent(Grabbed);
+      if (
+        (this.isLiveXRHandActive() || this.world.renderer?.xr?.isPresenting) &&
+        cubeEntity.hasComponent(Grabbed) &&
+        !this.isCubeGrabbedByXRHand(cubeEntity)
+      ) {
+        this.world.getSystem(GrabSystem)?.forceRelease(cubeEntity);
+      }
+      const isCurrentlyGrabbed = this.isLiveXRHandActive()
+        ? this.isCubeGrabbedByXRHand(cubeEntity)
+        : cubeEntity.hasComponent(Grabbed) || this.isCubeGrabbedByXRHand(cubeEntity);
 
       if (!pkt) {
         cubeEntity.setValue(EvidenceCubeNode, 'packetId', '');
@@ -3080,6 +4805,7 @@ export class MissionControlSystem extends createSystem({
           const home = RAW_TRAY_POSITIONS[slotIndex] ?? RAW_TRAY_POSITIONS[0];
           obj.position.set(home[0], home[1], home[2]);
           obj.rotation.set(0, 0, 0);
+          obj.updateMatrixWorld(true);
         }
         // Keep standby holocubes full-sized and visibly luminous on the tray
         obj.scale.set(0.92, 0.92, 0.92);
@@ -3112,11 +4838,18 @@ export class MissionControlSystem extends createSystem({
           const bayPos =
             DOWNLINK_BAY_POSITIONS[pkt.queueIndex] ?? DOWNLINK_BAY_POSITIONS[0];
           obj.position.set(bayPos[0], bayPos[1], bayPos[2]);
+        } else if (
+          this.cubeTransitions.get(pkt.id)?.kind === 'PROCESS' &&
+          !this.profile.preferences.reducedMotion
+        ) {
+          obj.position.copy(PROCESS_CRADLE_WORLD);
+          obj.position.y += 0.02;
         } else {
           const trayPos = RAW_TRAY_POSITIONS[slotIndex] ?? RAW_TRAY_POSITIONS[0];
           obj.position.set(trayPos[0], trayPos[1], trayPos[2]);
         }
         obj.rotation.set(0, 0, 0);
+        obj.updateMatrixWorld(true);
       }
 
       // Update sector-specific 3D internal physical features (Phase 4 Living Micro-Holograms)
@@ -3384,7 +5117,11 @@ export class MissionControlSystem extends createSystem({
         ctx.fillStyle = '#38bdf8';
         ctx.font = 'bold 16px monospace';
         ctx.fillText(
-          pkt.sensorMode === 'RADAR' ? 'SAR BACKSCATTER' : 'OPTICAL SWATH',
+          pkt.sensorMode === 'RADAR'
+            ? 'SAR BACKSCATTER'
+            : pkt.sensorMode === 'THERMAL'
+              ? 'THERMAL IR SWATH'
+              : 'OPTICAL SWATH',
           36,
           130,
         );
@@ -3407,13 +5144,17 @@ export class MissionControlSystem extends createSystem({
       ctx.fillText(snrText, 274, 178);
 
       const compLabel =
-        pkt.compressionAlgorithm === 'OPTICAL_ROAD_EDGE_ENCODING'
-          ? 'EDGE'
-          : pkt.compressionAlgorithm === 'SAR_AMBIGUITY_METADATA_ENCODING'
-            ? 'AMBIG'
-            : pkt.sensorMode === 'RADAR'
-              ? 'SAR-ENC'
-              : 'OPT-ENC';
+        pkt.compressionAlgorithm === 'INTERFEROMETRIC_CHANGE_DETECTION'
+          ? 'CHANGE-DET'
+          : pkt.compressionAlgorithm === 'THERMAL_RADIOMETRIC_ENCODING'
+            ? 'THERM-ENC'
+            : pkt.compressionAlgorithm === 'OPTICAL_ROAD_EDGE_ENCODING'
+              ? 'EDGE'
+              : pkt.compressionAlgorithm === 'SAR_AMBIGUITY_METADATA_ENCODING'
+                ? 'AMBIG'
+                : pkt.sensorMode === 'RADAR'
+                  ? 'SAR-ENC'
+                  : 'OPT-ENC';
       const procStr = pkt.processed
         ? `1 STR (${compLabel})`
         : '3 STR (RAW)';
@@ -3424,9 +5165,9 @@ export class MissionControlSystem extends createSystem({
       const queueState = pkt.transmitted
         ? 'TX COMPLETE'
         : pkt.droppedByWindow ? 'SIGNAL LOST'
-        : pkt.queued
-          ? `QUEUED (#${(pkt.queueIndex ?? 0) + 1})`
-          : 'BUFFERED';
+          : pkt.queued
+            ? `QUEUED (#${(pkt.queueIndex ?? 0) + 1})`
+            : 'BUFFERED';
       ctx.fillStyle = pkt.transmitted ? '#38bdf8' : pkt.queued ? '#10b981' : '#e2e8f0';
       ctx.font = 'bold 18px monospace';
       ctx.fillText(`STATE: ${queueState}`, 274, 250);
@@ -3472,43 +5213,61 @@ export class MissionControlSystem extends createSystem({
   private syncBriefingPanel(): void {
     if (!this.briefingPanel) return;
     const state = this.engine.getState();
-    const scenario = MISSION_SCENARIOS[state.scenarioId] ?? MISSION_SCENARIOS.STANDARD_INDUS_PASS;
-    const sector = getScenarioSector(state.scenarioId, state.selectedSectorId);
+    const scenario = this.engine.getActiveScenario();
+    const threat = this.engine.getActiveThreat();
+    const sector = getScenarioSector(state.scenarioId, state.selectedSectorId, scenario);
     const scanCost =
       state.activeSensorMode === 'OPTICAL'
         ? scenario.budget.opticalScan
-        : scenario.budget.radarScan;
+        : state.activeSensorMode === 'THERMAL'
+          ? (scenario.budget.thermalScan ?? MISSION_BUDGET.thermalScan ?? { powerCost: 11, storageCost: 3, transmitSec: 4.2 })
+          : scenario.budget.radarScan;
 
+    const threatBadge = threat ? `[ALERT: ${threat.name} (SEV ${threat.severity}/5)] ` : '';
+    const opLabel = scenario.operationCode ? `${scenario.operationCode} — ${scenario.name.toUpperCase()}` : scenario.name.toUpperCase();
     this.setText(
       this.briefingPanel,
       'BriefingSubtitle',
-      `${scenario.name.toUpperCase()} | ${state.downlinkWindowSec.toFixed(1)}s WINDOW | ${state.maxPower} PWR`,
+      `${threatBadge}${opLabel} | ${state.downlinkWindowSec.toFixed(1)}s @ 10 MB/s | ${state.maxPower} Wh`,
     );
 
+    const payloadMb = scanCost.payloadMb ?? Number((scanCost.transmitSec * 10).toFixed(0));
     this.setText(
       this.briefingPanel,
       'SelectedSectorTitle',
-      `TARGET: ${sector.code} ${sector.name} (${sector.cloudCover === 'DENSE_STORM' ? 'STORM CLOUDS' : 'CLEAR SKY'})`,
+      `TARGET: ${sector.code} ${sector.name} (${sector.cloudCover !== 'CLEAR' ? sector.cloudCover.replace(/_/g, ' ') : 'CLEAR SKY'})`,
     );
     this.setText(
       this.briefingPanel,
       'SelectedSectorDesc',
-      `Sensor: ${state.activeSensorMode} (${scanCost.powerCost} PWR, ${scanCost.storageCost} STR, ${scanCost.transmitSec.toFixed(1)}s Tx) | ${sector.terrainSummary}`,
+      `Sensor: ${state.activeSensorMode} (${scanCost.powerCost} Wh, ${scanCost.storageCost} STR, ${payloadMb} MB / ${scanCost.transmitSec.toFixed(1)}s Tx) | ${sector.terrainSummary}`,
     );
+    const availableModes = (scenario.availableSensors ?? ['RADAR', 'OPTICAL']).join(' / ');
     this.setText(
       this.briefingPanel,
       'Lbl_ToggleSensor',
-      `Active Sensor: ${state.activeSensorMode} (Click to Switch OPTICAL / RADAR)`,
+      `Active Sensor: ${state.activeSensorMode} (Switch ${availableModes})`,
     );
     this.setText(
       this.briefingPanel,
       'Lbl_ScanSector',
-      `SCAN ${sector.code} WITH ${state.activeSensorMode} (-${scanCost.powerCost} PWR)`,
+      `SCAN ${sector.code} WITH ${state.activeSensorMode} (-${scanCost.powerCost} Wh)`,
+    );
+    this.setText(
+      this.briefingPanel,
+      'Lbl_SelectCampaign',
+      `SWITCH OP (${scenario.operationCode ?? 'CAMPAIGN'})`,
+    );
+    this.setText(
+      this.briefingPanel,
+      'Lbl_StartTutorial',
+      this.tutorial.isActive() ? 'SKIP ACADEMY' : 'ORBITAL ACADEMY',
     );
 
+    const requests = getScenarioRequests(state.scenarioId, scenario);
     for (let i = 0; i < GROUND_REQUEST_ORDER.length; i++) {
       const reqId = GROUND_REQUEST_ORDER[i];
-      const req = GROUND_REQUESTS[reqId];
+      const req = requests[reqId];
       const matchingPkt = state.packets.find(
         (p) => p.satisfiesRequestId === reqId && p.confidence !== 'UNVERIFIED',
       );
@@ -3582,10 +5341,11 @@ export class MissionControlSystem extends createSystem({
           titleId,
           `REQ ${i + 1}: ${req.shortLabel} [AWAITING SCAN]`,
         );
+        const reqSector = getScenarioSector(state.scenarioId, req.targetSectorId, scenario);
         this.setText(
           this.briefingPanel,
           statusId,
-          `[?] Best sensor: ${getRecommendedSensor(state.scenarioId, req.targetSectorId)} on SEC-${req.targetSectorId} | ${getScenarioSector(state.scenarioId, req.targetSectorId).cloudCover === 'DENSE_STORM' ? 'storm obscuration' : 'clear sky'} | target ${req.requiredBadge}`,
+          `[?] Best sensor: ${getRecommendedSensor(state.scenarioId, req.targetSectorId, scenario)} on SEC-${req.targetSectorId} | ${reqSector.cloudCover !== 'CLEAR' ? reqSector.cloudCover.toLowerCase().replace(/_/g, ' ') : 'clear sky'} | target ${req.requiredBadge}`,
         );
         this.setBg(this.briefingPanel, cardId, '#152238');
       }
@@ -3593,34 +5353,61 @@ export class MissionControlSystem extends createSystem({
   }
 
   private getNextTacticalHint(state: MissionState): string {
+    if (this.tutorial.isActive()) {
+      const step = this.tutorial.getCurrentStepSpec();
+      if (step) {
+        return `[ORBITAL ACADEMY ${step.index}/9] ${step.vrInstruction}`;
+      }
+    }
     if (state.paused) return 'PAUSED: pass clock held. Use RESUME when ready.';
-    if (state.phase === 'DEBRIEF') return 'PASS COMPLETE: review one decision, earn mastery, or launch the next orbital pass.';
-    if (state.phase === 'DOWNLINK') return `TRANSMITTING: ${state.downlinkRemainingSec.toFixed(1)}s left. Evidence is locked until ground acknowledgement.`;
+    if (state.phase === 'DEBRIEF') return 'PASS COMPLETE: review mission decisions or launch next operation.';
+    if (state.phase === 'DOWNLINK') return `TRANSMITTING: ${state.downlinkRemainingSec.toFixed(1)}s left (@ 10.0 MB/s). Evidence streaming to ground.`;
     const solution = this.getSolution(state);
     const benchmark = getMissionBenchmark(state.scenarioId);
-    if (this.profile.preferences.guidance === 'EXPERT') return `EXPERT MODE | ${state.packets.length}/3 CUBES | ${state.downlinkCommittedSec.toFixed(1)}s QUEUE | OBJECTIVE ${benchmark.score}/100`;
-    if (this.profile.preferences.guidance === 'STANDARD') return `OBJECTIVE ${benchmark.score}/100 | REACHABLE ${solution.score}/100 | observe -> compress -> prioritize -> transmit`;
+    if (this.profile.preferences.guidance === 'EXPERT') return `EXPERT MODE | ${state.packets.length}/3 CUBES | ${state.downlinkCommittedSec.toFixed(1)}s QUEUE | TARGET ${benchmark.score}/100`;
+    if (this.profile.preferences.guidance === 'STANDARD') return `TARGET ${benchmark.score}/100 | REACHABLE ${solution.score}/100 | observe -> compress -> queue -> transmit`;
     const next = getNextPlanAction(state, solution);
     if (!next) return state.queuePacketIds.length
-      ? `READY: ${state.downlinkCommittedSec.toFixed(1)}s / ${state.downlinkWindowSec.toFixed(1)}s. Press COMMIT to begin the live downlink.`
-      : 'No useful evidence remains reachable with this power reserve. Restart to try a different observation plan.';
-    const ceiling = solution.score < benchmark.score ? `REACHABLE ${solution.score}/${benchmark.score}. ` : '';
+      ? `> DIRECTIVE: ${state.downlinkCommittedSec.toFixed(1)}s queued. Pull green Lever to commit downlink pass!`
+      : '> DIRECTIVE: No useful evidence reachable with remaining power. Restart pass to try a different strategy.';
+    const ceiling = solution.score < benchmark.score ? `[REACHABLE ${solution.score}/${benchmark.score}] ` : '';
     if (next.type === 'SCAN') {
-      if (state.selectedSectorId !== next.sectorId) return `${ceiling}NEXT: select SEC-${next.sectorId} on the globe or cycle the target.`;
-      if (state.activeSensorMode !== next.sensorMode) return `${ceiling}NEXT: switch to ${next.sensorMode} for SEC-${next.sectorId}.`;
-      return `${ceiling}NEXT: scan SEC-${next.sectorId} using ${next.sensorMode}.`;
+      if (state.selectedSectorId !== next.sectorId) return `${ceiling}> STEP 1: Point at highlighted Sector ${next.sectorId} on the globe & pinch to acquire.`;
+      if (state.activeSensorMode !== next.sensorMode) return `${ceiling}> STEP 2: Press console switch to arm ${next.sensorMode} sensor.`;
+      return `${ceiling}> STEP 3: Press red Swath Plunger to capture ${next.sensorMode} evidence.`;
     }
     const packet = state.packets.find((p) => p.id === next.packetId);
-    if (packet && state.selectedPacketId !== packet.id) return `${ceiling}NEXT: select ${packet.id} (SEC-${packet.sectorId}) using the cube or SELECT NEXT EVIDENCE.`;
-    if (next.type === 'PROCESS') return `${ceiling}NEXT: compress SEC-${next.sectorId} in the amber cradle before the next observation.`;
-    if (next.type === 'DISCARD') return `${ceiling}NEXT: discard unnecessary SEC-${next.sectorId} evidence to free a physical cube.`;
-    if (next.type === 'UNQUEUE') return `${ceiling}NEXT: remove SEC-${next.sectorId} from the bay so the strongest evidence fits.`;
-    return `${ceiling}NEXT: place SEC-${next.sectorId} in the downlink bay.`;
+    if (packet && state.selectedPacketId !== packet.id) return `${ceiling}> STEP 4: Grab or select Evidence Cube ${packet.id} (SEC-${packet.sectorId}).`;
+    if (next.type === 'PROCESS') return `${ceiling}> STEP 4: Drop cube into the Amber Cradle to compress payload (-6 Wh).`;
+    if (next.type === 'DISCARD') return `${ceiling}> DIRECTIVE: Drop unnecessary SEC-${next.sectorId} cube into discard chute.`;
+    if (next.type === 'UNQUEUE') return `${ceiling}> DIRECTIVE: Remove SEC-${next.sectorId} from the bay to fit higher-value evidence.`;
+    return `${ceiling}> STEP 5: Place compressed cube into Downlink Bay slot.`;
   }
 
   private syncTelemetryPanel(): void {
     if (!this.telemetryPanel) return;
     const state = this.engine.getState();
+
+    const scenario = this.engine.getActiveScenario();
+    const tutStep = this.tutorial.getCurrentStepSpec();
+    this.setText(
+      this.telemetryPanel,
+      'OperationTitleText',
+      tutStep
+        ? `ORBIT ZERO // OP 00: ORBITAL ACADEMY (STEP ${tutStep.index}/9)`
+        : `ORBIT ZERO // ${scenario?.operationCode ?? ''} ${scenario?.name.toUpperCase() ?? 'TACTICAL PASS'}`,
+    );
+    this.setText(
+      this.telemetryPanel,
+      'OperationPhaseBadge',
+      state.phase === 'DOWNLINK'
+        ? 'PHASE: DOWNLINK PASS'
+        : state.phase === 'DEBRIEF'
+          ? 'PHASE: MISSION DEBRIEF'
+          : tutStep
+            ? 'MODE: GESTURE TRAINING'
+            : 'PHASE: RECON & PROCESSING',
+    );
 
     const pwrRatio = Math.max(0, Math.min(1, state.power / state.maxPower));
     const pwrFilled = Math.round(pwrRatio * 10);
@@ -3632,7 +5419,7 @@ export class MissionControlSystem extends createSystem({
     this.setText(
       this.telemetryPanel,
       'ResourceReadout',
-      `PWR: ${pwrBar} ${state.power}/${state.maxPower} PWR  |  STR: ${strBar} ${state.storageUsed}/${state.maxStorage} STR`,
+      `POWER: ${pwrBar} ${state.power}/${state.maxPower} Wh  |  STORAGE: ${strBar} ${state.storageUsed}/${state.maxStorage} STR (18 MB/UNIT)`,
     );
 
     const winRatio = Math.max(
@@ -3656,13 +5443,13 @@ export class MissionControlSystem extends createSystem({
       );
       const remFilled = Math.round(remRatio * 10);
       const remBar = `[${'#'.repeat(remFilled)}${'-'.repeat(10 - remFilled)}]`;
-      windowText = `TX STREAM: ${remBar} ${state.downlinkRemainingSec.toFixed(1)}s REMAINING  |  PHASE: DOWNLINK`;
+      windowText = `TX STREAM (10 MB/s): ${remBar} ${state.downlinkRemainingSec.toFixed(1)}s REMAINING  |  PHASE: DOWNLINK`;
     } else if (state.phase === 'DEBRIEF') {
-      windowText = `WINDOW CLOSED: ${state.debrief?.downlinkUsedSec.toFixed(1)}s USED / ${state.downlinkWindowSec.toFixed(1)}s | ${state.debrief?.transmittedPacketIds.length ?? 0} PACKETS DELIVERED`;
+      windowText = `WINDOW CLOSED: ${state.debrief?.downlinkUsedSec.toFixed(1)}s USED / ${state.downlinkWindowSec.toFixed(1)}s | ${state.debrief?.transmittedPacketIds.length ?? 0} PACKETS (${state.debrief?.transmittedPayloadMb ?? 0} MB @ 10 MB/s)`;
     } else if (windowOverflow) {
-      windowText = `WINDOW: ${winBar} ${state.downlinkCommittedSec.toFixed(1)}s / ${state.downlinkWindowSec.toFixed(1)}s [OVERFLOW +${(state.downlinkCommittedSec - state.downlinkWindowSec).toFixed(1)}s!]`;
+      windowText = `WINDOW (10 MB/s): ${winBar} ${state.downlinkCommittedSec.toFixed(1)}s / ${state.downlinkWindowSec.toFixed(1)}s [OVERFLOW +${(state.downlinkCommittedSec - state.downlinkWindowSec).toFixed(1)}s!]`;
     } else {
-      windowText = `WINDOW: ${winBar} ${state.downlinkCommittedSec.toFixed(1)}s / ${state.downlinkWindowSec.toFixed(1)}s [MARGIN: ${marginSec.toFixed(1)}s]`;
+      windowText = `WINDOW (10 MB/s): ${winBar} ${state.downlinkCommittedSec.toFixed(1)}s / ${state.downlinkWindowSec.toFixed(1)}s [MARGIN: ${marginSec.toFixed(1)}s]`;
     }
 
     this.setText(this.telemetryPanel, 'WindowReadout', windowText);
@@ -3708,13 +5495,13 @@ export class MissionControlSystem extends createSystem({
       this.setText(
         this.telemetryPanel,
         'InspectorScience',
-        'Onboard Processing (6 PWR) compresses CONFIRMED or PROBABLE cubes from 3 STR -> 1 STR and 4.5s -> 1.8s Tx.',
+        'Onboard Processing (6 Wh) compresses CONFIRMED or PROBABLE cubes from 3 STR (40-45 MB) -> 1 STR (18 MB / 1.8s @ 10 MB/s).',
       );
       this.setBg(this.telemetryPanel, 'CubeInspectorCard', '#152238');
       this.setText(
         this.telemetryPanel,
         'Lbl_ProcessCube',
-        'PROCESS SELECTED CUBE (6 PWR -> 1 STR / 1.8s Tx)',
+        'PROCESS SELECTED CUBE (-6 Wh -> 1 STR / 18 MB / 1.8s Tx)',
       );
       this.setText(
         this.telemetryPanel,
@@ -3723,6 +5510,8 @@ export class MissionControlSystem extends createSystem({
       );
     } else {
       const procTag = selectedPkt.processed ? 'PROCESSED' : 'RAW';
+      const mb = selectedPkt.payloadMb ?? Number((selectedPkt.transmitSec * 10).toFixed(0));
+      const confPct = selectedPkt.observationConfidencePct ?? (selectedPkt.confidence === 'CONFIRMED' ? 94 : selectedPkt.confidence === 'PROBABLE' ? 68 : 12);
       this.setText(
         this.telemetryPanel,
         'InspectorTitle',
@@ -3731,12 +5520,12 @@ export class MissionControlSystem extends createSystem({
       this.setText(
         this.telemetryPanel,
         'InspectorConfidence',
-        `${selectedPkt.confidenceBadge} | ${selectedPkt.storageCost} STR | ${selectedPkt.transmitSec.toFixed(1)}s Tx | ${selectedPkt.headline}`,
+        `${selectedPkt.confidenceBadge} (${confPct}% SIM. OBS. CONF.) | ${selectedPkt.storageCost} STR (${mb} MB / ${selectedPkt.transmitSec.toFixed(1)}s @ 10 MB/s) | ${selectedPkt.headline}`,
       );
       this.setText(
         this.telemetryPanel,
         'InspectorScience',
-        selectedPkt.scientificReason,
+        `${selectedPkt.scientificReason} ${selectedPkt.scientificCaveat ?? ''}`.trim(),
       );
 
       const cardColor =
@@ -3751,10 +5540,10 @@ export class MissionControlSystem extends createSystem({
         this.telemetryPanel,
         'Lbl_ProcessCube',
         selectedPkt.processed
-          ? `${selectedPkt.id} ALREADY PROCESSED (1 STR / 1.8s Tx)`
+          ? `${selectedPkt.id} ALREADY PROCESSED (1 STR / 18 MB / 1.8s Tx)`
           : selectedPkt.confidence === 'UNVERIFIED'
             ? `CANNOT PROCESS [X] UNVERIFIED CUBE (DISCARD INSTEAD)`
-            : `PROCESS ${selectedPkt.id} (-6 PWR -> 1 STR / 1.8s Tx)`,
+            : `PROCESS ${selectedPkt.id} (-6 Wh -> 1 STR / 18 MB / 1.8s Tx)`,
       );
 
       this.setText(
@@ -3762,7 +5551,7 @@ export class MissionControlSystem extends createSystem({
         'Lbl_QueueCube',
         selectedPkt.queued
           ? `REMOVE ${selectedPkt.id} FROM DOWNLINK SLOT #${(selectedPkt.queueIndex ?? 0) + 1}`
-          : `QUEUE ${selectedPkt.id} IN DOWNLINK BAY (${selectedPkt.transmitSec.toFixed(1)}s Tx)`,
+          : `QUEUE ${selectedPkt.id} IN DOWNLINK BAY (${mb} MB / ${selectedPkt.transmitSec.toFixed(1)}s Tx)`,
       );
     }
   }
@@ -3844,42 +5633,56 @@ export class MissionControlSystem extends createSystem({
       );
       this.setBg(this.debriefPanel, 'DebriefBannerCard', '#132036');
 
+      const requests = getScenarioRequests(state.scenarioId, this.engine.getActiveScenario());
       this.setText(
         this.debriefPanel,
         'OutcomeReq1',
-        'REQ 1 (SEC-B Road Inundation): AWAITING DOWNLINK',
+        `${requests.REQ_1.shortLabel}: AWAITING DOWNLINK`,
       );
       this.setText(
         this.debriefPanel,
         'OutcomeReq2',
-        'REQ 2 (SEC-C Crossing Approach): AWAITING DOWNLINK',
+        `${requests.REQ_2.shortLabel}: AWAITING DOWNLINK`,
       );
       this.setText(
         this.debriefPanel,
         'OutcomeReq3',
-        'REQ 3 (SEC-E Shelter Spur): AWAITING DOWNLINK',
+        `${requests.REQ_3.shortLabel}: AWAITING DOWNLINK`,
       );
       this.setText(
         this.debriefPanel,
         'DebriefAdviceText',
-        MISSION_SCENARIOS[state.scenarioId].briefing,
+        this.engine.getActiveScenario().briefing,
       );
     } else {
       const d = state.debrief;
+      const isAcademyPass =
+        state.scenarioId === 'ORBITAL_ACADEMY' && d.outcome === 'SUCCESS';
+      const outcomeLabel = isAcademyPass
+        ? 'TRAINING COMPLETE'
+        : d.outcome === 'SUCCESS'
+          ? 'MISSION SUCCESS'
+          : d.outcome === 'PARTIAL_SUCCESS'
+            ? 'PARTIAL SUCCESS'
+            : 'MISSION FAILURE';
       this.setText(
         this.debriefPanel,
         'DebriefRankTitle',
-        `DEBRIEF: ${d.missionRank} [GRADE ${d.efficiencyGrade}] (${d.totalScore}/${d.maxScore} PTS)`,
+        isAcademyPass
+          ? `${outcomeLabel}: ${d.missionRank} (${d.totalScore}/${d.maxScore} PTS)`
+          : `${outcomeLabel}: ${d.missionRank} [GRADE ${d.efficiencyGrade} / ${d.certification}] (${d.totalScore}/${d.maxScore} PTS)`,
       );
       this.setText(
         this.debriefPanel,
         'DebriefScoreSubtitle',
-        `${d.requestsVerifiedCount}/3 Verified | Window: ${d.downlinkUsedSec.toFixed(1)}s/${d.downlinkWindowSec.toFixed(1)}s | Margin: ${Math.max(0, d.downlinkWindowSec - d.downlinkUsedSec).toFixed(1)}s | ${d.powerRemaining} PWR Left`,
+        isAcademyPass
+          ? `1/1 Training Target Verified | ${d.transmittedPayloadMb ?? 0} MB (${d.downlinkUsedSec.toFixed(1)}s/${d.downlinkWindowSec.toFixed(1)}s @ 10 MB/s) | ${d.powerRemaining} Wh Left | Ready for OP 01: FIRELINE`
+          : `${d.requestsVerifiedCount}/3 Verified | ${d.transmittedPayloadMb ?? 0} MB (${d.downlinkUsedSec.toFixed(1)}s/${d.downlinkWindowSec.toFixed(1)}s @ 10 MB/s) | ${d.powerRemaining} Wh Left`,
       );
       const bannerColor =
-        d.totalScore >= d.achievableScore
+        d.outcome === 'SUCCESS'
           ? '#047857'
-          : d.missionRank === 'PARTIAL DOWNLINK'
+          : d.outcome === 'PARTIAL_SUCCESS'
             ? '#78350f'
             : '#7f1d1d';
       this.setBg(this.debriefPanel, 'DebriefBannerCard', bannerColor);
@@ -3892,10 +5695,14 @@ export class MissionControlSystem extends createSystem({
           `${ev.shortLabel}: ${ev.statusBadge} - ${ev.groundConsequence}`,
         );
       }
+      const diagPrefix =
+        d.outcome !== 'SUCCESS' && d.failureExplanation
+          ? `[DIAGNOSTIC: ${d.failureReasonCode ?? 'TRIAGE_GAP'}] ${d.failureExplanation} | `
+          : '';
       this.setText(
         this.debriefPanel,
         'DebriefAdviceText',
-        `${d.deterministicRecommendation} | ${d.counterfactualComparison}`,
+        `${diagPrefix}${d.deterministicRecommendation} | ${d.counterfactualComparison}`,
       );
     }
   }
