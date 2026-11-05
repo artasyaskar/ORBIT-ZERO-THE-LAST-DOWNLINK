@@ -77,6 +77,22 @@ describe('Phase 3: Diegetic Desk Physical Controls & Arc Gauges', () => {
       expect(gauges.userData.materials.cyan).toBeDefined();
       expect(gauges.userData.materials.amber).toBeDefined();
       expect(gauges.userData.materials.red).toBeDefined();
+
+      // Stage 3: Diegetic Physical Recenter Button, Master Ignition Switch & ARIA Delegation Beacon
+      const recenterBtn = gauges.getObjectByName('RecenterDeskButton');
+      expect(recenterBtn).toBeDefined();
+      const recenterCap = recenterBtn?.getObjectByName('PadIlluminatedCap');
+      expect(recenterCap).toBeDefined();
+
+      const ignitionSwitch = gauges.getObjectByName('MasterIgnitionSwitch');
+      expect(ignitionSwitch).toBeDefined();
+      const ignitionCap = ignitionSwitch?.getObjectByName('MasterIgnitionCap');
+      expect(ignitionCap).toBeDefined();
+
+      const ariaBeacon = gauges.getObjectByName('AriaDelegationBeacon');
+      expect(ariaBeacon).toBeDefined();
+      const ariaBeaconCap = ariaBeacon?.getObjectByName('AriaBeaconCap');
+      expect(ariaBeaconCap).toBeDefined();
     });
   });
 

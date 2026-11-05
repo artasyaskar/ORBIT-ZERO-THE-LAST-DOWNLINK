@@ -134,7 +134,7 @@ describe('Desktop Controls & First-Time Player Experience', () => {
         engine.cycleScenario();
       }),
       togglePause: vi.fn(() => {
-        engine.togglePause();
+        engine.dispatch({ type: engine.getState().paused ? 'RESUME' : 'PAUSE' });
       }),
       reorderQueue: vi.fn(() => {}),
       playCue: vi.fn(() => {}),
