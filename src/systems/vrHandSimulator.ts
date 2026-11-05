@@ -57,6 +57,8 @@ export class VRHandSimulator {
   private isPoking = false;
   private pinchProgress = 0;
   private pokeProgress = 0;
+  private demoTargetPos: Vector3 | null = null;
+  private demoTimer = 0;
 
   private rightIndexTip: Object3D | null = null;
   private rightThumbTip: Object3D | null = null;
@@ -121,6 +123,10 @@ export class VRHandSimulator {
     this.isPoking = poking;
   }
 
+  public setDemoTarget(target: Vector3 | null): void {
+    this.demoTargetPos = target;
+  }
+
   private setVisible(visible: boolean): void {
     this.root.visible = visible;
   }
@@ -149,6 +155,19 @@ export class VRHandSimulator {
 
       // Pitch slightly downward toward console surface
       this.rightHand.rotation.set(-0.25 + this.pokeProgress * 0.15, -0.15, 0.05);
+    } else if (this.demoTargetPos) {
+      // Animated gesture demonstration: gently hovers over demoTarget and pinches periodically
+      this.demoTimer += delta;
+      const hoverY = this.demoTargetPos.y + 0.05 + 0.015 * Math.sin(this.demoTimer * 3.0);
+      this.rightHand.position.set(
+        this.demoTargetPos.x + 0.04,
+        hoverY,
+        this.demoTargetPos.z + 0.06,
+      );
+      this.rightHand.rotation.set(-0.25, -0.2, 0.1);
+      // Gentle cyclical pinch preview
+      const pinchWave = 0.5 + 0.5 * Math.sin(this.demoTimer * 3.5);
+      this.pinchProgress = Math.max(this.pinchProgress, pinchWave);
     }
 
     // Apply pinch gesture (thumb and index fingertips meet)
