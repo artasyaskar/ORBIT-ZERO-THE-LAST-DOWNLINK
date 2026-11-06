@@ -9,6 +9,7 @@ import {
 import type {
   DataPacket,
   MissionPlanAction,
+  MissionScenarioConfig,
   MissionScenarioId,
   MissionSolution,
   MissionState,
@@ -17,7 +18,8 @@ import type {
 } from './types';
 
 const confidenceRank = { UNVERIFIED: 0, PROBABLE: 1, CONFIRMED: 2 };
-const solutionCache = new Map<MissionScenarioId, MissionSolution>();
+// Cache keyed by "scenarioId|customScenarioId" to handle procedural scenarios correctly.
+const solutionCache = new Map<string, MissionSolution>();
 
 export function getQueueSchedule(state: MissionState): QueueScheduleEntry[] {
   let cursor = 0;
@@ -40,8 +42,9 @@ export function getQueueSchedule(state: MissionState): QueueScheduleEntry[] {
 export function scoreEvidence(
   packets: DataPacket[],
   scenarioId: MissionScenarioId = 'STANDARD_INDUS_PASS',
+  customScenario?: MissionScenarioConfig | null,
 ): { score: number; verified: number; partial: number } {
-  const requests = getScenarioRequests(scenarioId);
+  const requests = getScenarioRequests(scenarioId, customScenario);
   let points = 0;
   let verified = 0;
   let partial = 0;
@@ -71,11 +74,11 @@ function better(candidate: MissionSolution, best: MissionSolution, downlinkWindo
   );
 }
 
-export function solveMission(state: Pick<MissionState, 'scenarioId' | 'power' | 'maxPower' | 'maxStorage' | 'downlinkWindowSec' | 'packets'>): MissionSolution {
-  const scenario = MISSION_SCENARIOS[state.scenarioId] ?? MISSION_SCENARIOS.STANDARD_INDUS_PASS;
+export function solveMission(state: Pick<MissionState, 'scenarioId' | 'power' | 'maxPower' | 'maxStorage' | 'downlinkWindowSec' | 'packets'>, customScenario?: MissionScenarioConfig | null): MissionSolution {
+  const scenario = customScenario ?? MISSION_SCENARIOS[state.scenarioId] ?? MISSION_SCENARIOS.STANDARD_INDUS_PASS;
   const budget = scenario.budget;
   const availableSensors: SensorMode[] = scenario.availableSensors ?? ['RADAR', 'OPTICAL'];
-  const requests = getScenarioRequests(state.scenarioId);
+  const requests = getScenarioRequests(state.scenarioId, customScenario);
   let best: MissionSolution = {
     score: 0, verifiedRequests: 0, partialRequests: 0,
     powerUsed: state.maxPower - state.power, powerRemaining: state.power,
@@ -94,7 +97,7 @@ export function solveMission(state: Pick<MissionState, 'scenarioId' | 'power' | 
       const transmitted = useful.filter((_, index) => mask & (1 << index));
       const duration = Number(transmitted.reduce((sum, p) => sum + p.transmitSec, 0).toFixed(6));
       if (transmitted.length > budget.maxQueueSlots || duration > state.downlinkWindowSec + 1e-6) continue;
-      const result = scoreEvidence(transmitted, state.scenarioId);
+      const result = scoreEvidence(transmitted, state.scenarioId, customScenario);
       const candidate: MissionSolution = {
         score: result.score, verifiedRequests: result.verified, partialRequests: result.partial,
         powerUsed: state.maxPower - power, powerRemaining: power, transmitSec: duration,
@@ -130,7 +133,7 @@ export function solveMission(state: Pick<MissionState, 'scenarioId' | 'power' | 
           type: 'PROCESS', packetId: packet.id, sectorId: packet.sectorId, sensorMode: packet.sensorMode,
         }]);
       }
-      const sectorOutcomes = getScenarioSector(state.scenarioId, packet.sectorId).outcomes;
+      const sectorOutcomes = getScenarioSector(state.scenarioId, packet.sectorId, customScenario).outcomes;
       const betterObservationAvailable = packet.satisfiesRequestId &&
         availableSensors
           .map((m) => sectorOutcomes[m])
@@ -150,7 +153,7 @@ export function solveMission(state: Pick<MissionState, 'scenarioId' | 'power' | 
     if (packets.length >= MAX_EVIDENCE_CUBES) return;
     for (const requestId of GROUND_REQUEST_ORDER) {
       const request = requests[requestId];
-      const sector = getScenarioSector(state.scenarioId, request.targetSectorId);
+      const sector = getScenarioSector(state.scenarioId, request.targetSectorId, customScenario);
       for (const sensorMode of availableSensors) {
         const outcome = sector.outcomes[sensorMode] ?? sector.outcomes.OPTICAL;
         const cost =
@@ -184,15 +187,17 @@ export function solveMission(state: Pick<MissionState, 'scenarioId' | 'power' | 
   return best;
 }
 
-export function getMissionBenchmark(scenarioId: MissionScenarioId): MissionSolution {
-  let solution = solutionCache.get(scenarioId);
+export function getMissionBenchmark(scenarioId: MissionScenarioId, customScenario?: MissionScenarioConfig | null): MissionSolution {
+  const cacheKey = `${scenarioId}|${customScenario?.id ?? ''}`;
+  let solution = solutionCache.get(cacheKey);
   if (!solution) {
-    const budget = (MISSION_SCENARIOS[scenarioId] ?? MISSION_SCENARIOS.STANDARD_INDUS_PASS).budget;
+    const scenario = customScenario ?? MISSION_SCENARIOS[scenarioId] ?? MISSION_SCENARIOS.STANDARD_INDUS_PASS;
+    const budget = scenario.budget;
     solution = solveMission({
       scenarioId, power: budget.initialPower, maxPower: budget.initialPower,
       maxStorage: budget.maxStorage, downlinkWindowSec: budget.downlinkDurationSec, packets: [],
-    });
-    solutionCache.set(scenarioId, solution);
+    }, customScenario);
+    solutionCache.set(cacheKey, solution);
   }
   return { ...solution, actions: solution.actions.map((action) => ({ ...action })) };
 }

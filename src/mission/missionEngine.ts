@@ -59,6 +59,10 @@ export class MissionEngine {
     );
   }
 
+  public getActiveCustomScenario(): typeof this.activeCustomScenario {
+    return this.activeCustomScenario;
+  }
+
   public startProceduralCrisis(seedInput?: string | number): MissionState {
     const crisis = generateProceduralCrisis(seedInput ?? Date.now());
     this.activeCustomScenario = crisis.config;

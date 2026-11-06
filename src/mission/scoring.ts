@@ -53,7 +53,9 @@ export function evaluateRequestWithPackets(
     matchedSectorId: packet?.sectorId ?? null, matchedSensorMode: packet?.sensorMode ?? null,
     matchedConfidence: packet?.confidence ?? null,
     explanation,
-    groundConsequence: status === 'VERIFIED' ? request.consequenceOnSuccess : status === 'PARTIAL' ? request.consequenceOnPartial : request.consequenceOnFailure,
+    groundConsequence: status === 'VERIFIED' ? (request.consequenceOnSuccess.includes('740 K') && packet?.sensorMode !== 'THERMAL'
+      ? 'Processed SAR change-detection flagged probable surface disturbance around the Sector E substation; no temperature was measured, so grid engineers still verify the transformer on site.'
+      : request.consequenceOnSuccess) : status === 'PARTIAL' ? request.consequenceOnPartial : request.consequenceOnFailure,
   };
 }
 
@@ -77,7 +79,7 @@ export function buildDebriefReport(params: {
     scenarioId = 'STANDARD_INDUS_PASS',
     customScenario = null,
   } = params;
-  const benchmark = getMissionBenchmark(scenarioId);
+  const benchmark = getMissionBenchmark(scenarioId, customScenario);
   const requests = getScenarioRequests(scenarioId, customScenario);
   const evaluations = GROUND_REQUEST_ORDER.map((id) => evaluateRequestWithPackets(requests[id], transmittedPackets));
   const requestsVerifiedCount = evaluations.filter((ev) => ev.status === 'VERIFIED').length;
@@ -183,8 +185,7 @@ export function buildDebriefReport(params: {
     const req1Eval = evaluations[0];
     const hasValidTrainingTx =
       droppedPackets.length === 0 &&
-      (req1Eval?.status === 'VERIFIED' ||
-        transmittedPackets.some((p) => p.confidence !== 'UNVERIFIED'));
+      transmittedPackets.some((p) => p.processed && p.sensorMode === 'THERMAL' && p.confidence !== 'UNVERIFIED');
     if (hasValidTrainingTx) {
       const trainingEvaluations: RequestEvaluation[] = evaluations.map((ev, idx) =>
         idx === 0
