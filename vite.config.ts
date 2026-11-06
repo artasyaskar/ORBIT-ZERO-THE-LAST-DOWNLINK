@@ -1,8 +1,18 @@
 import { iwsdkDev } from '@iwsdk/vite-plugin-dev';
-import { defineConfig } from 'vite';
+import { rmSync } from 'node:fs';
+import { defineConfig, type Plugin } from 'vite';
+
+/** Vite copies public/ verbatim (ignoring .gitignore); keep raw source models out of deployments. */
+const excludeIncomingSources = (): Plugin => ({
+  name: 'orbit-zero-exclude-incoming-sources',
+  apply: 'build',
+  closeBundle() {
+    rmSync('dist/assets/models/incoming', { recursive: true, force: true });
+  },
+});
 
 export default defineConfig({
-  plugins: [iwsdkDev()],
+  plugins: [iwsdkDev(), excludeIncomingSources()],
   server: { host: '0.0.0.0', port: 8081, open: false },
   preview: { host: '0.0.0.0', port: 8081 },
   build: {
