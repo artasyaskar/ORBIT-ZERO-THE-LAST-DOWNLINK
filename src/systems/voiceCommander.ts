@@ -165,6 +165,9 @@ export class VoiceCommander {
   private subtitleTextEl: HTMLSpanElement | null = null;
   private subtitleBadgeEl: HTMLSpanElement | null = null;
   private chosenVoice: SpeechSynthesisVoice | null = null;
+  private voicesChangedHandler: (() => void) | null = null;
+  /** Single caption feed: every spoken ARIA line is mirrored here for spatial/DOM presenters. */
+  public onCaption: ((text: string, priority: VoicePriority) => void) | null = null;
 
   // Audio-reactive avatar metrics
   private speechIntensity = 0;
@@ -182,6 +185,12 @@ export class VoiceCommander {
   public dispose(): void {
     this.stopCurrentSpeech();
     this.queue = [];
+    this.onCaption = null;
+    if (this.voicesChangedHandler && typeof window !== 'undefined' && 'speechSynthesis' in window &&
+        window.speechSynthesis.onvoiceschanged === this.voicesChangedHandler) {
+      window.speechSynthesis.onvoiceschanged = null;
+    }
+    this.voicesChangedHandler = null;
     if (this.subtitleBarEl) {
       this.subtitleBarEl.remove();
       this.subtitleBarEl = null;
@@ -546,6 +555,7 @@ export class VoiceCommander {
 
     findVoice();
     if (window.speechSynthesis.onvoiceschanged !== undefined) {
+      this.voicesChangedHandler = findVoice;
       window.speechSynthesis.onvoiceschanged = findVoice;
     }
   }
@@ -608,6 +618,7 @@ export class VoiceCommander {
 
   private displaySubtitle(text: string, priority: VoicePriority): void {
     if (typeof document === 'undefined') return;
+    this.onCaption?.(text.replace(/^\[ARIA-7\]\s*/i, ''), priority);
     this.ensureSubtitleBar();
     const inHud = document.querySelector('#orbit-zero-aria-hud #aria-subtitle-bar') as HTMLDivElement | null;
     if (inHud) {
