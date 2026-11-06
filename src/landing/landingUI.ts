@@ -102,6 +102,7 @@ export class LandingUI {
   private container: HTMLElement;
   private events: LandingUIEvents;
   private rootEl!: HTMLDivElement;
+  private onKeyDown: ((e: KeyboardEvent) => void) | null = null;
   private heroScreenEl!: HTMLDivElement;
   private selectionScreenEl!: HTMLDivElement;
   private muteBtnEl!: HTMLButtonElement;
@@ -439,13 +440,14 @@ export class LandingUI {
     });
 
     // Keyboard accessibility: Escape closes advisory
-    window.addEventListener('keydown', (e) => {
+    this.onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (!this.vrAdvisoryEl.classList.contains('oz-hidden')) {
           this.hideVRAdvisory();
         }
       }
-    });
+    };
+    window.addEventListener('keydown', this.onKeyDown);
   }
 
   public transitionToSelection(): void {
@@ -497,6 +499,10 @@ export class LandingUI {
   }
 
   public dispose(): void {
+    if (this.onKeyDown) {
+      window.removeEventListener('keydown', this.onKeyDown);
+      this.onKeyDown = null;
+    }
     if (this.rootEl?.parentElement) {
       this.rootEl.parentElement.removeChild(this.rootEl);
     }

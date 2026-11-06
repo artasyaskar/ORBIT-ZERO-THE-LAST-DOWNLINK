@@ -52,6 +52,7 @@ import {
   WebGLRenderer,
 } from '@iwsdk/core';
 
+const ASSET_BASE: string = (import.meta as any).env?.BASE_URL ?? './';
 export class LandingScene {
   private container: HTMLElement;
   private scene: Scene;
@@ -153,7 +154,7 @@ export class LandingScene {
     const skyGeo = new SphereGeometry(85, 36, 24);
 
     const skyTex = loader.load(
-      '/assets/textures/milky_way_skybox_4096.jpg',
+      `${ASSET_BASE}assets/textures/milky_way_skybox_4096.jpg`,
       (tex) => {
         tex.colorSpace = SRGBColorSpace;
       },
@@ -268,14 +269,14 @@ export class LandingScene {
 
     // Day Surface Texture: 4K NASA Blue Marble
     const dayMap = loader.load(
-      '/assets/textures/earth_atmos_4096.jpg',
+      `${ASSET_BASE}assets/textures/earth_atmos_4096.jpg`,
       (tex) => {
         tex.colorSpace = SRGBColorSpace;
       },
       undefined,
       () => {
         // Fallback to 2048 if 4096 is not reachable
-        const day2k = loader.load('/assets/textures/earth_atmos_2048.jpg', (t) => {
+        const day2k = loader.load(`${ASSET_BASE}assets/textures/earth_atmos_2048.jpg`, (t) => {
           t.colorSpace = SRGBColorSpace;
         });
         earthMat.map = day2k;
@@ -286,11 +287,11 @@ export class LandingScene {
 
     // Surface Normal Map (4K topographical relief)
     const normalMap = loader.load(
-      '/assets/textures/earth_normal_4096.jpg',
+      `${ASSET_BASE}assets/textures/earth_normal_4096.jpg`,
       undefined,
       undefined,
       () => {
-        const norm2k = loader.load('/assets/textures/earth_normal_2048.jpg');
+        const norm2k = loader.load(`${ASSET_BASE}assets/textures/earth_normal_2048.jpg`);
         earthMat.normalMap = norm2k;
         earthMat.needsUpdate = true;
       }
@@ -299,11 +300,11 @@ export class LandingScene {
 
     // Specular Ocean Reflectivity Map (4K ocean gloss)
     const specularMap = loader.load(
-      '/assets/textures/earth_specular_4096.jpg',
+      `${ASSET_BASE}assets/textures/earth_specular_4096.jpg`,
       undefined,
       undefined,
       () => {
-        const spec2k = loader.load('/assets/textures/earth_specular_2048.jpg');
+        const spec2k = loader.load(`${ASSET_BASE}assets/textures/earth_specular_2048.jpg`);
         earthMat.roughnessMap = spec2k;
         earthMat.needsUpdate = true;
       }
@@ -311,7 +312,7 @@ export class LandingScene {
     this.texturesToDispose.push(specularMap);
 
     // Night Lights Map (City clusters glowing on unlit hemisphere)
-    const lightsMap = loader.load('/assets/textures/earth_lights_2048.png', (tex) => {
+    const lightsMap = loader.load(`${ASSET_BASE}assets/textures/earth_lights_2048.png`, (tex) => {
       tex.colorSpace = SRGBColorSpace;
     });
     this.texturesToDispose.push(lightsMap);
@@ -334,7 +335,7 @@ export class LandingScene {
 
     // 2. Swirling Atmospheric Cloud Layer Sphere (Radius 1.822)
     const cloudGeo = new SphereGeometry(1.822, 40, 32);
-    const cloudMap = loader.load('/assets/textures/earth_clouds_1024.png', (tex) => {
+    const cloudMap = loader.load(`${ASSET_BASE}assets/textures/earth_clouds_1024.png`, (tex) => {
       tex.colorSpace = SRGBColorSpace;
     });
     this.texturesToDispose.push(cloudMap);

@@ -61,10 +61,21 @@ export async function initOrbitZeroGame(
       await world.launchXR();
     } catch (err) {
       console.warn('[ORBIT ZERO] WebXR launch failed or not supported in this session:', err);
+      showLaunchNotice('Immersive mode could not start (permission denied or unsupported). Continuing in desktop mode - hand controls need an XR session.');
     }
   }
 
   return world;
+}
+
+function showLaunchNotice(message: string): void {
+  if (typeof document === 'undefined') return;
+  const el = document.createElement('div');
+  el.setAttribute('role', 'alert');
+  el.textContent = message;
+  el.style.cssText = 'position:fixed;left:50%;top:16px;transform:translateX(-50%);z-index:99999;max-width:560px;padding:12px 18px;background:#1e293b;color:#f8fafc;border:1px solid #f59e0b;border-radius:8px;font:14px/1.4 system-ui,sans-serif;';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 9000);
 }
 
 // =============================================================================
@@ -97,11 +108,16 @@ function bootstrap(): void {
 
   // Standard user entry: Cinematic Landing Experience
   const landing = new LandingController(document.body, async (selection) => {
-    await initOrbitZeroGame({
-      launchXR: selection.launchXR,
-      initialScenarioId: selection.scenarioId,
-      startTutorial: selection.startTutorial,
-    });
+    try {
+      await initOrbitZeroGame({
+        launchXR: selection.launchXR,
+        initialScenarioId: selection.scenarioId,
+        startTutorial: selection.startTutorial,
+      });
+    } catch (err) {
+      console.error('[ORBIT ZERO] Game launch failed:', err);
+      showLaunchNotice('Mission launch failed. Reload the page to return to the menu.');
+    }
   });
 
   (window as any).__ORBIT_LANDING_CONTROLLER__ = landing;
