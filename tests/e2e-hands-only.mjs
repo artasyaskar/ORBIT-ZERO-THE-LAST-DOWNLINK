@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const artifacts = join(root, 'artifacts', 'hands-only-audit');
+const artifacts = process.env.ORBIT_ARTIFACT_DIR || join(root, 'artifacts', 'hands-only-audit');
 await mkdir(artifacts, { recursive: true });
 
 const run = (script, args = []) =>
@@ -168,20 +168,22 @@ try {
         const pos = api.get3DTargetWorldPosition(targetId);
         if (!pos) throw new Error(`3D target not found: ${targetId}`);
 
+        const settle = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))));
         await remote.dispatch('set_hand_pose', { device: handDevice, poseId: 'point' });
+        await remote.dispatch('set_select_value', { device: handDevice, value: 0.0 });
         await remote.dispatch('set_transform', {
           device: handDevice,
           position: pos,
           anchor: 'index-tip',
         });
-        await new Promise((r) => setTimeout(r, 60));
+        await settle();
 
         await remote.dispatch('set_select_value', { device: handDevice, value: 1.0 });
-        await new Promise((r) => setTimeout(r, 60));
+        await settle();
         const pinchedHand = await remote.dispatch('get_hand_state', { device: handDevice });
 
         await remote.dispatch('set_select_value', { device: handDevice, value: 0.0 });
-        await new Promise((r) => setTimeout(r, 60));
+        await settle();
         const releasedHand = await remote.dispatch('get_hand_state', { device: handDevice });
 
         return {
@@ -220,17 +222,29 @@ try {
         }
 
         // 1. Move hand grasp anchor to the 3D Data Cube
-        await remote.dispatch('set_hand_pose', { device: handDevice, poseId: 'pinch' });
-        await remote.dispatch('set_transform', {
-          device: handDevice,
-          position: cubePos,
-          anchor: 'grasp',
-        });
-        await new Promise((r) => setTimeout(r, 60));
+        const settle = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        const moveGrasp = async (position) => {
+          await remote.dispatch('set_transform', { device: handDevice, position, anchor: 'grasp' });
+          const hand = await remote.dispatch('get_hand_state', { device: handDevice });
+          const index = hand.anchors['index-tip'], thumb = hand.anchors['thumb-tip'];
+          await remote.dispatch('set_transform', {
+            device: handDevice,
+            position: {
+              x: hand.position.x + position.x - (index.x + thumb.x) * 0.5,
+              y: hand.position.y + position.y - (index.y + thumb.y) * 0.5,
+              z: hand.position.z + position.z - (index.z + thumb.z) * 0.5,
+            },
+          });
+        };
+        await remote.dispatch('set_hand_pose', { device: handDevice, poseId: 'point' });
+        await remote.dispatch('set_select_value', { device: handDevice, value: 0.0 });
+        await moveGrasp(cubePos);
+        await settle();
+        const beforePinch = api.getXRHandTelemetryLog().slice(-5).map(e => ({ type:e.eventType, target:e.targetId, pose:e.poseId, wrist:e.position, grasp:e.graspPosition, tip:e.indexTipPosition }));
 
         // 2. Close pinch to grab the 3D Data Cube
         await remote.dispatch('set_select_value', { device: handDevice, value: 1.0 });
-        await new Promise((r) => setTimeout(r, 65));
+        await settle();
         const activeGrabsAtStart = api.getActiveXRHandGrabs();
 
         // 3. Lift & carry cube through 3D inspection waypoint
@@ -239,30 +253,23 @@ try {
           y: 0.89,
           z: -0.44,
         };
-        await remote.dispatch('set_transform', {
-          device: handDevice,
-          position: waypoint,
-          anchor: 'grasp',
-        });
-        await new Promise((r) => setTimeout(r, 65));
+        await moveGrasp(waypoint);
+        await settle();
         const cubeMidCarryPos = api.get3DTargetWorldPosition(cubeNodeId);
 
         // 4. Carry cube into the 3D target drop zone (Processing Cradle or Downlink Bay Slot)
-        await remote.dispatch('set_transform', {
-          device: handDevice,
-          position: dropPos,
-          anchor: 'grasp',
-        });
-        await new Promise((r) => setTimeout(r, 65));
+        await moveGrasp(dropPos);
+        await settle();
         const cubeAtDropZonePos = api.get3DTargetWorldPosition(cubeNodeId);
 
         // 5. Open hand pinch to release the cube inside the drop zone
         await remote.dispatch('set_select_value', { device: handDevice, value: 0.0 });
-        await new Promise((r) => setTimeout(r, 75));
+        await settle();
         const activeGrabsAfterRelease = api.getActiveXRHandGrabs();
 
         return {
           handDevice,
+          beforePinch,
           cubeNodeId,
           dropZoneTargetId,
           cubePos,
@@ -320,7 +327,7 @@ try {
   let toggleSafety = 0;
   while ((await page.evaluate(() => window.__ORBIT_ZERO__.getState().activeSensorMode)) !== 'THERMAL') {
     await handPointAndPinch('hand-right', 'pad-toggle-sensor');
-    if (++toggleSafety > 5) throw new Error('Sensor toggle did not reach THERMAL');
+    if (++toggleSafety > 5) throw new Error(`Sensor toggle did not reach THERMAL: ${JSON.stringify(await page.evaluate(() => ({mode: window.__ORBIT_ZERO__.getState().activeSensorMode, grabs: window.__ORBIT_ZERO__.getActiveXRHandGrabs(), events: window.__ORBIT_ZERO__.getXRHandTelemetryLog().slice(-18).map(e => [e.handedness,e.eventType,e.targetId,e.actionOrOutcome])})))}`);
   }
   const step3Res = await handPointAndPinch('hand-right', 'pad-fire-swath');
   assert.equal(step3Res.missionState.packets.length, 1);
@@ -343,8 +350,12 @@ try {
     const remote = window.__ORBIT_IWER__.remote;
     const cubeHome = api.get3DTargetWorldPosition('evidence-cube-1');
 
+    // Recovery requires a tracked open hand before a new pinch can acquire a cube.
+    await remote.dispatch('set_hand_pose', { device: 'hand-left', poseId: 'point' });
+    await remote.dispatch('set_select_value', { device: 'hand-left', value: 0.0 });
+    await new Promise((r) => setTimeout(r, 120));
     // Grab evidence-cube-1 with hand-left and lift it to y = 0.93m
-    await remote.dispatch('set_hand_pose', { device: 'hand-left', poseId: 'pinch' });
+    await remote.dispatch('set_hand_pose', { device: 'hand-left', poseId: 'point' });
     await remote.dispatch('set_transform', {
       device: 'hand-left',
       position: cubeHome,
@@ -369,6 +380,7 @@ try {
     const grabsAfterLoss = api.getActiveXRHandGrabs();
 
     // Reconnect hand-left and reset select value
+    await remote.dispatch('set_hand_pose', { device: 'hand-left', poseId: 'point' });
     await remote.dispatch('set_select_value', { device: 'hand-left', value: 0.0 });
     await remote.dispatch('set_connected', { device: 'hand-left', connected: true });
     await new Promise((r) => setTimeout(r, 60));
@@ -403,9 +415,10 @@ try {
   assert.equal(cradleDropRes.missionState.packets[0].storageCost, 1, 'Compressed packet must occupy 1 STR');
   assert.equal(cradleDropRes.missionState.packets[0].payloadMb, 18, 'Compressed packet must be 18 MB (1.8s Tx)');
   assert.equal(cradleDropRes.tutorialState.currentStepId, 'STEP_7_STAGE', 'Cradle release must advance STEP_6 -> STEP_7_STAGE');
+  await page.waitForTimeout(750);
 
   const bayDropRes = await handGrabCarryAndRelease('hand-right', 'evidence-cube-1', 'DOWNLINK_SLOT_1');
-  assert.equal(bayDropRes.missionState.queuePacketIds.length, 1, 'Releasing cube in Downlink Bay must queue packet');
+  assert.equal(bayDropRes.missionState.queuePacketIds.length, 1, `Releasing cube in Downlink Bay must queue packet: ${JSON.stringify({carry:bayDropRes,events:await page.evaluate(() => window.__ORBIT_ZERO__.getXRHandTelemetryLog().slice(-12).map(e => [e.handedness,e.eventType,e.targetId,e.actionOrOutcome]))})}`);
   assert.equal(bayDropRes.tutorialState.currentStepId, 'STEP_8_TRANSMIT', 'Downlink Bay release must advance STEP_7 -> STEP_8_TRANSMIT');
 
   // =========================================================================
@@ -467,10 +480,11 @@ try {
   toggleSafety = 0;
   while ((await page.evaluate(() => window.__ORBIT_ZERO__.getState().activeSensorMode)) !== 'THERMAL') {
     await handPointAndPinch('hand-right', 'pad-toggle-sensor');
-    if (++toggleSafety > 5) throw new Error('Sensor toggle did not reach THERMAL');
+    if (++toggleSafety > 5) throw new Error(`Sensor toggle did not reach THERMAL: ${JSON.stringify(await page.evaluate(() => ({mode: window.__ORBIT_ZERO__.getState().activeSensorMode, grabs: window.__ORBIT_ZERO__.getActiveXRHandGrabs(), events: window.__ORBIT_ZERO__.getXRHandTelemetryLog().slice(-18).map(e => [e.handedness,e.eventType,e.targetId,e.actionOrOutcome])})))}`);
   }
   await handPointAndPinch('hand-right', 'pad-fire-swath');
   await handGrabCarryAndRelease('hand-left', 'evidence-cube-1', 'PROCESS_CRADLE');
+  await page.waitForTimeout(750);
   await handGrabCarryAndRelease('hand-right', 'evidence-cube-1', 'DOWNLINK_SLOT_1');
   const after7a = await page.evaluate(() => window.__ORBIT_ZERO__.getState());
   assert.equal(after7a.queuePacketIds.length, 1, `7a failed: ${JSON.stringify({ packets: after7a.packets, queue: after7a.queuePacketIds, sel: after7a.selectedSectorId, pwr: after7a.power })}`);
@@ -492,12 +506,13 @@ try {
   toggleSafety = 0;
   while ((await page.evaluate(() => window.__ORBIT_ZERO__.getState().activeSensorMode)) !== 'THERMAL') {
     await handPointAndPinch('hand-right', 'pad-toggle-sensor');
-    if (++toggleSafety > 5) throw new Error('Sensor toggle did not reach THERMAL');
+    if (++toggleSafety > 5) throw new Error(`Sensor toggle did not reach THERMAL: ${JSON.stringify(await page.evaluate(() => ({mode: window.__ORBIT_ZERO__.getState().activeSensorMode, grabs: window.__ORBIT_ZERO__.getActiveXRHandGrabs(), events: window.__ORBIT_ZERO__.getXRHandTelemetryLog().slice(-18).map(e => [e.handedness,e.eventType,e.targetId,e.actionOrOutcome])})))}`);
   }
   await handPointAndPinch('hand-right', 'pad-fire-swath');
   const after7cScan = await page.evaluate(() => window.__ORBIT_ZERO__.getState());
   assert.equal(after7cScan.packets.length, 3, `7c scan failed: ${JSON.stringify({ packets: after7cScan.packets, queue: after7cScan.queuePacketIds, sel: after7cScan.selectedSectorId, pwr: after7cScan.power })}`);
   const after7cCradle = await handGrabCarryAndRelease('hand-left', 'evidence-cube-3', 'PROCESS_CRADLE');
+  await page.waitForTimeout(750);
   const after7cDock = await handGrabCarryAndRelease('hand-right', 'evidence-cube-3', 'DOWNLINK_SLOT_3');
 
   const preCommitFireline = await page.evaluate(() => window.__ORBIT_ZERO__.getState());
@@ -514,8 +529,8 @@ try {
       dockDropPos: after7cDock.dropPos,
     })}`,
   );
-  assert.equal(preCommitFireline.downlinkCommittedSec, 7.6);
-  assert.equal(preCommitFireline.power, 10);
+  assert.equal(preCommitFireline.downlinkCommittedSec, 7.6, JSON.stringify({beforePinch:after7cCradle.beforePinch,cradle:after7cCradle.activeGrabsAtStart,cradlePacket:after7cCradle.missionState.packets.map(p=>({id:p.id,sector:p.sectorId,processed:p.processed})),events:await page.evaluate(()=>window.__ORBIT_ZERO__.getXRHandTelemetryLog().slice(-16).map(e=>[e.handedness,e.eventType,e.targetId,e.actionOrOutcome]))}));
+  assert.equal(preCommitFireline.power, 10, JSON.stringify({packets:preCommitFireline.packets.map(p=>({id:p.id,sector:p.sectorId,sensor:p.sensorMode,processed:p.processed})),events:await page.evaluate(()=>window.__ORBIT_ZERO__.getXRHandTelemetryLog().filter(e=>e.eventType==='selectstart').slice(-16).map(e=>[e.handedness,e.targetId,e.actionOrOutcome]))}));
 
   // 7d. Commit Downlink with hand-right pinch on pad-commit-downlink
   await handPointAndPinch('hand-right', 'pad-commit-downlink');
@@ -566,7 +581,7 @@ try {
   );
   assert.ok(
     finalTelemetry.reachEnvelope.maxDistance <= 0.58,
-    `Expected all interactive objects within <= 0.58 m comfortable reach envelope, got maxDistance=${finalTelemetry.reachEnvelope.maxDistance}`,
+    `Expected all interactive objects within <= 0.58 m comfortable reach envelope, got maxDistance=${finalTelemetry.reachEnvelope.maxDistance}: ${JSON.stringify(finalTelemetry.reachEnvelope.objects)}`,
   );
   assert.equal(failures.length, 0, `Console/page errors detected:\n${failures.join('\n')}`);
 

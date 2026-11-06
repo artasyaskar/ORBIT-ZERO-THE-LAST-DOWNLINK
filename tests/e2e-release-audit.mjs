@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
@@ -7,6 +7,10 @@ import { get as getHttps } from 'node:https';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+
+// Build/revision identification for reproducible audit reports.
+let GIT_REVISION = 'UNKNOWN';
+try { GIT_REVISION = execSync('git rev-parse --short HEAD', { cwd: resolve(dirname(fileURLToPath(import.meta.url)), '..') }).toString().trim(); } catch { /* non-git env */ }
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const artifacts = join(root, 'artifacts', 'release-audit');
@@ -52,7 +56,7 @@ preview?.stderr.on('data', (data) => {
 let browser;
 let page;
 const failures = [];
-const stageReport = [];
+const stageReport = [{ stage: 0, name: 'Build Identification', status: 'INFO', gitRevision: GIT_REVISION, timestamp: new Date().toISOString() }];
 
 try {
   const deadline = Date.now() + 30000;
@@ -177,6 +181,16 @@ try {
     'Step 1 must teach seated reach envelope and tracking recovery',
   );
 
+  // TEST_SETUP: trigger3DNode() is a deterministic ECS shortcut that fires the same
+  // internal event as a physical globe hover+pinch. It is used here as test setup
+  // because desktop headless tests cannot perform optical tracking gestures.
+  // On a physical Quest, replace these with actual hand-joint positioning via IWER remote.
+  // If this API is unavailable the test must fail — no silent bypass.
+  assert.ok(
+    await page.evaluate(() => typeof window.__ORBIT_ZERO__?.trigger3DNode === 'function'),
+    'DEBUG API: window.__ORBIT_ZERO__.trigger3DNode must be available — missing means debug mode is off or app failed to boot',
+  );
+
   // Advance to STEP_2_POINT -> STEP_3_PINCH using 3D globe beacon nodes
   await page.evaluate(() => {
     window.__ORBIT_ZERO__.trigger3DNode('sector-a');
@@ -193,6 +207,9 @@ try {
   // Complete remaining tutorial steps via 3D hardware & physical cube drop nodes through STEP_8_TRANSMIT
   const tutAdvanced = await page.evaluate(() => {
     const api = window.__ORBIT_ZERO__;
+    // TEST_SETUP: simulateCubeDrop() teleports a cube to a named station. This mirrors
+    // the physics of a hand-released grab drop and fires the same station snap callback.
+    // On Quest, replace with IWER remote hand-joint positioning + release gesture.
     while (api.getState().activeSensorMode !== 'THERMAL') {
       api.trigger3DNode('pad-toggle-sensor');
     }
@@ -271,8 +288,10 @@ try {
   const firelineResult = await page.evaluate(() => {
     const api = window.__ORBIT_ZERO__;
     const rawCommittedSec = api.getState().downlinkCommittedSec;
+    // TEST_SETUP: simulateCubeDrop() — deterministic station drop shortcut for headless tests.
     api.simulateCubeDrop(0, 'PROCESS'); // Compress Sector B Thermal (42 MB -> 18 MB, saves 24 MB)
     const oneCompressedSec = api.getState().downlinkCommittedSec;
+    // TEST_SETUP: simulateCubeDrop() — strictly dominant B+E (76 MB / 7.6s)
     api.simulateCubeDrop(2, 'PROCESS'); // Compress Sector E Thermal (42 MB -> 18 MB, saves 24 MB) -> strictly dominant B+E (76 MB / 7.6s)
     const twoCompressedSec = api.getState().downlinkCommittedSec;
 
