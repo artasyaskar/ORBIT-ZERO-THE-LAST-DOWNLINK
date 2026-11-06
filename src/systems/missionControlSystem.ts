@@ -58,6 +58,8 @@ import {
   SECTORS,
 } from '../mission/missionConfig';
 import { MissionEngine, replayMission } from '../mission/missionEngine';
+import { NativeXRHands, type LiveXRHandSample } from './nativeXRHands';
+import { CubeInteractions, cubeStationTargets, nearestCubeStation, isVisible, setWorldPosition, type CubeDropTarget } from './cubeInteractions';
 import { TutorialEngine } from '../mission/tutorialEngine';
 import { describeMissionPlan, getMissionBenchmark, getNextPlanAction, getQueueSchedule, solveMission } from '../mission/missionPlanner';
 import type { DataPacket, MissionScenarioId, MissionState, SectorId, SensorMode } from '../mission/types';
@@ -78,12 +80,6 @@ import {
 } from './missionProfile';
 import type { ActionResult, MissionAction, MissionSolution } from '../mission/types';
 
-const RAW_TRAY_POSITIONS: [number, number, number][] = [
-  [-0.38, 0.792, -0.42],
-  [-0.31, 0.792, -0.42],
-  [-0.24, 0.792, -0.42],
-];
-
 const DOWNLINK_BAY_POSITIONS: [number, number, number][] = [
   [0.25, 0.79, -0.43],
   [0.32, 0.79, -0.43],
@@ -94,10 +90,7 @@ const STANDBY_CUBE_COLORS = [0x38bdf8, 0x38bdf8, 0xf59e0b];
 
 const SCANNER_HOME_POSITION = new Vector3(-0.44, 0.80, -0.30);
 const GLOBE_CENTER_WORLD = new Vector3(0, 0.98, -0.48);
-const PROCESS_CRADLE_WORLD = new Vector3(0.18, 0.79, -0.49);
-const DISCARD_CHUTE_WORLD = new Vector3(0.44, 0.79, -0.34);
 const DOWNLINK_BAY_CENTER_WORLD = new Vector3(0.32, 0.79, -0.43);
-const RAW_TRAY_CENTER_WORLD = new Vector3(0.0, 0.79, -0.42);
 
 // Target seated eye position in world space (0.44m back from origin, 1.20m seated eye height)
 const SEATED_TARGET_HEAD_WORLD = new Vector3(0, 1.20, 0.44);
@@ -146,20 +139,6 @@ export interface XRHandTelemetryEvent {
   actionOrOutcome?: string;
 }
 
-interface LiveXRHandSample {
-  device: 'hand-left' | 'hand-right';
-  handedness: 'left' | 'right';
-  connected: boolean;
-  poseId: string;
-  pinchValue: number;
-  pressed: boolean;
-  position: Vector3;
-  indexTip: Vector3;
-  thumbTip: Vector3;
-  graspPoint: Vector3;
-  fingerDir: Vector3;
-}
-
 interface Resolved3DHandTarget {
   targetType: 'SECTOR' | 'CONTROL_PAD' | 'DATA_CUBE' | 'SPATIAL_UI_BUTTON' | 'GLOBE';
   targetId: string;
@@ -178,7 +157,6 @@ export class MissionControlSystem extends createSystem({
   sectorActivated: { required: [OrbitSectorNode, Pressed] },
   cubes: { required: [EvidenceCubeNode] },
   cubeActivated: { required: [EvidenceCubeNode, Pressed] },
-  cubeGrabbed: { required: [EvidenceCubeNode, Grabbed] },
   controls: { required: [ConsoleControlNode] },
   controlActivated: { required: [ConsoleControlNode, Pressed] },
   controlGrabbed: { required: [ConsoleControlNode, Grabbed] },
@@ -207,6 +185,7 @@ export class MissionControlSystem extends createSystem({
   private lastDownlinkTickSecond = -1;
   private profile = loadMissionProfile();
   private settingsOpen = false;
+  private delegationBaseline = 0;
   private recordedDebrief = false;
   private earnedMedals: string[] = [];
   private dailyDate: string | null = null;
@@ -264,11 +243,14 @@ export class MissionControlSystem extends createSystem({
 
   // WebXR Hand Joint & XRSession Input Pipeline (IWER 2.7.0 + Physical Meta Quest 3 / 3S)
   private currentInputSource: 'xr-hand' | 'desktop' = 'desktop';
-  private boundXRSession: any = null;
+  private boundXRSession: XRSession | null = null;
+  private readonly nativeHands = new NativeXRHands();
+  private readonly cubeInteractions = new CubeInteractions();
   private xrHandEventLog: XRHandTelemetryEvent[] = [];
   private lastHandConnected: Record<'left' | 'right', boolean> = { left: false, right: false };
   private lastHandPressed: Record<'left' | 'right', boolean> = { left: false, right: false };
   private lastHandPointTarget: Record<'left' | 'right', string> = { left: '', right: '' };
+  private handHoverTargets = new Map<'left' | 'right', { targetId: string; sample: LiveXRHandSample; time: number }>();
   private lastHandPokeTime = new Map<string, number>();
   private lastHandGlobeTouchPos = new Map<'left' | 'right', Vector3>();
   private activeXRHandGrabs = new Map<
@@ -291,14 +273,6 @@ export class MissionControlSystem extends createSystem({
     } finally {
       this.currentInputSource = prev;
     }
-  }
-
-  private isCubeGrabbedByXRHand(cubeEntity?: Entity): boolean {
-    if (!cubeEntity) return false;
-    for (const grab of this.activeXRHandGrabs.values()) {
-      if (grab.cubeEntity === cubeEntity) return true;
-    }
-    return false;
   }
 
   init(): void {
@@ -335,6 +309,7 @@ export class MissionControlSystem extends createSystem({
       subtitlesEnabled: true,
       voiceEnabled: true,
     });
+    this.voiceCommander.onCaption = (text) => { this.caption = text; };
     this.cleanupFuncs.push(() => this.voiceCommander?.dispose());
 
     // Deep Agentic Co-Pilot System Integration
@@ -436,36 +411,6 @@ export class MissionControlSystem extends createSystem({
       }
     });
 
-    // 4. Subscribe to 3D Evidence Cube grab start & release -> physical drop zone triage!
-    this.queries.cubeGrabbed.subscribe('qualify', (entity) => {
-      if (this.isLiveXRHandActive()) return;
-      if (this.suppressReleaseActions || this.engine.getState().phase !== 'OPERATIONS' || this.engine.getState().paused) {
-        this.world.getSystem(GrabSystem)?.forceRelease(entity);
-        return;
-      }
-      const slotIndex = entity.getValue(EvidenceCubeNode, 'slotIndex') ?? 0;
-      const pkt = this.engine.getState().packets[slotIndex];
-      const src = this.world.renderer.xr.isPresenting ? 'xr-hand' : 'desktop';
-      this.withInputSource(src, () => {
-        if (pkt) {
-          this.tutorial.notifyCubeGrabOrSelect(pkt.confidence !== 'UNVERIFIED', src);
-          this.applyAction({ type: 'SELECT_PACKET', packetId: pkt.id });
-        }
-        this.playCue('CUBE_GRAB');
-        this.highlightDropZones(true);
-        this.syncAll();
-      });
-    });
-
-    this.queries.cubeGrabbed.subscribe('disqualify', (entity) => {
-      if (this.isLiveXRHandActive()) return;
-      const src = this.world.renderer.xr.isPresenting ? 'xr-hand' : 'desktop';
-      this.withInputSource(src, () => {
-        this.highlightDropZones(false);
-        this.handleCubeReleased(entity);
-      });
-    });
-
     // 5. Subscribe to 3D Console Control Pads & Scanner Tool
     this.queries.controlActivated.subscribe('qualify', (entity) => {
       if (this.isLiveXRHandActive()) return;
@@ -540,6 +485,13 @@ export class MissionControlSystem extends createSystem({
         this.applyAction({ type: 'SELECT_PACKET', packetId: id });
         this.syncAll();
       },
+      inspectPacket: (id) => {
+        const pkt = this.engine.getState().packets.find((p) => p.id === id);
+        if (pkt && pkt.confidence !== 'UNVERIFIED') {
+          this.tutorial.notifyCubeInspected('desktop');
+          this.tutorial.syncWithMissionState(this.engine.getState(), undefined, 'desktop');
+        }
+      },
       cycleCube: () => this.cycleEvidence(),
       processSelected: (packetId) => {
         if (packetId && this.engine.getState().selectedPacketId !== packetId) {
@@ -589,6 +541,10 @@ export class MissionControlSystem extends createSystem({
       setPoking: (poking: boolean) => this.vrHandSimulator.setPoking(poking),
       getInteractionTargetPoint: () => this.desktopControls?.getInteractionTargetPoint() ?? null,
       toggleSpatialHud: () => this.toggleSpatialHud(),
+      cubeInteractions: this.cubeInteractions,
+      getCubeDropTargets: () => this.getCubeDropTargets(),
+      releaseCube: (object) => this.withInputSource('desktop', () => this.releaseCube(object)),
+      previewCubeDrop: (target) => this.highlightDropZones(true, target),
       syncAll: () => this.syncAll(),
     });
     this.cleanupFuncs.push(() => this.desktopControls?.dispose());
@@ -600,7 +556,7 @@ export class MissionControlSystem extends createSystem({
         getJournal: () => this.engine.getJournal(),
         getStateHash: () => this.engine.getStateHash(),
         verifyReplay: () => replayMission(this.engine.getState().scenarioId, this.engine.getJournal()).getStateHash(),
-        getMissionBenchmark: () => getMissionBenchmark(this.engine.getState().scenarioId),
+        getMissionBenchmark: () => getMissionBenchmark(this.engine.getState().scenarioId, this.engine.getActiveCustomScenario()),
         getReachablePlan: () => this.getSolution(this.engine.getState()),
         getProfile: () => structuredClone(this.profile),
         togglePreference: (key: keyof MissionPreferences) => this.cyclePreference(key),
@@ -609,6 +565,13 @@ export class MissionControlSystem extends createSystem({
         setCameraPreset: (preset: 'HERO' | 'GLOBE' | 'CUBES' | 'CRADLE' | 'DOWNLINK' | 'DEBRIEF') => this.setCameraPreset(preset),
         pause: () => this.togglePause(),
         selectPacket: (id: string) => { this.applyAction({ type: 'SELECT_PACKET', packetId: id }); this.syncAll(); },
+        inspectPacket: (id: string) => {
+          const pkt = this.engine.getState().packets.find((p) => p.id === id);
+          if (pkt && pkt.confidence !== 'UNVERIFIED') {
+            this.tutorial.notifyCubeInspected('desktop');
+            this.tutorial.syncWithMissionState(this.engine.getState(), undefined, 'desktop');
+          }
+        },
         cycleCube: () => { this.cycleEvidence(); },
         getRuntimeStatus: () => ({ immersive: this.world.renderer.xr.isPresenting, phase: this.engine.getState().phase, caption: this.caption }),
         getControlScreenPosition: (panelId: string, elementId: string) => {
@@ -1163,7 +1126,7 @@ export class MissionControlSystem extends createSystem({
 
       for (const sectorEntity of this.queries.sectors.entities) {
         const sObj = sectorEntity.object3D;
-        if (!sObj) continue;
+        if (!sObj || !isVisible(sObj)) continue;
         sObj.updateWorldMatrix(true, false);
         const sPos = new Vector3().setFromMatrixPosition(sObj.matrixWorld);
         const toSector = sPos.sub(headPos).normalize();
@@ -1212,6 +1175,8 @@ export class MissionControlSystem extends createSystem({
     }
 
     // Phase 3: Tactile 3D button mechanical spring-loaded depression & recoil physics (-12mm travel)
+    const vibratingDesk = this.world.getSceneObject('orbital-console')?.getObjectByName('ConsoleDeskAssembly');
+    if (vibratingDesk) vibratingDesk.position.x = 0;
     for (const [padId, timer] of this.padPressTimers.entries()) {
       const newTimer = Math.max(0, timer - delta);
       const padObj = this.world.getSceneObject(padId);
@@ -1226,10 +1191,9 @@ export class MissionControlSystem extends createSystem({
           cap.position.y = restY - depression * stroke;
 
           // Diegetic console vibration pulse during button press (never camera)
-          const consoleObj = this.world.getSceneObject('orbital-console');
-          if (consoleObj && progress < 0.5) {
+          if (vibratingDesk && progress < 0.5) {
             const vibration = Math.sin(progress * Math.PI * 8) * 0.003;
-            consoleObj.position.x += vibration;
+            vibratingDesk.position.x += vibration;
           }
         } else {
           cap.position.y = restY;
@@ -1267,11 +1231,13 @@ export class MissionControlSystem extends createSystem({
         }
 
         // Animate 30% compression shrink when processed in cradle (4.5s → 1.8s transmission)
-        if (pkt.processed && !pkt.queued) {
-          const compressionProgress = Math.min(1, this.elapsedTime * 1.8);
-          cubeRoot.scale.lerp(new Vector3(0.72, 0.72, 0.72), compressionProgress * 0.4);
-        } else {
-          cubeRoot.scale.lerp(new Vector3(1, 1, 1), 0.2);
+        if (!this.cubeInteractions.isHeld(cubeRoot)) {
+          if (pkt.processed && !pkt.queued) {
+            const compressionProgress = Math.min(1, this.elapsedTime * 1.8);
+            cubeRoot.scale.lerp(new Vector3(0.72, 0.72, 0.72), compressionProgress * 0.4);
+          } else {
+            cubeRoot.scale.lerp(new Vector3(1, 1, 1), 0.2);
+          }
         }
       }
     }
@@ -1486,7 +1452,7 @@ export class MissionControlSystem extends createSystem({
       globe.updateMatrixWorld(true);
       for (const sectorEntity of this.queries.sectors.entities) {
         const sObj = sectorEntity.object3D;
-        if (!sObj) continue;
+        if (!sObj || !isVisible(sObj)) continue;
         const sId = (sectorEntity.getValue(OrbitSectorNode, 'sectorId') || 'B') as SectorId;
         const sDef = SECTOR_GEO_DEFINITIONS[sId];
         if (!sDef) continue;
@@ -1707,7 +1673,7 @@ export class MissionControlSystem extends createSystem({
           let bestDist = 0.3;
           for (const sectorEntity of this.queries.sectors.entities) {
             const sObj = sectorEntity.object3D;
-            if (!sObj) continue;
+            if (!sObj || !isVisible(sObj)) continue;
             sObj.updateWorldMatrix(true, false);
             const sPos = new Vector3().setFromMatrixPosition(sObj.matrixWorld);
             const dist = laserTipWorld.distanceTo(sPos);
@@ -1861,15 +1827,12 @@ export class MissionControlSystem extends createSystem({
             );
             if (
               activeCubeEntity?.object3D &&
-              !activeCubeEntity.hasComponent(Grabbed)
+              !this.cubeInteractions.isHeld(activeCubeEntity.object3D)
             ) {
               const obj = activeCubeEntity.object3D;
-              const basePos =
-                activePkt.queueIndex !== null
-                  ? DOWNLINK_BAY_POSITIONS[activePkt.queueIndex]
-                  : null;
+              const basePos = activePkt.queueIndex !== null ? this.cubeStationPosition('QUEUE', activePkt.queueIndex) : null;
               if (basePos) {
-                obj.position.set(basePos[0], basePos[1] + (reducedMotion ? 0 : 0.018), basePos[2]);
+                setWorldPosition(obj, basePos.add(new Vector3(0, reducedMotion ? 0 : 0.018, 0)));
                 obj.rotation.y += reducedMotion ? 0 : delta * 3.5;
                 const particles = obj.getObjectByName('CubeAssemblyParticles');
                 if (particles instanceof Points && particles.material instanceof PointsMaterial) {
@@ -2446,7 +2409,7 @@ export class MissionControlSystem extends createSystem({
     globe.updateMatrixWorld(true);
     for (const sectorEntity of this.queries.sectors.entities) {
       const sObj = sectorEntity.object3D;
-      if (!sObj) continue;
+      if (!sObj || !isVisible(sObj)) continue;
       const sId = (sectorEntity.getValue(OrbitSectorNode, 'sectorId') || 'B') as SectorId;
       const sDef = SECTOR_GEO_DEFINITIONS[sId];
       if (!sDef) continue;
@@ -2527,42 +2490,14 @@ export class MissionControlSystem extends createSystem({
   ): { x: number; y: number; z: number } | null {
     this.syncGlobeSectorBeaconPositions();
 
-    if (targetId === 'PROCESS_CRADLE') {
-      return {
-        x: PROCESS_CRADLE_WORLD.x,
-        y: PROCESS_CRADLE_WORLD.y,
-        z: PROCESS_CRADLE_WORLD.z,
-      };
-    }
-    if (targetId === 'DOWNLINK_BAY' || targetId === 'DOWNLINK_SLOT_1') {
-      const [x, y, z] = DOWNLINK_BAY_POSITIONS[0];
-      return { x, y, z };
-    }
-    if (targetId === 'DOWNLINK_SLOT_2') {
-      const [x, y, z] = DOWNLINK_BAY_POSITIONS[1];
-      return { x, y, z };
-    }
-    if (targetId === 'DOWNLINK_SLOT_3') {
-      const [x, y, z] = DOWNLINK_BAY_POSITIONS[2];
-      return { x, y, z };
-    }
-    if (targetId === 'DISCARD_CHUTE') {
-      return {
-        x: DISCARD_CHUTE_WORLD.x,
-        y: DISCARD_CHUTE_WORLD.y,
-        z: DISCARD_CHUTE_WORLD.z,
-      };
-    }
-    if (targetId === 'RAW_TRAY_1') {
-      const [x, y, z] = RAW_TRAY_POSITIONS[0];
-      return { x, y, z };
-    }
-    if (targetId === 'RAW_TRAY_2') {
-      const [x, y, z] = RAW_TRAY_POSITIONS[1];
-      return { x, y, z };
-    }
-    if (targetId === 'RAW_TRAY_3') {
-      const [x, y, z] = RAW_TRAY_POSITIONS[2];
+    const stationIds: Record<string, [CubeDropTarget['kind'], number]> = {
+      PROCESS_CRADLE: ['PROCESS', 0], DISCARD_CHUTE: ['DISCARD', 0],
+      DOWNLINK_BAY: ['QUEUE', 0], DOWNLINK_SLOT_1: ['QUEUE', 0], DOWNLINK_SLOT_2: ['QUEUE', 1], DOWNLINK_SLOT_3: ['QUEUE', 2],
+      RAW_TRAY_1: ['RAW_TRAY', 0], RAW_TRAY_2: ['RAW_TRAY', 1], RAW_TRAY_3: ['RAW_TRAY', 2],
+    };
+    const station = stationIds[targetId];
+    if (station) {
+      const { x, y, z } = this.cubeStationPosition(...station);
       return { x, y, z };
     }
     if (targetId === 'GLOBE_GIMBAL') {
@@ -2584,137 +2519,15 @@ export class MissionControlSystem extends createSystem({
   private sampleLiveXRHandState(
     handedness: 'left' | 'right',
   ): LiveXRHandSample | null {
-    const deviceId = handedness === 'left' ? 'hand-left' : 'hand-right';
-    const iwer =
-      typeof window !== 'undefined'
-        ? ((window as any).__ORBIT_IWER__ ?? (window as any).IWER_DEVICE)
-        : null;
-
-    if (iwer?.remote?.executeGetHandState) {
-      if (iwer.primaryInputMode && iwer.primaryInputMode !== 'hand') {
-        return null;
-      }
-      try {
-        const raw = iwer.remote.executeGetHandState({ device: deviceId });
-        if (!raw) return null;
-        const offset = this.player.position;
-        const pos = new Vector3(
-          raw.position.x,
-          raw.position.y,
-          raw.position.z,
-        ).add(offset);
-        const indexTip = new Vector3(
-          raw.anchors['index-tip'].x,
-          raw.anchors['index-tip'].y,
-          raw.anchors['index-tip'].z,
-        ).add(offset);
-        const thumbTip = new Vector3(
-          raw.anchors['thumb-tip'].x,
-          raw.anchors['thumb-tip'].y,
-          raw.anchors['thumb-tip'].z,
-        ).add(offset);
-        const graspPoint = new Vector3(
-          raw.anchors['grasp'].x,
-          raw.anchors['grasp'].y,
-          raw.anchors['grasp'].z,
-        ).add(offset);
-        const fingerDir = new Vector3(
-          raw.axes?.fingers?.x ?? 0,
-          raw.axes?.fingers?.y ?? 0,
-          raw.axes?.fingers?.z ?? -1,
-        ).normalize();
-        const pinchValue = Number(raw.pinchValue ?? 0);
-        const pressed = Boolean(raw.pressed || pinchValue >= 0.9);
-        return {
-          device: deviceId,
-          handedness,
-          connected: Boolean(raw.connected),
-          poseId: String(raw.poseId || 'default'),
-          pinchValue,
-          pressed,
-          position: pos,
-          indexTip,
-          thumbTip,
-          graspPoint,
-          fingerDir,
-        };
-      } catch {
-        return null;
-      }
-    }
-
-    // Physical Meta Quest 3 / 3S WebXR Hand Tracking fallback via Three.js WebXRManager
-    const session = (this.world.renderer?.xr as any)?.getSession?.();
-    if (!session?.inputSources) return null;
-    let matchedSource: any = null;
-    for (const src of session.inputSources) {
-      if (src.handedness === handedness && src.hand) {
-        matchedSource = src;
-        break;
-      }
-    }
-    if (!matchedSource) {
-      return {
-        device: deviceId,
-        handedness,
-        connected: false,
-        poseId: 'default',
-        pinchValue: 0,
-        pressed: false,
-        position: new Vector3(),
-        indexTip: new Vector3(),
-        thumbTip: new Vector3(),
-        graspPoint: new Vector3(),
-        fingerDir: new Vector3(0, 0, -1),
-      };
-    }
-
-    const handIdx = handedness === 'left' ? 0 : 1;
-    const xrHandSpace = (this.world.renderer.xr as any)?.getHand?.(handIdx);
-    const joints = xrHandSpace?.joints;
-    const wristObj = joints?.['wrist'];
-    const indexTipObj = joints?.['index-finger-tip'];
-    const thumbTipObj = joints?.['thumb-tip'];
-
-    const pos = wristObj
-      ? wristObj.getWorldPosition(new Vector3())
-      : new Vector3();
-    const indexTip = indexTipObj
-      ? indexTipObj.getWorldPosition(new Vector3())
-      : pos.clone();
-    const thumbTip = thumbTipObj
-      ? thumbTipObj.getWorldPosition(new Vector3())
-      : pos.clone();
-    const graspPoint = indexTip.clone().lerp(thumbTip, 0.5);
-    const fingerDir = indexTip.clone().sub(pos).normalize();
-    if (fingerDir.lengthSq() < 0.001) fingerDir.set(0, 0, -1);
-
-    const pinchDist = indexTip.distanceTo(thumbTip);
-    const pinchValue = Math.max(
-      0,
-      Math.min(1, 1 - (pinchDist - 0.015) / 0.055),
+    const xr = this.world.renderer.xr;
+    return this.nativeHands.sample(
+      handedness, xr.getSession(), xr.getFrame(), xr.getReferenceSpace(), this.player,
     );
-    const pressed = Boolean(
-      matchedSource.gamepad?.buttons?.[0]?.pressed || pinchValue >= 0.88,
-    );
-
-    return {
-      device: deviceId,
-      handedness,
-      connected: true,
-      poseId: pressed ? 'pinch' : 'point',
-      pinchValue,
-      pressed,
-      position: pos,
-      indexTip,
-      thumbTip,
-      graspPoint,
-      fingerDir,
-    };
   }
 
   private resolve3DTargetForHand(
     sample: LiveXRHandSample,
+    preferredTargetId?: string,
   ): Resolved3DHandTarget | null {
     this.syncGlobeSectorBeaconPositions();
 
@@ -2734,22 +2547,18 @@ export class MissionControlSystem extends createSystem({
     };
 
     const candidates: Resolved3DHandTarget[] = [];
-    const isPointPose = sample.poseId === 'point';
+    const isPointPose = sample.poseId === 'point' || !sample.pressed;
 
     // 1. Check 3D Evidence Data Cubes for near-hand pinch-grab (< 7.5 cm in pinch pose, < 4.5 cm in point pose)
-    const cubeThreshold = isPointPose ? 0.045 : 0.085;
+    const cubeThreshold = isPointPose ? 0.055 : 0.085;
     for (const cubeEntity of this.queries.cubes.entities) {
       const obj = cubeEntity.object3D;
-      if (!obj) continue;
+      if (!obj || !isVisible(obj) || this.cubeInteractions.isHeld(obj)) continue;
+      const slotIndex = cubeEntity.getValue(EvidenceCubeNode, 'slotIndex') ?? 0;
+      if (!this.engine.getState().packets[slotIndex]) continue;
       obj.updateWorldMatrix(true, false);
       const cubePos = obj.getWorldPosition(new Vector3());
-      const dist = isPointPose
-        ? sample.indexTip.distanceTo(cubePos) + 0.015
-        : Math.min(
-          sample.graspPoint.distanceTo(cubePos),
-          sample.indexTip.distanceTo(cubePos),
-        );
-      const slotIndex = cubeEntity.getValue(EvidenceCubeNode, 'slotIndex') ?? 0;
+      const dist = sample.graspPoint.distanceTo(cubePos);
       if (dist <= cubeThreshold) {
         candidates.push({
           targetType: 'DATA_CUBE',
@@ -2762,15 +2571,10 @@ export class MissionControlSystem extends createSystem({
       }
     }
 
-    if (!isPointPose && candidates.length > 0) {
-      candidates.sort((a, b) => a.distance - b.distance);
-      return candidates[0];
-    }
-
     // 2. Check 3D Sector Beacons on the Earth Globe (near fingertip < 9.5 cm or pointed ray)
     for (const sectorEntity of this.queries.sectors.entities) {
       const sObj = sectorEntity.object3D;
-      if (!sObj) continue;
+      if (!sObj || !isVisible(sObj)) continue;
       const sectorId = (sectorEntity.getValue(OrbitSectorNode, 'sectorId') ||
         'B') as SectorId;
       const sPos = sObj.getWorldPosition(new Vector3());
@@ -2895,6 +2699,8 @@ export class MissionControlSystem extends createSystem({
     }
 
     if (candidates.length === 0) return null;
+    const preferred = candidates.find((target) => target.targetId === preferredTargetId);
+    if (preferred) return preferred;
     candidates.sort((a, b) => a.distance - b.distance);
     return candidates[0];
   }
@@ -2904,71 +2710,46 @@ export class MissionControlSystem extends createSystem({
     if (!session || this.boundXRSession === session) return;
     this.boundXRSession = session;
 
-    const onSelectStart = (event: any) => {
-      const handedness =
-        event?.inputSource?.handedness === 'left' ? 'left' : 'right';
-      const sample = this.sampleLiveXRHandState(handedness);
-      if (!sample || !sample.connected) return;
-      if (!this.lastHandPressed[handedness]) {
-        this.lastHandPressed[handedness] = true;
-        this.handleXRHandPressStart(sample, 'selectstart');
-      }
-    };
-
-    const onSelectEnd = (event: any) => {
-      const handedness =
-        event?.inputSource?.handedness === 'left' ? 'left' : 'right';
-      const sample = this.sampleLiveXRHandState(handedness);
-      if (this.lastHandPressed[handedness]) {
-        this.lastHandPressed[handedness] = false;
-        if (!sample || !sample.connected) {
-          this.lastHandConnected[handedness] = false;
-          this.handleXRHandTrackingLost(handedness, sample ?? undefined);
-        } else {
-          this.handleXRHandPressEnd(sample, 'selectend');
+    const onSelectStart = (event: XRInputSourceEvent) => this.nativeHands.setSelect(event.inputSource, true);
+    const onSelectEnd = (event: XRInputSourceEvent) => this.nativeHands.setSelect(event.inputSource, false);
+    const onInputSourcesChange = (event: XRInputSourcesChangeEvent) => {
+      for (const source of event.removed) {
+        if (source.hand && (source.handedness === 'left' || source.handedness === 'right')) {
+          this.handleXRHandTrackingLost(source.handedness);
         }
       }
     };
-
-    const onSelect = (event: any) => {
-      const handedness =
-        event?.inputSource?.handedness === 'left' ? 'left' : 'right';
-      const sample = this.sampleLiveXRHandState(handedness);
-      if (!sample) return;
-      this.recordXRHandEvent({
-        eventType: 'select',
-        inputSource: 'hand',
-        handedness,
-        connected: sample.connected,
-        poseId: sample.poseId,
-        pinchValue: Number(sample.pinchValue.toFixed(3)),
-        position: this.toVec3Tuple(sample.position),
-        indexTipPosition: this.toVec3Tuple(sample.indexTip),
-        graspPosition: this.toVec3Tuple(sample.graspPoint),
-      });
+    const onEnd = () => {
+      for (const side of ['left', 'right'] as const) this.handleXRHandTrackingLost(side);
+      this.forceReleaseAllGrabs();
+      this.nativeHands.reset();
+      this.boundXRSession = null;
+      this.syncAll();
     };
 
-    const onInputSourcesChange = () => {
-      for (const side of ['left', 'right'] as const) {
-        const sample = this.sampleLiveXRHandState(side);
-        if (sample && !sample.connected && this.lastHandConnected[side]) {
-          this.lastHandConnected[side] = false;
-          this.handleXRHandTrackingLost(side, sample);
-        }
-      }
-    };
-
-    session.addEventListener?.('selectstart', onSelectStart);
-    session.addEventListener?.('selectend', onSelectEnd);
-    session.addEventListener?.('select', onSelect);
-    session.addEventListener?.('inputsourceschange', onInputSourcesChange);
+    session.addEventListener('selectstart', onSelectStart);
+    session.addEventListener('selectend', onSelectEnd);
+    session.addEventListener('inputsourceschange', onInputSourcesChange);
+    session.addEventListener('end', onEnd);
+    this.cleanupFuncs.push(() => {
+      session.removeEventListener('selectstart', onSelectStart);
+      session.removeEventListener('selectend', onSelectEnd);
+      session.removeEventListener('inputsourceschange', onInputSourcesChange);
+      session.removeEventListener('end', onEnd);
+    });
   }
 
   private handleXRHandPressStart(
     sample: LiveXRHandSample,
     viaEvent: 'selectstart' | 'pinch_threshold' | 'poke',
   ): void {
-    const resolved = this.resolve3DTargetForHand(sample);
+    const hover = this.handHoverTargets.get(sample.handedness);
+    const latched = hover && performance.now() - hover.time <= 250 && Math.min(
+      hover.sample.position.distanceTo(sample.position),
+      hover.sample.indexTip.distanceTo(sample.indexTip),
+      hover.sample.graspPoint.distanceTo(sample.graspPoint),
+    ) <= 0.05;
+    const resolved = this.resolve3DTargetForHand(latched ? hover.sample : sample, latched ? hover.targetId : undefined);
 
     this.recordXRHandEvent({
       eventType: viaEvent === 'poke' ? 'poke' : 'selectstart',
@@ -2982,6 +2763,7 @@ export class MissionControlSystem extends createSystem({
       graspPosition: this.toVec3Tuple(sample.graspPoint),
       targetType: resolved?.targetType ?? 'NONE',
       targetId: resolved?.targetId ?? 'none',
+      actionOrOutcome: `hover:${hover?.targetId ?? 'none'}:${hover ? Math.round(performance.now() - hover.time) : -1}:${latched ? 'latched' : 'fresh'}`,
     });
 
     if (!resolved) return;
@@ -3000,7 +2782,7 @@ export class MissionControlSystem extends createSystem({
         }
         const pkt = this.engine.getState().packets[resolved.slotIndex];
         const obj = resolved.cubeEntity.object3D;
-        if (!obj) return;
+        if (!obj || !pkt || !this.cubeInteractions.acquire(sample.device, obj, pkt.id)) return;
         this.activeXRHandGrabs.set(sample.handedness, {
           cubeEntity: resolved.cubeEntity,
           slotIndex: resolved.slotIndex,
@@ -3087,7 +2869,7 @@ export class MissionControlSystem extends createSystem({
     }
     const activeGrab = this.activeXRHandGrabs.get(sample.handedness);
     this.recordXRHandEvent({
-      eventType: viaEvent === 'selectend' ? 'selectend' : 'grabrelease',
+      eventType: 'selectend',
       inputSource: 'hand',
       handedness: sample.handedness,
       connected: sample.connected,
@@ -3100,61 +2882,16 @@ export class MissionControlSystem extends createSystem({
       targetId: activeGrab ? `evidence-cube-${activeGrab.slotIndex + 1}` : 'none',
     });
 
-    if (!activeGrab) {
-      let hadStaleGrab = false;
-      for (const cubeEntity of this.queries.cubes.entities) {
-        if (cubeEntity.hasComponent(Grabbed)) {
-          this.world.getSystem(GrabSystem)?.forceRelease(cubeEntity);
-          hadStaleGrab = true;
-        }
-      }
-      for (const ctrlEntity of this.queries.controls.entities) {
-        if (ctrlEntity.hasComponent(Grabbed)) {
-          this.world.getSystem(GrabSystem)?.forceRelease(ctrlEntity);
-        }
-      }
-      if (hadStaleGrab) {
-        const st = this.engine.getState();
-        this.syncCubeTransforms(st.packets, st);
-      }
-      return;
-    }
+    if (!activeGrab) return;
 
     this.activeXRHandGrabs.delete(sample.handedness);
-    if (activeGrab.cubeEntity.hasComponent(Grabbed)) {
-      this.world.getSystem(GrabSystem)?.forceRelease(activeGrab.cubeEntity);
-    }
-    for (const ctrlEntity of this.queries.controls.entities) {
-      if (ctrlEntity.hasComponent(Grabbed)) {
-        this.world.getSystem(GrabSystem)?.forceRelease(ctrlEntity);
-      }
-    }
-    if (this.activeXRHandGrabs.size === 0) {
-      this.highlightDropZones(false);
-    }
+    if (!this.cubeInteractions.release(sample.device)) return;
+    if (this.activeXRHandGrabs.size === 0) this.highlightDropZones(false);
 
     const obj = activeGrab.cubeEntity.object3D;
-    if (obj) {
-      obj.position.copy(sample.graspPoint);
-      obj.updateMatrixWorld(true);
-    }
-
-    const distProcess = sample.graspPoint.distanceTo(PROCESS_CRADLE_WORLD);
-    const distDownlink = Math.min(
-      sample.graspPoint.distanceTo(DOWNLINK_BAY_CENTER_WORLD),
-      ...DOWNLINK_BAY_POSITIONS.map(([x, y, z]) =>
-        sample.graspPoint.distanceTo(new Vector3(x, y, z)),
-      ),
-    );
-    const distDiscard = sample.graspPoint.distanceTo(DISCARD_CHUTE_WORLD);
-    const zoneLabel =
-      distProcess < 0.15
-        ? 'PROCESS_CRADLE'
-        : distDownlink < 0.18
-          ? 'DOWNLINK_BAY'
-          : distDiscard < 0.15
-            ? 'DISCARD_CHUTE'
-            : 'TRAY_SNAP_RECOVERY';
+    if (obj) setWorldPosition(obj, sample.graspPoint);
+    const target = nearestCubeStation(sample.graspPoint, this.getCubeDropTargets());
+    const zoneLabel = target?.kind ?? 'TRAY_SNAP_RECOVERY';
 
     this.withInputSource('xr-hand', () => {
       this.handleCubeReleased(activeGrab.cubeEntity);
@@ -3181,8 +2918,13 @@ export class MissionControlSystem extends createSystem({
     lastSample?: LiveXRHandSample,
   ): void {
     const activeGrab = this.activeXRHandGrabs.get(handedness);
+    if (!activeGrab && !this.lastHandConnected[handedness]) return;
+    this.lastHandConnected[handedness] = false;
+    this.nativeHands.reset(handedness);
+    this.cubeInteractions.release(handedness === 'left' ? 'hand-left' : 'hand-right', true);
     this.lastHandPressed[handedness] = false;
     this.lastHandGlobeTouchPos.delete(handedness);
+    this.handHoverTargets.delete(handedness);
 
     if (activeGrab) {
       this.activeXRHandGrabs.delete(handedness);
@@ -3236,13 +2978,19 @@ export class MissionControlSystem extends createSystem({
 
   private updateXRHandInteractions(_delta: number): void {
     const isImmersive = Boolean(this.world.renderer?.xr?.isPresenting);
-    if (!isImmersive) return;
+    if (!isImmersive) {
+      for (const side of ['left', 'right'] as const) this.handleXRHandTrackingLost(side);
+      return;
+    }
 
     this.bindXRSessionHandEvents();
 
     for (const side of ['left', 'right'] as const) {
       const sample = this.sampleLiveXRHandState(side);
-      if (!sample) continue;
+      if (!sample) {
+        this.handleXRHandTrackingLost(side);
+        continue;
+      }
 
       // 1. Connection & Disconnection Transition Tracking
       if (sample.connected && !this.lastHandConnected[side]) {
@@ -3274,8 +3022,10 @@ export class MissionControlSystem extends createSystem({
         }
         const obj = activeGrab.cubeEntity.object3D;
         if (obj) {
-          obj.position.copy(sample.graspPoint);
-          obj.updateMatrixWorld(true);
+          setWorldPosition(obj, sample.graspPoint);
+          const target = nearestCubeStation(sample.graspPoint, this.getCubeDropTargets());
+          this.cubeInteractions.preview(sample.device, target);
+          this.highlightDropZones(true, target);
         }
         const movedFromStart = sample.graspPoint.distanceTo(
           activeGrab.grabStartPos,
@@ -3356,6 +3106,11 @@ export class MissionControlSystem extends createSystem({
 
         // 4. Resolve 3D target for pointing hover & direct index-tip poke
         const resolved = this.resolve3DTargetForHand(sample);
+        if (!sample.pressed && sample.poseId !== 'pinch') {
+          if (resolved) this.handHoverTargets.set(side, { targetId: resolved.targetId, sample, time: performance.now() });
+          else this.handHoverTargets.delete(side);
+        }
+        this.cubeInteractions.hover(sample.device, resolved?.cubeEntity?.object3D);
         if (resolved) {
           if (this.lastHandPointTarget[side] !== resolved.targetId) {
             this.lastHandPointTarget[side] = resolved.targetId;
@@ -3401,7 +3156,7 @@ export class MissionControlSystem extends createSystem({
   }
 
   private isAnyObjectGrabbed(): boolean {
-    if (this.activeXRHandGrabs.size > 0) return true;
+    if (this.cubeInteractions.hasHeld) return true;
     if (this.isLiveXRHandActive()) return false;
     for (const cubeEntity of this.queries.cubes.entities) {
       if (cubeEntity.hasComponent(Grabbed)) return true;
@@ -3414,7 +3169,11 @@ export class MissionControlSystem extends createSystem({
 
   private forceReleaseAllGrabs(): void {
     this.suppressReleaseActions = true;
+    this.desktopControls?.cancelCubeDrag();
+    this.cubeInteractions.recoverAll();
     this.activeXRHandGrabs.clear();
+    this.handHoverTargets.clear();
+    this.nativeHands.reset();
     const grabSystem = this.world.getSystem(GrabSystem);
     if (grabSystem) {
       for (const cubeEntity of this.queries.cubes.entities) {
@@ -3925,7 +3684,7 @@ export class MissionControlSystem extends createSystem({
     const signature = `${state.scenarioId}:${state.power}:${state.packets.map((p) => `${p.id}/${p.processed}`).join(',')}`;
     if (signature !== this.solverSignature || !this.cachedSolution) {
       this.solverSignature = signature;
-      this.cachedSolution = solveMission(state);
+      this.cachedSolution = solveMission(state, this.engine.getActiveCustomScenario());
     }
     return this.cachedSolution;
   }
@@ -4120,7 +3879,7 @@ export class MissionControlSystem extends createSystem({
     this.syncCubeTransforms(this.reviewState.packets, this.reviewState);
     const action = entry.action;
     const detail = action.type === 'SCAN' ? `SEC-${action.sectorId} / ${action.sensorMode}` : 'packetId' in action ? action.packetId ?? '' : '';
-    const achievable = this.reviewState.phase === 'OPERATIONS' ? solveMission(this.reviewState).score : state.debrief.totalScore;
+    const achievable = this.reviewState.phase === 'OPERATIONS' ? solveMission(this.reviewState, this.engine.getActiveCustomScenario()).score : state.debrief.totalScore;
     this.setText(this.debriefPanel, 'ReplayTimeline', `DECISION ${this.replayIndex + 1}/${decisions.length} | ${entry.elapsedSec.toFixed(1)}s: ${action.type} ${detail}\n${entry.ok ? '[OK]' : '[X]'} | ${this.reviewState.power} POWER | ${this.reviewState.storageUsed} STORAGE | SCORE STILL REACHABLE ${achievable}/100`);
   }
 
@@ -4151,7 +3910,7 @@ export class MissionControlSystem extends createSystem({
       const mastery = this.profile.mastery[this.engine.getState().scenarioId];
       this.setText(this.debriefPanel, 'MasteryReadout', mastery
         ? `PERSONAL BEST: ${mastery.bestScore}/100 | ${mastery.bestGrade}-RANK | ${mastery.bestMarginSec.toFixed(1)}s MARGIN | ${mastery.attempts} PASSES`
-        : `PROVEN OBJECTIVE: ${getMissionBenchmark(this.engine.getState().scenarioId).score}/100 | COMPLETE THIS PASS TO EARN MASTERY`);
+        : `PROVEN OBJECTIVE: ${getMissionBenchmark(this.engine.getState().scenarioId, this.engine.getActiveCustomScenario()).score}/100 | COMPLETE THIS PASS TO EARN MASTERY`);
       this.setText(this.debriefPanel, 'MedalsReadout', this.earnedMedals.length ? this.earnedMedals.join(' | ') : 'GROUND TRUTH / POWER DISCIPLINE / LINK PRECISION');
     }
   }
@@ -4302,21 +4061,13 @@ export class MissionControlSystem extends createSystem({
     const pkt = this.engine.getState().packets[slotIndex];
     if (pkt) {
       this.tutorial.notifyCubeGrabOrSelect(pkt.confidence !== 'UNVERIFIED');
+      this.tutorial.notifyCubeInspected();
     }
 
-    const targetPos =
-      targetZone === 'PROCESS'
-        ? PROCESS_CRADLE_WORLD
-        : targetZone === 'QUEUE'
-          ? DOWNLINK_BAY_CENTER_WORLD
-          : targetZone === 'RAW_TRAY'
-            ? RAW_TRAY_CENTER_WORLD
-            : targetZone === 'DISCARD'
-              ? DISCARD_CHUTE_WORLD
-              : new Vector3(0, 1.15, -0.2);
-
-    cubeEntity.object3D.position.copy(targetPos);
-    cubeEntity.object3D.updateMatrixWorld(true);
+    const targetPos = targetZone === 'INVALID'
+      ? new Vector3(0, 1.15, -0.2)
+      : this.cubeStationPosition(targetZone, targetZone === 'RAW_TRAY' ? slotIndex : 0);
+    setWorldPosition(cubeEntity.object3D, targetPos);
     this.handleCubeReleased(cubeEntity);
     return true;
   }
@@ -4333,7 +4084,7 @@ export class MissionControlSystem extends createSystem({
     let bestDist = 0.28;
     for (const sectorEntity of this.queries.sectors.entities) {
       const sObj = sectorEntity.object3D;
-      if (!sObj) continue;
+      if (!sObj || !isVisible(sObj)) continue;
       sObj.updateWorldMatrix(true, false);
       const pos = new Vector3().setFromMatrixPosition(sObj.matrixWorld);
       const dist = this.tempVec.distanceTo(pos);
@@ -4355,8 +4106,28 @@ export class MissionControlSystem extends createSystem({
     obj.rotation.set(0, 0, 0);
   }
 
+  private getCubeDropTargets(): CubeDropTarget[] {
+    const console = this.world.getSceneObject('orbital-console');
+    return console ? cubeStationTargets(console, this.profile.preferences.oneHanded ? 1.2 : 1) : [];
+  }
+
+  private cubeStationPosition(kind: CubeDropTarget['kind'], slotIndex = 0): Vector3 {
+    return this.getCubeDropTargets().find((target) => target.kind === kind && (target.slotIndex ?? 0) === slotIndex)!.position;
+  }
+
+  private releaseCube(object: Object3D): boolean {
+    const entity = [...this.queries.cubes.entities].find((cube) => cube.object3D === object);
+    if (!entity) return false;
+    const target = nearestCubeStation(object.getWorldPosition(new Vector3()), this.getCubeDropTargets());
+    this.handleCubeReleased(entity);
+    return target !== null && this.engine.getState().lastActionOk;
+  }
+
   private handleCubeReleased(entity: Entity): void {
-    if (this.suppressReleaseActions || this.engine.getState().phase !== 'OPERATIONS' || this.engine.getState().paused) return;
+    if (this.suppressReleaseActions || this.engine.getState().phase !== 'OPERATIONS' || this.engine.getState().paused) {
+      this.syncAll();
+      return;
+    }
     const obj = entity.object3D;
     if (!obj) return;
 
@@ -4372,45 +4143,9 @@ export class MissionControlSystem extends createSystem({
     obj.updateWorldMatrix(true, false);
     this.tempVec.setFromMatrixPosition(obj.matrixWorld);
 
-    const distProcess = this.tempVec.distanceTo(PROCESS_CRADLE_WORLD);
-    const distDiscard = this.tempVec.distanceTo(DISCARD_CHUTE_WORLD);
-    const distDownlinkCenter = this.tempVec.distanceTo(DOWNLINK_BAY_CENTER_WORLD);
-    const distRawTray = this.tempVec.distanceTo(RAW_TRAY_CENTER_WORLD);
-
-    let closestSlotIdx = -1;
-    let bestSlotDist = 0.22;
-    for (let s = 0; s < DOWNLINK_BAY_POSITIONS.length; s++) {
-      const [bx, by, bz] = DOWNLINK_BAY_POSITIONS[s];
-      const slotPos = new Vector3(bx, by, bz);
-      const d = this.tempVec.distanceTo(slotPos);
-      if (d < bestSlotDist) {
-        bestSlotDist = d;
-        closestSlotIdx = s;
-      }
-    }
-    const downlinkDist = Math.min(distDownlinkCenter, bestSlotDist);
-
-    // Determine the closest magnetic destination station among valid capture envelopes
-    let closestTarget: 'DISCARD' | 'PROCESS' | 'DOWNLINK' | 'RAW_TRAY' | 'NONE' = 'NONE';
-    let minDistance = this.profile.preferences.oneHanded ? 0.24 : 0.20;
-    const assistance = this.profile.preferences.oneHanded ? 1.3 : 1;
-
-    if (distDiscard < 0.15 * assistance && distDiscard < minDistance) {
-      closestTarget = 'DISCARD';
-      minDistance = distDiscard;
-    }
-    if (distProcess < 0.15 * assistance && distProcess < minDistance) {
-      closestTarget = 'PROCESS';
-      minDistance = distProcess;
-    }
-    if (downlinkDist < 0.18 * assistance && downlinkDist < minDistance) {
-      closestTarget = 'DOWNLINK';
-      minDistance = downlinkDist;
-    }
-    if (distRawTray < 0.22 * assistance && distRawTray < minDistance) {
-      closestTarget = 'RAW_TRAY';
-      minDistance = distRawTray;
-    }
+    const target = nearestCubeStation(this.tempVec, this.getCubeDropTargets());
+    const closestTarget = target?.kind ?? 'NONE';
+    const closestSlotIdx = target?.slotIndex ?? -1;
 
     if (closestTarget === 'DISCARD') {
       this.playCue('CUBE_DOCK');
@@ -4423,7 +4158,7 @@ export class MissionControlSystem extends createSystem({
       this.handleProcessSelected();
       return;
     }
-    if (closestTarget === 'DOWNLINK') {
+    if (closestTarget === 'QUEUE') {
       this.playCue('CUBE_DOCK');
       this.tutorial.notifyDownlinkBayRelease(this.currentInputSource);
       if (!pkt.queued) {
@@ -4447,23 +4182,24 @@ export class MissionControlSystem extends createSystem({
       return;
     }
 
-    // Automatic drop recovery: return cube to its assigned tray or downlink bay slot
+    this.playCue('ERROR_REJECT');
     this.syncAll();
   }
 
-  private highlightDropZones(active: boolean): void {
+  private highlightDropZones(active: boolean, preview?: CubeDropTarget | null): void {
+    const selected = (kind: CubeDropTarget['kind']) => active && (preview === undefined || preview?.kind === kind);
     const processPad = this.world.getSceneObject('pad-process-cradle');
     const queuePad = this.world.getSceneObject('pad-queue-downlink');
     const discardPad = this.world.getSceneObject('pad-discard-chute');
 
     if (processPad) {
-      this.setObjectTint(processPad, 0xf59e0b, active ? 1.45 : 0.85);
+      this.setObjectTint(processPad, 0xf59e0b, selected('PROCESS') ? 1.45 : 0.85);
     }
     if (queuePad) {
-      this.setObjectTint(queuePad, 0x38bdf8, active ? 1.45 : 0.85);
+      this.setObjectTint(queuePad, 0x38bdf8, selected('QUEUE') ? 1.45 : 0.85);
     }
     if (discardPad) {
-      this.setObjectTint(discardPad, 0xef4444, active ? 1.45 : 0.85);
+      this.setObjectTint(discardPad, 0xef4444, selected('DISCARD') ? 1.45 : 0.85);
     }
 
     const consoleObj = this.world.getSceneObject('orbital-console');
@@ -4479,7 +4215,7 @@ export class MissionControlSystem extends createSystem({
         cradleHalo instanceof Mesh &&
         cradleHalo.material instanceof MeshBasicMaterial
       ) {
-        cradleHalo.visible = active;
+        cradleHalo.visible = selected('PROCESS');
         cradleHalo.material.opacity = opacity;
         cradleHalo.scale.set(scale, scale, scale);
       }
@@ -4487,7 +4223,7 @@ export class MissionControlSystem extends createSystem({
         queueHalo instanceof Mesh &&
         queueHalo.material instanceof MeshBasicMaterial
       ) {
-        queueHalo.visible = active;
+        queueHalo.visible = selected('QUEUE');
         queueHalo.material.opacity = opacity;
         queueHalo.scale.set(1.68 * scale, 0.65 * scale, 1);
       }
@@ -4495,7 +4231,7 @@ export class MissionControlSystem extends createSystem({
         discardHalo instanceof Mesh &&
         discardHalo.material instanceof MeshBasicMaterial
       ) {
-        discardHalo.visible = active;
+        discardHalo.visible = selected('DISCARD');
         discardHalo.material.opacity = opacity;
         discardHalo.scale.set(scale, scale, scale);
       }
@@ -4714,12 +4450,18 @@ export class MissionControlSystem extends createSystem({
     if (state.debrief && !this.recordedDebrief) {
       this.recordedDebrief = true;
       if (state.scenarioId !== 'ORBITAL_ACADEMY') {
-        this.earnedMedals = recordMissionMastery(this.profile, state.scenarioId, state.debrief);
+        this.earnedMedals = recordMissionMastery(this.profile, state.scenarioId, state.debrief, {
+          actualHandsUsed: this.profile.preferences.oneHanded ? 1 : 2,
+          hintsRequestedCount: (this.coPilot?.getTotalDelegations() ?? 0) - this.delegationBaseline,
+        });
         if (this.dailyDate) recordDailyPass(this.profile, this.dailyDate, state.debrief.totalScore);
         saveMissionProfile(this.profile);
       } else {
-        this.earnedMedals = ['ORBITAL WORKSTATION QUALIFIED'];
+        this.earnedMedals = state.debrief.outcome === 'SUCCESS' ? ['ORBITAL WORKSTATION QUALIFIED'] : [];
+        recordMissionMastery(this.profile, state.scenarioId, state.debrief);
+        saveMissionProfile(this.profile);
       }
+      this.delegationBaseline = this.coPilot?.getTotalDelegations() ?? 0;
     }
     this.syncBriefingPanel();
     this.syncTelemetryPanel();
@@ -4736,7 +4478,7 @@ export class MissionControlSystem extends createSystem({
       transition.remaining = Math.max(0, transition.remaining - delta);
       const entity = [...this.queries.cubes.entities].find((cube) => cube.getValue(EvidenceCubeNode, 'packetId') === packetId);
       const object = entity?.object3D;
-      if (!object || entity?.hasComponent(Grabbed) || this.isCubeGrabbedByXRHand(entity)) {
+      if (!object || this.cubeInteractions.isHeld(object)) {
         this.cubeTransitions.delete(packetId);
         continue;
       }
@@ -4757,7 +4499,7 @@ export class MissionControlSystem extends createSystem({
           particles.rotation.y = progress * Math.PI;
         }
       } else if (!this.profile.preferences.reducedMotion) {
-        object.position.copy(PROCESS_CRADLE_WORLD);
+        setWorldPosition(object, this.cubeStationPosition('PROCESS'));
         object.position.y += 0.02;
         const scaleProgress = 1.04 - 0.34 * smooth;
         object.scale.set(scaleProgress * selected, (1.04 - 0.39 * smooth) * selected, scaleProgress * selected);
@@ -4788,22 +4530,12 @@ export class MissionControlSystem extends createSystem({
       const obj = cubeEntity.object3D;
       if (!obj) continue;
 
-      if (
-        (this.isLiveXRHandActive() || this.world.renderer?.xr?.isPresenting) &&
-        cubeEntity.hasComponent(Grabbed) &&
-        !this.isCubeGrabbedByXRHand(cubeEntity)
-      ) {
-        this.world.getSystem(GrabSystem)?.forceRelease(cubeEntity);
-      }
-      const isCurrentlyGrabbed = this.isLiveXRHandActive()
-        ? this.isCubeGrabbedByXRHand(cubeEntity)
-        : cubeEntity.hasComponent(Grabbed) || this.isCubeGrabbedByXRHand(cubeEntity);
+      const isCurrentlyGrabbed = this.cubeInteractions.isHeld(obj);
 
       if (!pkt) {
         cubeEntity.setValue(EvidenceCubeNode, 'packetId', '');
         if (!isCurrentlyGrabbed) {
-          const home = RAW_TRAY_POSITIONS[slotIndex] ?? RAW_TRAY_POSITIONS[0];
-          obj.position.set(home[0], home[1], home[2]);
+          setWorldPosition(obj, this.cubeStationPosition('RAW_TRAY', slotIndex));
           obj.rotation.set(0, 0, 0);
           obj.updateMatrixWorld(true);
         }
@@ -4835,18 +4567,15 @@ export class MissionControlSystem extends createSystem({
 
       if (!isCurrentlyGrabbed) {
         if (pkt.queued && pkt.queueIndex !== null && pkt.queueIndex < 3) {
-          const bayPos =
-            DOWNLINK_BAY_POSITIONS[pkt.queueIndex] ?? DOWNLINK_BAY_POSITIONS[0];
-          obj.position.set(bayPos[0], bayPos[1], bayPos[2]);
+          setWorldPosition(obj, this.cubeStationPosition('QUEUE', pkt.queueIndex));
         } else if (
           this.cubeTransitions.get(pkt.id)?.kind === 'PROCESS' &&
           !this.profile.preferences.reducedMotion
         ) {
-          obj.position.copy(PROCESS_CRADLE_WORLD);
+          setWorldPosition(obj, this.cubeStationPosition('PROCESS'));
           obj.position.y += 0.02;
         } else {
-          const trayPos = RAW_TRAY_POSITIONS[slotIndex] ?? RAW_TRAY_POSITIONS[0];
-          obj.position.set(trayPos[0], trayPos[1], trayPos[2]);
+          setWorldPosition(obj, this.cubeStationPosition('RAW_TRAY', slotIndex));
         }
         obj.rotation.set(0, 0, 0);
         obj.updateMatrixWorld(true);
@@ -5353,6 +5082,13 @@ export class MissionControlSystem extends createSystem({
   }
 
   private getNextTacticalHint(state: MissionState): string {
+    for (const owner of ['hand-left', 'hand-right', 'desktop'] as const) {
+      const held = this.cubeInteractions.held(owner);
+      if (!held) continue;
+      const target = held.preview;
+      return target ? `RELEASE TO ${target.kind.replace('_', ' ')}${target.slotIndex !== undefined && target.kind === 'QUEUE' ? ` SLOT ${target.slotIndex + 1}` : ''}`
+        : 'INVALID PLACEMENT: release returns evidence to its assigned station.';
+    }
     if (this.tutorial.isActive()) {
       const step = this.tutorial.getCurrentStepSpec();
       if (step) {
@@ -5363,7 +5099,7 @@ export class MissionControlSystem extends createSystem({
     if (state.phase === 'DEBRIEF') return 'PASS COMPLETE: review mission decisions or launch next operation.';
     if (state.phase === 'DOWNLINK') return `TRANSMITTING: ${state.downlinkRemainingSec.toFixed(1)}s left (@ 10.0 MB/s). Evidence streaming to ground.`;
     const solution = this.getSolution(state);
-    const benchmark = getMissionBenchmark(state.scenarioId);
+    const benchmark = getMissionBenchmark(state.scenarioId, this.engine.getActiveCustomScenario());
     if (this.profile.preferences.guidance === 'EXPERT') return `EXPERT MODE | ${state.packets.length}/3 CUBES | ${state.downlinkCommittedSec.toFixed(1)}s QUEUE | TARGET ${benchmark.score}/100`;
     if (this.profile.preferences.guidance === 'STANDARD') return `TARGET ${benchmark.score}/100 | REACHABLE ${solution.score}/100 | observe -> compress -> queue -> transmit`;
     const next = getNextPlanAction(state, solution);
@@ -5629,7 +5365,7 @@ export class MissionControlSystem extends createSystem({
       this.setText(
         this.debriefPanel,
         'DebriefScoreSubtitle',
-        `OBJECTIVE: ${getMissionBenchmark(state.scenarioId).score}/100 | CUTOFF ${state.downlinkWindowSec.toFixed(1)}s | ${state.paused ? 'PAUSED' : state.phase}`,
+        `OBJECTIVE: ${getMissionBenchmark(state.scenarioId, this.engine.getActiveCustomScenario()).score}/100 | CUTOFF ${state.downlinkWindowSec.toFixed(1)}s | ${state.paused ? 'PAUSED' : state.phase}`,
       );
       this.setBg(this.debriefPanel, 'DebriefBannerCard', '#132036');
 
