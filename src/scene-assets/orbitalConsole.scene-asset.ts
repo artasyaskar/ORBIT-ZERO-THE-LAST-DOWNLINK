@@ -40,6 +40,7 @@ import {
     mergeStaticMeshesByMaterial,
     taperPlate,
 } from './lib/hardsurface';
+import { installCubeStationAnchors } from '../systems/cubeInteractions';
 import { TACTICAL_PALETTE, EMISSION_INTENSITIES } from './lib/tacticalPalette';
 
 export function createOrbitalConsoleAsset(): Object3D {
@@ -829,7 +830,7 @@ export function createOrbitalConsoleAsset(): Object3D {
         slotBase.position.set(dlSlotX[i], 0.788, 0.14);
         deckGroup.add(slotBase);
 
-        const waveguide = new Mesh(dlWaveguideGeo, waveguideMat);
+        const waveguide = new Mesh(dlWaveguideGeo, waveguideMat.clone());
         waveguide.name = `DownlinkSlotWaveguide_${i + 1}`;
         waveguide.position.set(dlSlotX[i], 0.789, 0.172);
         downlinkDynamicGroup.add(waveguide);
@@ -1609,6 +1610,7 @@ export function createOrbitalConsoleAsset(): Object3D {
     // Dynamic interactive stations added after static merge to preserve animation transforms & material states
     // root.add(cradleGroup);
     root.add(downlinkDynamicGroup);
+    installCubeStationAnchors(root);
 
     return root;
 }

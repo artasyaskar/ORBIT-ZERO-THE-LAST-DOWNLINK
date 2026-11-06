@@ -269,7 +269,7 @@ export function generateProceduralCrisis(seedInput: string | number = Date.now()
     id: 'STANDARD_INDUS_PASS',
     name: threat.name,
     subtitle: `${threat.codeName} | Level ${severity} Emergency`,
-    briefing: `${threat.description} Telemetry budget: ${pwrBudget} Wh Power, 9 MB Buffer, ${timeLimit.toFixed(1)}s Horizon Contact. Triage and downlink verified flood evidence.`,
+    briefing: `${threat.description} Telemetry budget: ${pwrBudget} Wh Power, 9 MB abstract storage budget, ${timeLimit.toFixed(1)}s Horizon Contact. Triage and downlink verified flood evidence.`,
     budget,
     sectorOverrides,
   };

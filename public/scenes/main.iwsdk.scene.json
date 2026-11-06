@@ -445,7 +445,6 @@
       "components": {
         "RayInteractable": {},
         "PokeInteractable": {},
-        "OneHandGrabbable": {},
         "EvidenceCubeNode": {
           "slotIndex": 0,
           "packetId": ""
@@ -470,7 +469,6 @@
       "components": {
         "RayInteractable": {},
         "PokeInteractable": {},
-        "OneHandGrabbable": {},
         "EvidenceCubeNode": {
           "slotIndex": 1,
           "packetId": ""
@@ -495,7 +493,6 @@
       "components": {
         "RayInteractable": {},
         "PokeInteractable": {},
-        "OneHandGrabbable": {},
         "EvidenceCubeNode": {
           "slotIndex": 2,
           "packetId": ""
