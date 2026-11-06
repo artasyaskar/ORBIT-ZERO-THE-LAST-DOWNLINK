@@ -975,8 +975,9 @@ describe('ORBIT ZERO - MissionEngine Deterministic Triage Simulation', () => {
       tutorial.syncWithMissionState(engine.getState());
       expect(tutorial.getState().currentStepId).toBe('STEP_5_INSPECT');
 
-      tutorial.notifyCubeGrabOrSelect(true);
-      tutorial.syncWithMissionState(engine.getState(), { type: 'SELECT_PACKET' });
+      // CRITICAL (F05): Inspection requires explicit notification, not mere grab/select.
+      tutorial.notifyCubeInspected();
+      tutorial.syncWithMissionState(engine.getState());
       expect(tutorial.getState().currentStepId).toBe('STEP_6_PROCESS');
 
       engine.processPacket(pkt.id);

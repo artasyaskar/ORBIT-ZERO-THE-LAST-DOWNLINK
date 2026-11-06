@@ -227,12 +227,11 @@ export class TutorialEngine {
     this.state.pinchScanVerified = true;
   }
 
-  public notifyCubeGrabOrSelect(confidenceValid = true, source: TutorialInputSource = 'desktop'): void {
+  public notifyCubeGrabOrSelect(_confidenceValid = true, source: TutorialInputSource = 'desktop'): void {
     if (!this.acceptsSource(source)) return;
     this.state.cubeGrabbedOrSelected = true;
-    if (confidenceValid) {
-      this.state.cubeInspected = true;
-    }
+    // CRITICAL (F05): Grabbing or selecting a cube does NOT count as inspecting it.
+    // Inspection must be explicitly verified via notifyCubeInspected().
   }
 
   public notifyCubeInspected(source: TutorialInputSource = 'desktop'): void {
@@ -279,8 +278,7 @@ export class TutorialEngine {
     // after a scan. An explicit grab or SELECT_PACKET action is required after scanning.
     if (sourceAccepted && recentAction?.type === 'SELECT_PACKET' && mission.packets.length > 0) {
       this.state.cubeGrabbedOrSelected = true;
-      const validPkt = mission.packets.find((p) => p.confidence !== 'UNVERIFIED');
-      if (validPkt) this.state.cubeInspected = true;
+      // CRITICAL (F05): Selecting a packet does NOT automatically count as inspecting it.
     }
 
     const activeSource: TutorialInputSource = this.state.vrMode ? 'xr-hand' : source;

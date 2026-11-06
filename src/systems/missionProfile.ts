@@ -67,6 +67,7 @@ export function loadMissionProfile(): MissionProfile {
       ];
     }
     for (const id of [
+      'ORBITAL_ACADEMY',
       'STANDARD_INDUS_PASS',
       'MONSOON_SUPERCELL_PASS',
       'SOLAR_BROWNOUT_PASS',
@@ -128,7 +129,7 @@ export function recordMissionMastery(
       ? Math.max(previous.bestMarginSec, report.windowMarginSec) : previous.bestMarginSec,
     medals: [...new Set([...(previous?.medals ?? []), ...earned])],
   };
-  if (scenarioId === 'STANDARD_INDUS_PASS' || scenarioId === 'FIRELINE_PASS') profile.tutorialComplete = true;
+  if (scenarioId === 'ORBITAL_ACADEMY' && report.outcome === 'SUCCESS') profile.tutorialComplete = true;
   return earned;
 }
 
