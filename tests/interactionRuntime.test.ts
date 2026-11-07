@@ -23,6 +23,8 @@ function runtime() {
     queries: { cubes: { entities: [entity] }, controls: { entities: [] } },
     profile: { preferences: { oneHanded: false } },
     world: { getSceneObject: (id: string) => id === 'orbital-console' ? console : undefined },
+    sceneLookups: { get: (id: string) => id === 'orbital-console' ? console : undefined },
+    pressResolvedTarget: new Map(),
     tempVec: new Vector3(), currentInputSource: 'xr-hand', suppressReleaseActions: false,
     tutorial: { notifyCradleRelease: vi.fn(), notifyDownlinkBayRelease: vi.fn() },
     playCue: vi.fn(),

@@ -195,6 +195,10 @@ export class LandingUI {
             <span class="oz-badge-chip">3 CAMPAIGN OPERATIONS + ACADEMY</span>
             <span class="oz-badge-chip">META VR START 2026</span>
           </div>
+          <p class="oz-credit-line">
+            Earth day, night and relief maps: Solar System Scope, CC BY 4.0, based on NASA data.
+            <a href="assets/ATTRIBUTION.md" target="_blank" rel="noopener">Full asset credits</a>
+          </p>
         </div>
       </main>
 
@@ -216,22 +220,22 @@ export class LandingUI {
 
           <!-- 4-OPERATION CAMPAIGN SELECTOR -->
           <div id="oz-campaign-grid" class="oz-campaign-grid" role="radiogroup" aria-label="Select Campaign Operation">
-            <button type="button" id="card-op-academy" class="oz-op-card" data-op-id="ORBITAL_ACADEMY">
+            <button type="button" role="radio" id="card-op-academy" class="oz-op-card" data-op-id="ORBITAL_ACADEMY">
               <span class="oz-op-code">OP 00: ORBITAL ACADEMY</span>
               <strong class="oz-op-title">Hand Gesture Tutorial</strong>
               <span class="oz-op-meta">9-Step Point, Pinch, Grab & Dock</span>
             </button>
-            <button type="button" id="card-op-fireline" class="oz-op-card oz-op-card-active" data-op-id="FIRELINE_PASS">
+            <button type="button" role="radio" id="card-op-fireline" class="oz-op-card oz-op-card-active" data-op-id="FIRELINE_PASS">
               <span class="oz-op-code">OP 01: FIRELINE</span>
               <strong class="oz-op-title">Bolan Fireline Zone</strong>
               <span class="oz-op-meta">52 Wh • 9 STR (18 MB/STR) • Thermal IR</span>
             </button>
-            <button type="button" id="card-op-monsoon" class="oz-op-card" data-op-id="STANDARD_INDUS_PASS">
+            <button type="button" role="radio" id="card-op-monsoon" class="oz-op-card" data-op-id="STANDARD_INDUS_PASS">
               <span class="oz-op-code">OP 02: MONSOON SHIELD</span>
               <strong class="oz-op-title">Indus Basin Flood</strong>
               <span class="oz-op-meta">55 Wh • 9 STR (18 MB/STR) • SAR Cloud</span>
             </button>
-            <button type="button" id="card-op-aftershock" class="oz-op-card" data-op-id="AFTERSHOCK_PASS">
+            <button type="button" role="radio" id="card-op-aftershock" class="oz-op-card" data-op-id="AFTERSHOCK_PASS">
               <span class="oz-op-code">OP 03: AFTERSHOCK</span>
               <strong class="oz-op-title">Quetta Fault Crisis</strong>
               <span class="oz-op-meta">50 Wh • 6 STR (18 MB/STR) • Change Det.</span>
@@ -260,7 +264,7 @@ export class LandingUI {
             <div class="oz-card oz-card-desktop" id="card-desktop" tabindex="0">
               <div class="oz-card-header">
                 <span class="oz-card-badge">DESKTOP WORKSTATION</span>
-                <span class="oz-card-fps">60 FPS</span>
+                <span class="oz-card-fps">POINTER + DRAG</span>
               </div>
               <h3 class="oz-card-title">DESKTOP EXPERIENCE</h3>
               <p class="oz-card-desc">
@@ -280,7 +284,7 @@ export class LandingUI {
             <div class="oz-card oz-card-vr" id="card-vr" tabindex="0">
               <div class="oz-card-header">
                 <span class="oz-card-badge">SPATIAL COCKPIT</span>
-                <span class="oz-card-fps">72–90 FPS</span>
+                <span class="oz-card-fps">HANDS-FIRST</span>
               </div>
               <h3 class="oz-card-title">VR EXPERIENCE</h3>
               <p class="oz-card-desc">
@@ -340,6 +344,15 @@ export class LandingUI {
     }
   }
 
+  /** Initial radio state without firing onSelectCampaign (the default card is pre-selected in markup). */
+  private syncCampaignCardA11y(): void {
+    this.rootEl.querySelectorAll<HTMLButtonElement>('.oz-op-card').forEach((btn) => {
+      const isSelected = btn.getAttribute('data-op-id') === this.selectedCard.id;
+      btn.setAttribute('aria-checked', isSelected ? 'true' : 'false');
+      btn.tabIndex = isSelected ? 0 : -1;
+    });
+  }
+
   public selectCampaignCard(opId: CampaignCardSpec['id']): void {
     const found = CAMPAIGN_MENU_CARDS.find((c) => c.id === opId);
     if (!found) return;
@@ -350,6 +363,7 @@ export class LandingUI {
       const isSelected = btn.getAttribute('data-op-id') === opId;
       btn.classList.toggle('oz-op-card-active', isSelected);
       btn.setAttribute('aria-checked', isSelected ? 'true' : 'false');
+      btn.tabIndex = isSelected ? 0 : -1; // roving tabindex: the group is one tab stop
     });
 
     const opCodeEl = this.rootEl.querySelector('#oz-briefing-opcode');
@@ -398,7 +412,24 @@ export class LandingUI {
           this.selectCampaignCard(opId);
         }
       });
+      // WAI-ARIA radio group keys: arrows move selection and focus together, Home/End jump.
+      btn.addEventListener('keydown', (e: KeyboardEvent) => {
+        const list = Array.from(opCards);
+        const at = list.indexOf(btn);
+        let next = -1;
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (at + 1) % list.length;
+        else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (at - 1 + list.length) % list.length;
+        else if (e.key === 'Home') next = 0;
+        else if (e.key === 'End') next = list.length - 1;
+        if (next < 0) return;
+        e.preventDefault();
+        const target = list[next];
+        const opId = target.getAttribute('data-op-id') as CampaignCardSpec['id'] | null;
+        if (opId) this.selectCampaignCard(opId);
+        target.focus();
+      });
     });
+    this.syncCampaignCardA11y();
 
     // "PLAY ON DESKTOP" card & button CTA
     this.rootEl.querySelector('#card-desktop')?.addEventListener('click', () => {

@@ -62,6 +62,11 @@ import { NativeXRHands, type LiveXRHandSample } from './nativeXRHands';
 import { CubeInteractions, cubeStationTargets, nearestCubeStation, isVisible, setWorldPosition, type CubeDropTarget } from './cubeInteractions';
 import { TutorialEngine } from '../mission/tutorialEngine';
 import { describeMissionPlan, getMissionBenchmark, getNextPlanAction, getQueueSchedule, solveMission } from '../mission/missionPlanner';
+import { SolverMemo } from '../mission/solverMemo';
+import { SceneObjectCache } from './sceneObjectCache';
+import { clipText, retryGuidanceFor } from '../ui/debriefText';
+import { isStrayScannerGrab, pressOwner } from './scannerArbitration';
+import { IMMERSIVE_PANEL_POSES, type PanelPose } from '../ui/spatialLayout';
 import type { DataPacket, MissionScenarioId, MissionState, SectorId, SensorMode } from '../mission/types';
 import {
   GLOBE_RADIUS,
@@ -89,6 +94,9 @@ const DOWNLINK_BAY_POSITIONS: [number, number, number][] = [
 const STANDBY_CUBE_COLORS = [0x38bdf8, 0x38bdf8, 0xf59e0b];
 
 const SCANNER_HOME_POSITION = new Vector3(-0.44, 0.80, -0.30);
+/** Debrief panel elements that only matter before downlink; hidden once results are shown. */
+const DEBRIEF_PANEL_OPERATIONS_ONLY = ['Slot1Card', 'Slot2Card', 'Slot3Card', 'Btn_ReorderQueue', 'Btn_CommitDownlink'] as const;
+
 const GLOBE_CENTER_WORLD = new Vector3(0, 0.98, -0.48);
 const DOWNLINK_BAY_CENTER_WORLD = new Vector3(0.32, 0.79, -0.43);
 
@@ -191,8 +199,25 @@ export class MissionControlSystem extends createSystem({
   private dailyDate: string | null = null;
   private replayIndex = -1;
   private caption = '';
-  private solverSignature = '';
-  private cachedSolution?: MissionSolution;
+  /**
+   * `world.getSceneObject(id)` walks the whole level tree on every call, and the per-frame update
+   * and hand-interaction paths call it dozens of times. Lookups go through a revalidating cache:
+   * a node that was removed, moved out of the scene, rebuilt, or belongs to another level is
+   * re-resolved. See sceneObjectCache.ts.
+   */
+  private readonly sceneLookups = new SceneObjectCache({
+    root: () => this.scene,
+    resolve: (id) => this.world.getSceneObject(id),
+    isCurrent: (id, object) =>
+      object.userData.iwsdkSceneNodeId === id &&
+      (object.userData.iwsdkSceneLevelId == null || object.userData.iwsdkSceneLevelId === this.world.activeLevelId),
+  });
+  private sceneObject<T extends Object3D = Object3D>(id: string): T | undefined {
+    return this.sceneLookups.get<T>(id);
+  }
+  private debriefBorder = '';
+  /** Memoized planner keyed on every solver input, including the custom scenario instance. */
+  private readonly solverMemo = new SolverMemo();
   private panelValues = new WeakMap<UIKitMLAsset, Map<string, string>>();
   private panelFontSizes = new WeakMap<object, number>();
   private frameSnapshot?: MissionState;
@@ -202,6 +227,8 @@ export class MissionControlSystem extends createSystem({
   private readonly beamEnd = new Vector3(0, 1.255, 0.01);
   private readonly worldUp = new Vector3(0, 1, 0);
   private scannerEntity?: Entity;
+  /** What the app resolved each hand's current pinch to (null when it hit nothing). Cleared on release. */
+  private readonly pressResolvedTarget = new Map<'left' | 'right', string | null>();
   private earthGlobeEnhancements?: Object3D;
   private enhancementAnimationTime = 0;
   private objectCache = new Map<string, Object3D>();
@@ -315,6 +342,7 @@ export class MissionControlSystem extends createSystem({
     // Deep Agentic Co-Pilot System Integration
     this.coPilot = new AgenticCoPilot({
       getState: () => this.engine.getState(),
+      getSolution: (state) => this.getSolution(state),
       applyAction: (action) => {
         const res = this.applyAction(action);
         this.syncAll();
@@ -341,7 +369,7 @@ export class MissionControlSystem extends createSystem({
     this.bindEarthPlanetTextures();
 
     // 1a. RC10: Mount Tactical Earth Enhancements (storm, lightning, flood over Indus Basin)
-    const globe = this.world.getSceneObject('earth-globe');
+    const globe = this.sceneObject('earth-globe');
     if (globe) {
       this.earthGlobeEnhancements = createEarthGlobeEnhancementsOptimized();
       globe.add(this.earthGlobeEnhancements);
@@ -359,7 +387,7 @@ export class MissionControlSystem extends createSystem({
     ];
     const syncDeskPadsForXR = (isImmersive: boolean) => {
       for (const id of deskPadIds) {
-        const obj = this.world.getSceneObject(id);
+        const obj = this.sceneObject(id);
         if (!obj) continue;
         obj.visible = isImmersive;
         if (isImmersive) {
@@ -528,7 +556,7 @@ export class MissionControlSystem extends createSystem({
       rotateGlobe: (yaw, pitch) => this.rotateGlobe(yaw, pitch),
       zoomGlobe: (delta) => this.zoomGlobe(delta),
       playCue: (cue) => this.playCue(cue as never),
-      getSceneObject: (id) => this.world.getSceneObject(id),
+      getSceneObject: (id) => this.sceneObject(id),
       highlightDropZones: (active) => this.highlightDropZones(active),
       toggleVrHandSimulator: (active?: boolean) => {
         if (typeof active === 'boolean') {
@@ -577,7 +605,7 @@ export class MissionControlSystem extends createSystem({
         getControlScreenPosition: (panelId: string, elementId: string) => {
           if (this.world.renderer.xr.isPresenting) return null;
           if (this.engine.getState().paused && elementId === 'Btn_Pause') return null;
-          const panel = this.world.getSceneObject<UIKitMLAsset>(panelId);
+          const panel = this.sceneObject<UIKitMLAsset>(panelId);
           const element = panel?.getElementById<UIKit.Container>(elementId);
           const matrix = element?.globalMatrix.value;
           if (!matrix || !element?.size.value || !element.isVisible.value) return null;
@@ -622,9 +650,9 @@ export class MissionControlSystem extends createSystem({
           ray.setFromCamera(new Vector2((x - bounds.left) / bounds.width * 2 - 1, 1 - (y - bounds.top) / bounds.height * 2), this.camera);
           return ray.intersectObjects([this.scene], true).slice(0, 12).map((hit) => ({ name: hit.object.name, distance: hit.distance, parents: [hit.object.parent?.name, hit.object.parent?.parent?.name], visible: hit.object.visible }));
         },
-        getPanelText: (panelId: string, elementId: string) => this.world.getSceneObject<UIKitMLAsset>(panelId)?.getElementById<UIKit.Text>(elementId)?.properties.value.text,
+        getPanelText: (panelId: string, elementId: string) => this.sceneObject<UIKitMLAsset>(panelId)?.getElementById<UIKit.Text>(elementId)?.properties.value.text,
         clickPanel: (panelId: string, elementId: string) => {
-          const panel = this.world.getSceneObject<UIKitMLAsset>(panelId);
+          const panel = this.sceneObject<UIKitMLAsset>(panelId);
           const element = panel?.getElementById(elementId);
           if (!element) return false;
           element.dispatchEvent({ type: 'click' } as never);
@@ -699,25 +727,25 @@ export class MissionControlSystem extends createSystem({
         toggleSpatialHud: (active?: boolean) => this.toggleSpatialHud(active),
         getSpatialHudVisible: () => this.spatialHudVisible,
         calibrateSeatedView: () => this.calibrateSeatedView(),
-        getSceneObject: (id: string) => this.world.getSceneObject(id),
+        getSceneObject: (id: string) => this.sceneObject(id),
         trigger3DNode: (nodeId: string) => this.handleTrigger3DNodeById(nodeId),
         highlightDropZones: (active: boolean) => this.highlightDropZones(active),
         handleControlAction: (action: string) => this.handleControlAction(action),
         rotateGlobe: (yaw: number, pitch: number) => this.rotateGlobe(yaw, pitch),
         zoomGlobe: (delta: number) => this.zoomGlobe(delta),
         getGlobeRotationDelta: () => {
-          const globe = this.world.getSceneObject('earth-globe');
+          const globe = this.sceneObject('earth-globe');
           if (!globe) return 0;
           return 2 * Math.acos(Math.min(1, Math.max(-1, globe.quaternion.w)));
         },
         getGlobeFocalDistance: () => {
-          const globe = this.world.getSceneObject('earth-globe');
+          const globe = this.sceneObject('earth-globe');
           return globe ? globe.position.z : -0.58;
         },
         resetGlobeFocalDistance: () => {
           this.targetFocalDistance = -0.48;
           this.globeFocalDistance = -0.48;
-          const globe = this.world.getSceneObject('earth-globe');
+          const globe = this.sceneObject('earth-globe');
           if (globe) {
             globe.position.z = -0.48;
           }
@@ -762,6 +790,10 @@ export class MissionControlSystem extends createSystem({
           slotIndex: number,
           targetZone: 'PROCESS' | 'QUEUE' | 'RAW_TRAY' | 'DISCARD' | 'INVALID',
         ) => this.handleSimulateCubeDrop(slotIndex, targetZone),
+        getSceneLookupStats: () => ({ ...this.sceneLookups.stats, cached: this.sceneLookups.size }),
+        getSolverStats: () => ({ ...this.solverMemo.stats }),
+        /** Read-only handle for the Virtual Quest perf/XR probes (tests/virtual-quest). */
+        getWebGLRenderer: () => this.world.renderer,
         getRendererStats: () => ({
           calls: this.renderer.info.render.calls,
           triangles: this.renderer.info.render.triangles,
@@ -943,7 +975,7 @@ export class MissionControlSystem extends createSystem({
         desktopControls: this.desktopControls,
         vrHandSimulator: this.vrHandSimulator,
         verifySeatedReachEnvelope: () =>
-          VRHandSimulator.verifySeatedReachEnvelope(this.scene, (id) => this.world.getSceneObject(id)),
+          VRHandSimulator.verifySeatedReachEnvelope(this.scene, (id) => this.sceneObject(id)),
         toggleVrHandSimulator: (active?: boolean) => {
           if (typeof active === 'boolean') {
             this.vrHandSimulator.setEnabled(active);
@@ -1001,7 +1033,7 @@ export class MissionControlSystem extends createSystem({
       'pad-aria-delegate',
     ];
     for (const id of deskPadIds) {
-      const obj = this.world.getSceneObject(id);
+      const obj = this.sceneObject(id);
       if (!obj) continue;
       obj.visible = isImmersive;
       if (isImmersive) {
@@ -1041,7 +1073,7 @@ export class MissionControlSystem extends createSystem({
 
     // Deep Agentic Co-Pilot Telemetry & Spatial Delegation Loop
     const intervention = this.coPilot.update(delta);
-    const gaugesAsset = this.world.getSceneObject('desk-gauges');
+    const gaugesAsset = this.sceneObject('desk-gauges');
     if (gaugesAsset) {
       const beaconCap = gaugesAsset.getObjectByName('AriaBeaconCap');
       if (beaconCap && beaconCap instanceof Mesh && beaconCap.material instanceof MeshStandardMaterial) {
@@ -1063,21 +1095,21 @@ export class MissionControlSystem extends createSystem({
       if (next) {
         if (next.type === 'SCAN') {
           if (this.frameSnapshot.selectedSectorId !== next.sectorId) {
-            const beaconObj = this.world.getSceneObject(`sector-${next.sectorId.toLowerCase()}`);
+            const beaconObj = this.sceneObject(`sector-${next.sectorId.toLowerCase()}`);
             if (beaconObj) {
               const pos = new Vector3();
               beaconObj.getWorldPosition(pos);
               this.vrHandSimulator.setDemoTarget(pos);
             }
           } else if (this.frameSnapshot.activeSensorMode !== next.sensorMode) {
-            const switchObj = this.world.getSceneObject('pad-toggle-sensor');
+            const switchObj = this.sceneObject('pad-toggle-sensor');
             if (switchObj) {
               const pos = new Vector3();
               switchObj.getWorldPosition(pos);
               this.vrHandSimulator.setDemoTarget(pos);
             }
           } else {
-            const plungerObj = this.world.getSceneObject('pad-fire-swath');
+            const plungerObj = this.sceneObject('pad-fire-swath');
             if (plungerObj) {
               const pos = new Vector3();
               plungerObj.getWorldPosition(pos);
@@ -1085,14 +1117,14 @@ export class MissionControlSystem extends createSystem({
             }
           }
         } else if (next.type === 'PROCESS') {
-          const cradleObj = this.world.getSceneObject('pad-process-cradle');
+          const cradleObj = this.sceneObject('pad-process-cradle');
           if (cradleObj) {
             const pos = new Vector3();
             cradleObj.getWorldPosition(pos);
             this.vrHandSimulator.setDemoTarget(pos);
           }
         } else if (next.type === 'QUEUE') {
-          const bayObj = this.world.getSceneObject('pad-queue-downlink');
+          const bayObj = this.sceneObject('pad-queue-downlink');
           if (bayObj) {
             const pos = new Vector3();
             bayObj.getWorldPosition(pos);
@@ -1100,7 +1132,7 @@ export class MissionControlSystem extends createSystem({
           }
         }
       } else if (this.frameSnapshot.queuePacketIds.length > 0) {
-        const leverObj = this.world.getSceneObject('pad-commit-downlink');
+        const leverObj = this.sceneObject('pad-commit-downlink');
         if (leverObj) {
           const pos = new Vector3();
           leverObj.getWorldPosition(pos);
@@ -1175,11 +1207,11 @@ export class MissionControlSystem extends createSystem({
     }
 
     // Phase 3: Tactile 3D button mechanical spring-loaded depression & recoil physics (-12mm travel)
-    const vibratingDesk = this.world.getSceneObject('orbital-console')?.getObjectByName('ConsoleDeskAssembly');
+    const vibratingDesk = this.sceneObject('orbital-console')?.getObjectByName('ConsoleDeskAssembly');
     if (vibratingDesk) vibratingDesk.position.x = 0;
     for (const [padId, timer] of this.padPressTimers.entries()) {
       const newTimer = Math.max(0, timer - delta);
-      const padObj = this.world.getSceneObject(padId);
+      const padObj = this.sceneObject(padId);
       const cap = padObj?.getObjectByName('PadIlluminatedCap');
       const restY = padId === 'pad-fire-swath' ? 0.018 : 0.016;
       const stroke = padId === 'pad-fire-swath' ? 0.012 : 0.009; // -12mm stroke for plunger, -9mm for pads
@@ -1230,7 +1262,7 @@ export class MissionControlSystem extends createSystem({
             0.8 + 0.4 * Math.sin(this.elapsedTime * 6) : 1.2; // Pulsing for PROBABLE
         }
 
-        // Animate 30% compression shrink when processed in cradle (4.5s → 1.8s transmission)
+        // Animate 30% compression shrink when processed in cradle (4.5s â†’ 1.8s transmission)
         if (!this.cubeInteractions.isHeld(cubeRoot)) {
           if (pkt.processed && !pkt.queued) {
             const compressionProgress = Math.min(1, this.elapsedTime * 1.8);
@@ -1243,7 +1275,7 @@ export class MissionControlSystem extends createSystem({
     }
 
     // Phase 3: Diegetic 3D Segmented Arc Gauges Update (Battery, Storage, Karachi Window)
-    const deskGauges = this.world.getSceneObject('desk-gauges');
+    const deskGauges = this.sceneObject('desk-gauges');
     if (deskGauges && this.frameSnapshot) {
       const state = this.frameSnapshot;
       const cUnlit = MissionControlSystem.GAUGE_COLOR_UNLIT;
@@ -1307,7 +1339,7 @@ export class MissionControlSystem extends createSystem({
     }
 
     // Phase 3: Swath Plunger Safety Guard Ring Pulse
-    const plunger = this.world.getSceneObject('pad-fire-swath');
+    const plunger = this.sceneObject('pad-fire-swath');
     if (plunger && this.frameSnapshot) {
       const guardRing = plunger.getObjectByName('PlungerGuardRing');
       if (guardRing instanceof Mesh && guardRing.material instanceof MeshStandardMaterial) {
@@ -1330,7 +1362,7 @@ export class MissionControlSystem extends createSystem({
       }
     }
 
-    const orbitalConsole = this.world.getSceneObject('orbital-console');
+    const orbitalConsole = this.sceneObject('orbital-console');
     if (orbitalConsole) {
       const skyDome = orbitalConsole.getObjectByName('MilkyWayCosmicDome');
       if (skyDome) {
@@ -1356,7 +1388,7 @@ export class MissionControlSystem extends createSystem({
 
     // Phase 2: Commander ARIA-7 Voice Handler Tick & 3D Holographic AI Avatar Dynamic Animation
     this.voiceCommander?.tick(delta);
-    const avatarObj = this.world.getSceneObject('avatar-aria');
+    const avatarObj = this.sceneObject('avatar-aria');
     if (avatarObj && this.voiceCommander) {
       const metrics = this.voiceCommander.getAvatarMetrics(delta);
       const core = avatarObj.getObjectByName('AriaCore');
@@ -1423,7 +1455,7 @@ export class MissionControlSystem extends createSystem({
       }
     }
 
-    const globe = this.world.getSceneObject('earth-globe');
+    const globe = this.sceneObject('earth-globe');
     if (globe) {
       // Phase 1: Interactive Globe Gimbal Slerp or Damped Angular Momentum
       if (this.isSlerpingToSector) {
@@ -1565,7 +1597,7 @@ export class MissionControlSystem extends createSystem({
         swathCone instanceof Mesh &&
         swathCone.material instanceof MeshBasicMaterial
       ) {
-        const cubesat = this.world.getSceneObject('cubesat-spacecraft');
+        const cubesat = this.sceneObject('cubesat-spacecraft');
         const activeSectorId = this.scanBeamPulseTimer > 0 ? this.scanBeamSectorId : this.engine.getState().selectedSectorId;
         const sectorDef = SECTOR_GEO_DEFINITIONS[activeSectorId];
 
@@ -1606,7 +1638,7 @@ export class MissionControlSystem extends createSystem({
     }
 
     // Dynamic 3D Low-Earth-Orbit (LEO) Spacecraft Motion & Active ADCS Ground Tracking
-    const cubesat = this.world.getSceneObject('cubesat-spacecraft');
+    const cubesat = this.sceneObject('cubesat-spacecraft');
     if (cubesat) {
       this.initSpacecraftTelemetryLEDs(cubesat);
 
@@ -1625,9 +1657,10 @@ export class MissionControlSystem extends createSystem({
 
       // Starboard (Right) Window Flight Locus (Concept Images 1 & 2):
       // Satellite cruises comfortably inside the right window without obscuring the central Earth globe
-      const satBaseX = 0.70;
-      const satBaseY = 1.28;
-      const satBaseZ = -0.96;
+      // Kept well behind the side HUD panels (they sit about 1 m out) so it never floats over text.
+      const satBaseX = 0.85;
+      const satBaseY = 1.45;
+      const satBaseZ = -1.9;
       const bobTime = this.elapsedTime * (reducedMotion ? 0.3 : 0.65);
       const satX = satBaseX + Math.sin(bobTime * 0.5) * 0.04;
       const satY = satBaseY + Math.cos(bobTime * 0.8) * 0.025;
@@ -1643,7 +1676,7 @@ export class MissionControlSystem extends createSystem({
     }
 
     // Live Proximity Aiming Laser & Target Reticle Lock when scanner wand is held
-    const scannerObj = this.world.getSceneObject('scanner-tool');
+    const scannerObj = this.sceneObject('scanner-tool');
     if (scannerObj) {
       const currentPhase = this.frameSnapshot.phase;
       const scannerEntity = this.scannerEntity ??= [...this.queries.controls.entities].find((e) => e.getValue(ConsoleControlNode, 'action') === 'SCAN');
@@ -1701,7 +1734,7 @@ export class MissionControlSystem extends createSystem({
     // Animated processing cradle pneumatic clamps & status induction flash
     if (this.cradlePulseTimer > 0) {
       this.cradlePulseTimer = Math.max(0, this.cradlePulseTimer - delta);
-      const consoleObj = this.world.getSceneObject('orbital-console');
+      const consoleObj = this.sceneObject('orbital-console');
       if (consoleObj) {
         const clampLeft = consoleObj.getObjectByName('CradleClampLeft');
         const clampRight = consoleObj.getObjectByName('CradleClampRight');
@@ -1776,7 +1809,7 @@ export class MissionControlSystem extends createSystem({
 
             // ZERO PACKET LOSS achievement if all 3 packets transmitted
             if (nextState.debrief.transmittedPacketIds.length === 3) {
-              this.desktopControls?.triggerAchievement('🛰️ ZERO PACKET LOSS', 'All 3 Verified Packets Delivered', '✨');
+              this.desktopControls?.triggerAchievement('ðŸ›°ï¸ ZERO PACKET LOSS', 'All 3 Verified Packets Delivered', 'âœ¨');
             }
 
             this.voiceCommander?.trigger('DEBRIEF_VICTORY');
@@ -1792,7 +1825,7 @@ export class MissionControlSystem extends createSystem({
     }
 
     // Live S-Band Microwave Uplink Beam, Traveling Data Pulse Rings & Transmitting Cube Levitation
-    const consoleObj = this.world.getSceneObject('orbital-console');
+    const consoleObj = this.sceneObject('orbital-console');
     if (consoleObj) {
       const uplinkBeam = consoleObj.getObjectByName('DownlinkUplinkBeam');
       if (
@@ -1846,8 +1879,8 @@ export class MissionControlSystem extends createSystem({
           }
 
           // Phase 5: Space-to-Ground Downlink Telemetry Beam & Karachi Ground Station Lock (Stylized S-Band Carrier Link Visualization)
-          const globe = this.world.getSceneObject('earth-globe');
-          const cubesat = this.world.getSceneObject('cubesat-spacecraft');
+          const globe = this.sceneObject('earth-globe');
+          const cubesat = this.sceneObject('cubesat-spacecraft');
           if (globe && cubesat) {
             const downlinkLaserGroup = globe.getObjectByName('DownlinkLaserBeamGroup');
             const karachiTerminal = globe.getObjectByName('KarachiGroundStation');
@@ -1905,7 +1938,7 @@ export class MissionControlSystem extends createSystem({
               ring.material.opacity = 0.0;
             }
           }
-          const globe = this.world.getSceneObject('earth-globe');
+          const globe = this.sceneObject('earth-globe');
           if (globe) {
             const downlinkLaserGroup = globe.getObjectByName('DownlinkLaserBeamGroup');
             if (downlinkLaserGroup) {
@@ -1942,13 +1975,13 @@ export class MissionControlSystem extends createSystem({
       } else if (next?.type === 'PROCESS') { targetId = 'pad-process-cradle'; color = 0xfbbf24; }
       else if (next?.type === 'DISCARD') { targetId = 'pad-discard-chute'; color = 0xf87171; }
       else if (next?.type === 'QUEUE' || next?.type === 'UNQUEUE') { targetId = 'pad-queue-downlink'; color = 0x38bdf8; }
-      const target = this.world.getSceneObject(targetId);
+      const target = this.sceneObject(targetId);
       if (target) this.setObjectTint(target, color, intensity);
     }
   }
 
   private bindEarthPlanetTextures(): void {
-    const globe = this.world.getSceneObject('earth-globe');
+    const globe = this.sceneObject('earth-globe');
     if (!globe) return;
 
     this.globeCurrentQuaternion.copy(globe.quaternion);
@@ -2017,7 +2050,7 @@ export class MissionControlSystem extends createSystem({
   }
 
   private bindCosmicEnvironmentAndTextures(): void {
-    const consoleObj = this.world.getSceneObject('orbital-console');
+    const consoleObj = this.sceneObject('orbital-console');
     if (!consoleObj) return;
 
     const milkyWayTex = AssetManager.getTexture('milky-way-tex');
@@ -2155,7 +2188,7 @@ export class MissionControlSystem extends createSystem({
           px[i + 1] = Math.min(242, Math.round(205 + (g0 - 170) * 0.5));
           px[i + 2] = Math.min(248, Math.round(215 + (b0 - 170) * 0.5));
         } else if (r0 > g0 * 1.05) {
-          // Arid desert & high plateau ochre (Arabian, Iranian, Thar, Tibetan Plateau) — clamped to warm tan
+          // Arid desert & high plateau ochre (Arabian, Iranian, Thar, Tibetan Plateau) - clamped to warm tan
           px[i] = Math.min(196, Math.round(36 + r0 * 1.16));
           px[i + 1] = Math.min(172, Math.round(28 + g0 * 1.08));
           px[i + 2] = Math.min(128, Math.round(18 + b0 * 0.92));
@@ -2404,7 +2437,7 @@ export class MissionControlSystem extends createSystem({
   }
 
   private syncGlobeSectorBeaconPositions(): void {
-    const globe = this.world.getSceneObject('earth-globe');
+    const globe = this.sceneObject('earth-globe');
     if (!globe) return;
     globe.updateMatrixWorld(true);
     for (const sectorEntity of this.queries.sectors.entities) {
@@ -2434,7 +2467,7 @@ export class MissionControlSystem extends createSystem({
     panelId: string,
     buttonId: string,
   ): Vector3 | null {
-    const panel = this.world.getSceneObject<UIKitMLAsset>(panelId);
+    const panel = this.sceneObject<UIKitMLAsset>(panelId);
     if (!panel || !panel.visible) return null;
     const element = panel.getElementById<UIKit.Container>(buttonId);
     if (!element) return null;
@@ -2509,7 +2542,7 @@ export class MissionControlSystem extends createSystem({
       return btnPos ? { x: btnPos.x, y: btnPos.y, z: btnPos.z } : null;
     }
 
-    const obj = this.world.getSceneObject(targetId);
+    const obj = this.sceneObject(targetId);
     if (!obj) return null;
     obj.updateWorldMatrix(true, false);
     const pos = obj.getWorldPosition(new Vector3());
@@ -2618,7 +2651,7 @@ export class MissionControlSystem extends createSystem({
       { id: 'avatar-aria', action: 'ARIA_DELEGATE' },
     ];
     for (const pad of padNodes) {
-      const obj = this.world.getSceneObject(pad.id);
+      const obj = this.sceneObject(pad.id);
       if (!obj) continue;
       obj.updateWorldMatrix(true, false);
       const pPos = obj.getWorldPosition(new Vector3());
@@ -2766,6 +2799,10 @@ export class MissionControlSystem extends createSystem({
       actionOrOutcome: `hover:${hover?.targetId ?? 'none'}:${hover ? Math.round(performance.now() - hover.time) : -1}:${latched ? 'latched' : 'fresh'}`,
     });
 
+    const scannerAtPress = this.sceneObject('scanner-tool');
+    const scannerPos = scannerAtPress?.getWorldPosition(this.tempVec);
+    const distanceToScanner = scannerPos ? Math.min(sample.graspPoint.distanceTo(scannerPos), sample.indexTip.distanceTo(scannerPos)) : null;
+    this.pressResolvedTarget.set(sample.handedness, pressOwner(resolved?.targetId, distanceToScanner));
     if (!resolved) return;
 
     this.withInputSource('xr-hand', () => {
@@ -2849,7 +2886,7 @@ export class MissionControlSystem extends createSystem({
         if (resolved.buttonId === 'Btn_CommitDownlink') {
           this.tutorial.notifyTransmitActivated('xr-hand');
         }
-        const panel = this.world.getSceneObject<UIKitMLAsset>(resolved.panelId);
+        const panel = this.sceneObject<UIKitMLAsset>(resolved.panelId);
         const element = panel?.getElementById(resolved.buttonId);
         if (element) {
           element.dispatchEvent({ type: 'click' } as never);
@@ -2862,6 +2899,7 @@ export class MissionControlSystem extends createSystem({
     sample: LiveXRHandSample,
     viaEvent: 'selectend' | 'pinch_release',
   ): void {
+    this.pressResolvedTarget.delete(sample.handedness);
     if (!sample.connected) {
       this.lastHandConnected[sample.handedness] = false;
       this.handleXRHandTrackingLost(sample.handedness, sample);
@@ -3013,6 +3051,7 @@ export class MissionControlSystem extends createSystem({
       }
 
       if (!sample.connected) continue;
+      this.cancelStrayScannerGrab(side);
 
       // 2. If currently holding a 3D Data Cube, move the cube 1:1 with the hand's 3D grasp anchor
       const activeGrab = this.activeXRHandGrabs.get(side);
@@ -3167,7 +3206,31 @@ export class MissionControlSystem extends createSystem({
     return false;
   }
 
+  /**
+   * One pinch, one authority. The app resolves every pinch to a single target. When that target is
+   * not the scanner tool but IWSDK's ray grab also latched the scanner onto the same hand, the tool
+   * would fly to the hand and its release would fire an unintended, power-costing scan. Release it
+   * silently instead. A scanner held by the other hand, or by a pinch aimed at the scanner, is kept.
+   */
+  private cancelStrayScannerGrab(side: 'left' | 'right'): void {
+    if (!this.pressResolvedTarget.get(side)) return;
+    const scanner = (this.scannerEntity ??= [...this.queries.controls.entities].find((e) => e.getValue(ConsoleControlNode, 'action') === 'SCAN'));
+    const grabSystem = this.world.getSystem(GrabSystem);
+    const grabbed = Boolean(scanner?.hasComponent(Grabbed));
+    if (!scanner || !grabSystem || !isStrayScannerGrab({ pressOwnerId: this.pressResolvedTarget.get(side), scannerGrabbed: grabbed, holderHand: grabbed ? grabSystem.getHolderHand(scanner) : null, side })) return;
+    const previous = this.suppressReleaseActions;
+    this.suppressReleaseActions = true;
+    grabSystem.forceRelease(scanner);
+    this.suppressReleaseActions = previous;
+    const scannerObj = this.sceneObject('scanner-tool');
+    if (scannerObj) {
+      scannerObj.position.copy(SCANNER_HOME_POSITION);
+      scannerObj.rotation.set(0, 0, 0);
+    }
+  }
+
   private forceReleaseAllGrabs(): void {
+    this.pressResolvedTarget.clear();
     this.suppressReleaseActions = true;
     this.desktopControls?.cancelCubeDrag();
     this.cubeInteractions.recoverAll();
@@ -3187,7 +3250,7 @@ export class MissionControlSystem extends createSystem({
         }
       }
     }
-    const scannerObj = this.world.getSceneObject('scanner-tool');
+    const scannerObj = this.sceneObject('scanner-tool');
     if (scannerObj) {
       scannerObj.position.copy(SCANNER_HOME_POSITION);
       scannerObj.rotation.set(0, 0, 0);
@@ -3197,9 +3260,9 @@ export class MissionControlSystem extends createSystem({
   }
 
   private bindSpatialPanels(): void {
-    this.briefingPanel = this.world.getSceneObject<UIKitMLAsset>('briefing-panel');
-    this.telemetryPanel = this.world.getSceneObject<UIKitMLAsset>('telemetry-hud');
-    this.debriefPanel = this.world.getSceneObject<UIKitMLAsset>('debrief-panel');
+    this.briefingPanel = this.sceneObject<UIKitMLAsset>('briefing-panel');
+    this.telemetryPanel = this.sceneObject<UIKitMLAsset>('telemetry-hud');
+    this.debriefPanel = this.sceneObject<UIKitMLAsset>('debrief-panel');
 
     const bindClick = (
       panel: UIKitMLAsset | undefined,
@@ -3344,7 +3407,7 @@ export class MissionControlSystem extends createSystem({
   }
 
   public rotateGlobe(deltaYaw: number, deltaPitch: number): void {
-    const globe = this.world.getSceneObject('earth-globe');
+    const globe = this.sceneObject('earth-globe');
     if (!globe) return;
     this.isSlerpingToSector = false;
     this.tutorial.notifyGlobeInteraction(this.currentInputSource);
@@ -3368,7 +3431,7 @@ export class MissionControlSystem extends createSystem({
   }
 
   public slerpGlobeToSector(sectorId: SectorId): void {
-    const globe = this.world.getSceneObject('earth-globe');
+    const globe = this.sceneObject('earth-globe');
     if (!globe) return;
 
     const sectorDef = SECTOR_GEO_DEFINITIONS[sectorId];
@@ -3407,7 +3470,7 @@ export class MissionControlSystem extends createSystem({
   }
 
   private syncSensorSwitchHardware(sensorMode: SensorMode): void {
-    const consoleObj = this.world.getSceneObject('orbital-console');
+    const consoleObj = this.sceneObject('orbital-console');
     if (consoleObj) {
       const stem = consoleObj.getObjectByName('SensorToggleStem');
       if (stem) {
@@ -3466,17 +3529,17 @@ export class MissionControlSystem extends createSystem({
 
       // Achievement triggers
       if (state.selectedSectorId === 'B' && mode === 'RADAR') {
-        this.desktopControls?.triggerAchievement('⚡ CLOUD PIERCER', '5.4 GHz Microwave Backscatter Verified', '🔴');
+        this.desktopControls?.triggerAchievement('âš¡ CLOUD PIERCER', '5.4 GHz Microwave Backscatter Verified', 'ðŸ”´');
       } else if (state.selectedSectorId === 'C' && mode === 'OPTICAL') {
-        this.desktopControls?.triggerAchievement('🔭 SUB-METER LOCK', '0.75m GSD Zero Multipath Glare', '🟢');
+        this.desktopControls?.triggerAchievement('ðŸ”­ SUB-METER LOCK', '0.75m GSD Zero Multipath Glare', 'ðŸŸ¢');
       } else if (mode === 'THERMAL') {
-        this.desktopControls?.triggerAchievement('🔥 PYROCLASTIC LOCK', 'MWIR/LWIR Thermal Radiometry Verified', '🟠');
+        this.desktopControls?.triggerAchievement('ðŸ”¥ PYROCLASTIC LOCK', 'MWIR/LWIR Thermal Radiometry Verified', 'ðŸŸ ');
       }
 
       this.voiceCommander?.trigger('SCAN_ACQUIRED');
 
       // Immediately illuminate 3D observation swath cone
-      const globe = this.world.getSceneObject('earth-globe');
+      const globe = this.sceneObject('earth-globe');
       const swath = globe?.getObjectByName('OrbitalScanSwathCone');
       if (swath instanceof Mesh && swath.material instanceof MeshBasicMaterial) {
         swath.material.color.setHex(
@@ -3504,7 +3567,7 @@ export class MissionControlSystem extends createSystem({
       const queuedPackets = nextState.packets.filter((p) => nextState.queuePacketIds.includes(p.id));
       const totalTx = queuedPackets.reduce((acc, p) => acc + p.transmitSec, 0);
       if (totalTx <= nextState.downlinkWindowSec && queuedPackets.length === 3) {
-        this.desktopControls?.triggerAchievement('🧠 KNAPSACK OPTIMIZER', `13.0s → ${totalTx.toFixed(1)}s AI Feature Extraction`, '⚙️');
+        this.desktopControls?.triggerAchievement('ðŸ§  KNAPSACK OPTIMIZER', `13.0s â†’ ${totalTx.toFixed(1)}s AI Feature Extraction`, 'âš™ï¸');
       }
 
       this.voiceCommander?.trigger('PROCESS_SUCCESS');
@@ -3587,7 +3650,7 @@ export class MissionControlSystem extends createSystem({
       this.voiceCommander?.trigger('DOWNLINK_TRANSMIT');
 
       // Immediately activate live S-Band microwave uplink beam
-      const consoleObj = this.world.getSceneObject('orbital-console');
+      const consoleObj = this.sceneObject('orbital-console');
       const uplinkBeam = consoleObj?.getObjectByName('DownlinkUplinkBeam');
       if (
         uplinkBeam instanceof Mesh &&
@@ -3619,7 +3682,7 @@ export class MissionControlSystem extends createSystem({
     this.downlinkUiSyncAccumulator = 0;
     this.scanBeamPulseTimer = 0;
     this.cradlePulseTimer = 0;
-    const globe = this.world.getSceneObject('earth-globe');
+    const globe = this.sceneObject('earth-globe');
     if (globe) {
       this.targetFocalDistance = -0.48;
       this.globeFocalDistance = -0.48;
@@ -3633,7 +3696,7 @@ export class MissionControlSystem extends createSystem({
     const karachiTerminal = globe?.getObjectByName('KarachiGroundStation');
     const shockwave = karachiTerminal?.getObjectByName('KarachiDishShockwave');
     if (shockwave) shockwave.visible = false;
-    const consoleObj = this.world.getSceneObject('orbital-console');
+    const consoleObj = this.sceneObject('orbital-console');
     const uplinkBeam = consoleObj?.getObjectByName('DownlinkUplinkBeam');
     if (uplinkBeam) uplinkBeam.visible = false;
     this.reviewState = undefined;
@@ -3643,7 +3706,7 @@ export class MissionControlSystem extends createSystem({
     this.missionElapsedTime = 0;
     this.earnedMedals = [];
     this.cubeTransitions.clear();
-    this.solverSignature = '';
+    this.solverMemo.clear();
     this.engine.reset();
     this.voiceCommander?.reset();
     this.playCue('MISSION_RESET');
@@ -3681,12 +3744,7 @@ export class MissionControlSystem extends createSystem({
   }
 
   private getSolution(state: MissionState): MissionSolution {
-    const signature = `${state.scenarioId}:${state.power}:${state.packets.map((p) => `${p.id}/${p.processed}`).join(',')}`;
-    if (signature !== this.solverSignature || !this.cachedSolution) {
-      this.solverSignature = signature;
-      this.cachedSolution = solveMission(state, this.engine.getActiveCustomScenario());
-    }
-    return this.cachedSolution;
+    return this.solverMemo.get(state, this.engine.getActiveCustomScenario());
   }
 
   private togglePause(): void {
@@ -3728,20 +3786,26 @@ export class MissionControlSystem extends createSystem({
         }
       });
     }
-    const scanner = this.world.getSceneObject('scanner-tool');
+    const scanner = this.sceneObject('scanner-tool');
     SCANNER_HOME_POSITION.x = preferences.dominantHand === 'LEFT' ? -0.44 : 0.44;
     SCANNER_HOME_POSITION.y = 0.80;
     SCANNER_HOME_POSITION.z = -0.30;
-    const holster = this.world.getSceneObject('orbital-console')?.getObjectByName('ScannerHolster');
+    const holster = this.sceneObject('orbital-console')?.getObjectByName('ScannerHolster');
     if (holster) holster.position.x = SCANNER_HOME_POSITION.x;
     if (scanner && !this.isAnyObjectGrabbed()) scanner.position.copy(SCANNER_HOME_POSITION);
     this.applyTabletopMode();
   }
 
+  private applyPanelPose(panel: Object3D, pose: PanelPose): void {
+    panel.position.set(pose.position[0], pose.position[1], pose.position[2]);
+    panel.rotation.set(0, (pose.yawDeg * Math.PI) / 180, 0);
+    panel.scale.setScalar(pose.scale);
+  }
+
   public applyTabletopMode(): void {
     const isTabletop = this.profile.preferences.tabletopMode;
     const isImmersive = Boolean(this.world.renderer?.xr?.isPresenting);
-    const consoleObj = this.world.getSceneObject('orbital-console');
+    const consoleObj = this.sceneObject('orbital-console');
     if (consoleObj) {
       const cabinEnclosure = consoleObj.getObjectByName('CockpitEnclosureShell');
       if (cabinEnclosure) cabinEnclosure.visible = !isTabletop;
@@ -3755,9 +3819,7 @@ export class MissionControlSystem extends createSystem({
         this.briefingPanel.rotation.set(0, (32 * Math.PI) / 180, 0);
         this.briefingPanel.scale.setScalar(0.118);
       } else if (isImmersive) {
-        this.briefingPanel.position.set(-0.88, 1.16, -0.98);
-        this.briefingPanel.rotation.set(0, (30 * Math.PI) / 180, 0);
-        this.briefingPanel.scale.setScalar(0.098);
+        this.applyPanelPose(this.briefingPanel, IMMERSIVE_PANEL_POSES.briefing);
       } else {
         this.briefingPanel.position.set(-0.74, 1.16, -1.04);
         this.briefingPanel.rotation.set(0, (26 * Math.PI) / 180, 0);
@@ -3770,9 +3832,7 @@ export class MissionControlSystem extends createSystem({
         this.telemetryPanel.rotation.set((14 * Math.PI) / 180, 0, 0);
         this.telemetryPanel.scale.setScalar(0.122);
       } else if (isImmersive) {
-        this.telemetryPanel.position.set(0.88, 1.16, -0.98);
-        this.telemetryPanel.rotation.set(0, (-30 * Math.PI) / 180, 0);
-        this.telemetryPanel.scale.setScalar(0.098);
+        this.applyPanelPose(this.telemetryPanel, IMMERSIVE_PANEL_POSES.telemetry);
       } else {
         this.telemetryPanel.position.set(0, 1.67, -1.16);
         this.telemetryPanel.rotation.set((16 * Math.PI) / 180, 0, 0);
@@ -3785,9 +3845,8 @@ export class MissionControlSystem extends createSystem({
         this.debriefPanel.rotation.set(0, (-32 * Math.PI) / 180, 0);
         this.debriefPanel.scale.setScalar(0.118);
       } else if (isImmersive) {
-        this.debriefPanel.position.set(0.0, 1.18, -0.92);
-        this.debriefPanel.rotation.set((-4 * Math.PI) / 180, 0, 0);
-        this.debriefPanel.scale.setScalar(0.098);
+        // Same slot as telemetry (hidden during debrief). Centered behind the globe the debrief was hidden by it.
+        this.applyPanelPose(this.debriefPanel, IMMERSIVE_PANEL_POSES.debrief);
       } else {
         this.debriefPanel.position.set(0.74, 1.16, -1.04);
         this.debriefPanel.rotation.set(0, (-26 * Math.PI) / 180, 0);
@@ -3837,7 +3896,7 @@ export class MissionControlSystem extends createSystem({
     }
     this.forceReleaseAllGrabs();
     this.dailyDate = null;
-    this.engine.cycleScenario();
+    this.engine.cycleCampaignOperation();
     this.handleRestartMission();
   }
 
@@ -4013,7 +4072,7 @@ export class MissionControlSystem extends createSystem({
   }
 
   private handleTrigger3DNodeById(nodeId: string): boolean {
-    const obj = this.world.getSceneObject(nodeId);
+    const obj = this.sceneObject(nodeId);
     if (!obj) return false;
 
     for (const sectorEntity of this.queries.sectors.entities) {
@@ -4107,7 +4166,7 @@ export class MissionControlSystem extends createSystem({
   }
 
   private getCubeDropTargets(): CubeDropTarget[] {
-    const console = this.world.getSceneObject('orbital-console');
+    const console = this.sceneObject('orbital-console');
     return console ? cubeStationTargets(console, this.profile.preferences.oneHanded ? 1.2 : 1) : [];
   }
 
@@ -4188,9 +4247,9 @@ export class MissionControlSystem extends createSystem({
 
   private highlightDropZones(active: boolean, preview?: CubeDropTarget | null): void {
     const selected = (kind: CubeDropTarget['kind']) => active && (preview === undefined || preview?.kind === kind);
-    const processPad = this.world.getSceneObject('pad-process-cradle');
-    const queuePad = this.world.getSceneObject('pad-queue-downlink');
-    const discardPad = this.world.getSceneObject('pad-discard-chute');
+    const processPad = this.sceneObject('pad-process-cradle');
+    const queuePad = this.sceneObject('pad-queue-downlink');
+    const discardPad = this.sceneObject('pad-discard-chute');
 
     if (processPad) {
       this.setObjectTint(processPad, 0xf59e0b, selected('PROCESS') ? 1.45 : 0.85);
@@ -4202,7 +4261,7 @@ export class MissionControlSystem extends createSystem({
       this.setObjectTint(discardPad, 0xef4444, selected('DISCARD') ? 1.45 : 0.85);
     }
 
-    const consoleObj = this.world.getSceneObject('orbital-console');
+    const consoleObj = this.sceneObject('orbital-console');
     if (consoleObj) {
       const cradleHalo = consoleObj.getObjectByName('CradleDropHalo');
       const queueHalo = consoleObj.getObjectByName('QueueDropHalo');
@@ -4240,7 +4299,7 @@ export class MissionControlSystem extends createSystem({
 
   private syncAll(): void {
     const state = this.engine.getState();
-    const globe = this.world.getSceneObject('earth-globe');
+    const globe = this.sceneObject('earth-globe');
 
     // Single source of truth: engine's committed downlink time vs. the active window.
     // Withdraw the one-shot QUEUE_OVERFLOW advisory as soon as it is no longer true.
@@ -4347,7 +4406,7 @@ export class MissionControlSystem extends createSystem({
     }
 
     // 2. Update Scanner Tool & 3U CubeSat payload aperture colors for active sensor mode
-    const scannerObj = this.world.getSceneObject('scanner-tool');
+    const scannerObj = this.sceneObject('scanner-tool');
     if (scannerObj) {
       const sensorHex =
         state.activeSensorMode === 'OPTICAL'
@@ -4358,7 +4417,7 @@ export class MissionControlSystem extends createSystem({
       this.setObjectTint(scannerObj, sensorHex, 0.95);
     }
 
-    const cubesat = this.world.getSceneObject('cubesat-spacecraft');
+    const cubesat = this.sceneObject('cubesat-spacecraft');
     if (cubesat) {
       const opticalRing = cubesat.getObjectByName('CubeSatOpticalApertureRing');
       if (
@@ -4379,7 +4438,7 @@ export class MissionControlSystem extends createSystem({
     }
 
     // 2b. Update Processing Cradle resting state if not animating
-    const consoleObj = this.world.getSceneObject('orbital-console');
+    const consoleObj = this.sceneObject('orbital-console');
     if (consoleObj && this.cradlePulseTimer <= 0) {
       const clampLeft = consoleObj.getObjectByName('CradleClampLeft');
       const clampRight = consoleObj.getObjectByName('CradleClampRight');
@@ -4644,7 +4703,7 @@ export class MissionControlSystem extends createSystem({
   }
 
   /**
-   * High-DPI 512×512 telemetry renderer with 4-quadrant layout:
+   * High-DPI 512Ã—512 telemetry renderer with 4-quadrant layout:
    * 1. Top Header Banner: Sector code, sensor mode & request match status pill
    * 2. Left Swath: Simulated Synthetic Aperture Radar backscatter or Optical visible swath
    * 3. Right Telemetry: SNR signal ratio, confidence grade, AI compression state
@@ -4953,7 +5012,7 @@ export class MissionControlSystem extends createSystem({
           : scenario.budget.radarScan;
 
     const threatBadge = threat ? `[ALERT: ${threat.name} (SEV ${threat.severity}/5)] ` : '';
-    const opLabel = scenario.operationCode ? `${scenario.operationCode} — ${scenario.name.toUpperCase()}` : scenario.name.toUpperCase();
+    const opLabel = scenario.operationCode ?? scenario.name.toUpperCase();
     this.setText(
       this.briefingPanel,
       'BriefingSubtitle',
@@ -5068,7 +5127,8 @@ export class MissionControlSystem extends createSystem({
         this.setText(
           this.briefingPanel,
           titleId,
-          `REQ ${i + 1}: ${req.shortLabel} [AWAITING SCAN]`,
+          // shortLabel already starts with "REQ n |"; Academy only qualifies on the first target.
+          `${req.shortLabel} [${state.scenarioId === 'ORBITAL_ACADEMY' && i > 0 ? 'OPTIONAL IN TRAINING' : 'AWAITING SCAN'}]`,
         );
         const reqSector = getScenarioSector(state.scenarioId, req.targetSectorId, scenario);
         this.setText(
@@ -5131,7 +5191,7 @@ export class MissionControlSystem extends createSystem({
       'OperationTitleText',
       tutStep
         ? `ORBIT ZERO // OP 00: ORBITAL ACADEMY (STEP ${tutStep.index}/9)`
-        : `ORBIT ZERO // ${scenario?.operationCode ?? ''} ${scenario?.name.toUpperCase() ?? 'TACTICAL PASS'}`,
+        : `ORBIT ZERO // ${scenario?.operationCode ?? scenario?.name.toUpperCase() ?? 'TACTICAL PASS'}`,
     );
     this.setText(
       this.telemetryPanel,
@@ -5233,6 +5293,7 @@ export class MissionControlSystem extends createSystem({
         'InspectorScience',
         'Onboard Processing (6 Wh) compresses CONFIRMED or PROBABLE cubes from 3 STR (40-45 MB) -> 1 STR (18 MB / 1.8s @ 10 MB/s).',
       );
+      this.setText(this.telemetryPanel, 'InspectorCost', '');
       this.setBg(this.telemetryPanel, 'CubeInspectorCard', '#152238');
       this.setText(
         this.telemetryPanel,
@@ -5251,12 +5312,18 @@ export class MissionControlSystem extends createSystem({
       this.setText(
         this.telemetryPanel,
         'InspectorTitle',
-        `${selectedPkt.id} | ${selectedPkt.sectorCode} ${selectedPkt.sectorName} (${selectedPkt.sensorMode} - ${procTag})`,
+        `${selectedPkt.id} | ${selectedPkt.sectorCode} ${selectedPkt.sectorName} | ${selectedPkt.sensorMode} | ${procTag}`,
       );
+      // Confidence is a property of the observation. Compression changes size and cost only.
       this.setText(
         this.telemetryPanel,
         'InspectorConfidence',
-        `${selectedPkt.confidenceBadge} (${confPct}% SIM. OBS. CONF.) | ${selectedPkt.storageCost} STR (${mb} MB / ${selectedPkt.transmitSec.toFixed(1)}s @ 10 MB/s) | ${selectedPkt.headline}`,
+        `${selectedPkt.confidenceBadge} (${confPct}% sim. conf.)${selectedPkt.processed ? ' | compression did not change this' : ''}`,
+      );
+      this.setText(
+        this.telemetryPanel,
+        'InspectorCost',
+        `${selectedPkt.storageCost} STR | ${mb} MB | ${selectedPkt.transmitSec.toFixed(1)}s @ 10 MB/s | ${selectedPkt.headline}`,
       );
       this.setText(
         this.telemetryPanel,
@@ -5390,6 +5457,8 @@ export class MissionControlSystem extends createSystem({
         'DebriefAdviceText',
         this.engine.getActiveScenario().briefing,
       );
+      this.setDisplay(this.debriefPanel, 'DecisionReviewCard', 'none');
+      for (const id of DEBRIEF_PANEL_OPERATIONS_ONLY) this.setDisplay(this.debriefPanel, id, 'flex');
     } else {
       const d = state.debrief;
       const isAcademyPass =
@@ -5428,17 +5497,39 @@ export class MissionControlSystem extends createSystem({
         this.setText(
           this.debriefPanel,
           `OutcomeReq${i + 1}`,
-          `${ev.shortLabel}: ${ev.statusBadge} - ${ev.groundConsequence}`,
+          `${ev.shortLabel}: ${ev.statusBadge} - ${clipText(ev.groundConsequence, 120)}`,
         );
       }
+      // Same evidence-grounded notes the desktop debrief shows (scoring.describeRequestDecision).
+      const notes = isAcademyPass ? [] : d.evaluations.map((ev) => ev.decisionNote ?? '');
+      const hasNotes = notes.some((note) => note.length > 0);
+      for (let i = 0; i < 3; i++) {
+        const ev = d.evaluations[i];
+        this.setText(this.debriefPanel, `DecisionNote${i + 1}`, hasNotes && ev && notes[i] ? `${ev.shortLabel}: ${notes[i]}` : '');
+      }
+      this.setDisplay(this.debriefPanel, 'DecisionReviewCard', hasNotes ? 'flex' : 'none');
+      // After downlink the bay slots and the commit/reorder buttons carry no decisions; the results do.
+      for (const id of DEBRIEF_PANEL_OPERATIONS_ONLY) this.setDisplay(this.debriefPanel, id, 'none');
+      // Secondary readouts only take space when they have something to say.
+      this.setDisplay(this.debriefPanel, 'ReplayTimeline', this.replayIndex >= 0 ? 'flex' : 'none');
+      this.setDisplay(this.debriefPanel, 'MedalsReadout', this.earnedMedals.length > 0 ? 'flex' : 'none');
+      const outcomeBorder = d.outcome === 'SUCCESS' ? '#10b981' : d.outcome === 'PARTIAL_SUCCESS' ? '#f59e0b' : '#ef4444';
+      if (this.debriefBorder !== outcomeBorder) {
+        this.debriefBorder = outcomeBorder;
+        this.debriefPanel.getElementById('DebriefRoot')?.setProperties({ borderColor: outcomeBorder });
+      }
+      // Retry guidance and the achievable ceiling, trimmed to fit the spatial panel. The desktop debrief shows the full text.
       const diagPrefix =
         d.outcome !== 'SUCCESS' && d.failureExplanation
-          ? `[DIAGNOSTIC: ${d.failureReasonCode ?? 'TRIAGE_GAP'}] ${d.failureExplanation} | `
+          ? (() => {
+              const g = retryGuidanceFor(d);
+              return g ? `${g.title}. ${clipText(g.body, 150)} ` : '';
+            })()
           : '';
       this.setText(
         this.debriefPanel,
         'DebriefAdviceText',
-        `${diagPrefix}${d.deterministicRecommendation} | ${d.counterfactualComparison}`,
+        `${diagPrefix}${clipText(d.deterministicRecommendation, 150)} | CEILING ${d.achievableScore}/100 (${d.benchmarkDownlinkSec.toFixed(1)}s, ${d.benchmarkPowerUsed} Wh)`,
       );
     }
   }
@@ -5453,6 +5544,15 @@ export class MissionControlSystem extends createSystem({
     el.setProperties({ text });
   }
 
+  private setDisplay(panel: UIKitMLAsset, id: string, display: 'flex' | 'none'): void {
+    let values = this.panelValues.get(panel);
+    if (!values) { values = new Map(); this.panelValues.set(panel, values); }
+    if (values.get(`${id}:display`) === display) return;
+    const el = panel.getElementById(id);
+    if (!el) return;
+    values.set(`${id}:display`, display);
+    el.setProperties({ display });
+  }
   private setBg(panel: UIKitMLAsset, id: string, backgroundColor: string): void {
     let values = this.panelValues.get(panel);
     if (!values) { values = new Map(); this.panelValues.set(panel, values); }
@@ -5475,7 +5575,7 @@ export class MissionControlSystem extends createSystem({
         this.ensureClonedMaterials(entity.object3D);
       }
     }
-    const scannerObj = this.world.getSceneObject('scanner-tool');
+    const scannerObj = this.sceneObject('scanner-tool');
     if (scannerObj) {
       this.ensureClonedMaterials(scannerObj);
     }

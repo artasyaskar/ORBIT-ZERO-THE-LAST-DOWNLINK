@@ -6,7 +6,7 @@
 <style>
   .panel-root {
     flex-direction: column;
-    width: 540px;
+    width: 480px;
     padding-top: 14px;
     padding-bottom: 14px;
     padding-left: 18px;
@@ -28,14 +28,14 @@
   }
 
   .op-title-text {
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 800;
     letter-spacing: 0.5px;
     color: #38bdf8;
   }
 
   .op-phase-text {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 700;
     color: #f59e0b;
   }
@@ -55,7 +55,7 @@
   }
 
   .directive-text {
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 800;
     line-height: 1.35;
     color: #ffffff;
@@ -76,13 +76,13 @@
   }
 
   .resource-row {
-    font-size: 16px;
+    font-size: 17px;
     font-weight: 700;
     color: #38bdf8;
   }
 
   .window-row {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 700;
     color: #f59e0b;
     margin-top: 3px;
@@ -103,20 +103,20 @@
   }
 
   .inspector-title {
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 700;
     color: #f8fafc;
   }
 
   .inspector-meta {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 700;
     color: #10b981;
     margin-top: 2px;
   }
 
   .inspector-science {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
     color: #cbd5e1;
     margin-top: 2px;
@@ -141,7 +141,7 @@
   </div>
 
   <div id="StatusBannerCard" class="directive-banner">
-    <div id="StatusMessageText" class="directive-text" style="height: 48px; overflow: hidden;">
+    <div id="StatusMessageText" class="directive-text" style="height: 70px; overflow: hidden;">
       &gt; STEP 1: Point at highlighted Sector B on the globe and pinch to acquire target.
     </div>
   </div>
@@ -162,50 +162,51 @@
     <div id="InspectorConfidence" class="inspector-meta">
       Scan a sector or grab/poke an Evidence Cube on the tray to inspect.
     </div>
-    <div id="InspectorScience" class="inspector-science" style="height: 40px; overflow: hidden;">
+    <div id="InspectorCost" class="inspector-science" style="color: #94a3b8; font-weight: 700;">-</div>
+    <div id="InspectorScience" class="inspector-science" style="height: 78px; overflow: hidden;">
       Onboard Processing (6 Wh) compresses CONFIRMED/PROBABLE cubes: 3 STR (40-45 MB) -&gt; 1 STR (18 MB / 1.8s Tx).
     </div>
   </div>
 
   <Button id="Btn_ProcessCube" class="action-btn">
-    <ButtonLabel id="Lbl_ProcessCube" style="color: #f59e0b; font-size: 13px; font-weight: 700;">PROCESS SELECTED CUBE (-6 Wh -&gt; 1 STR / 18 MB / 1.8s Tx)</ButtonLabel>
+    <ButtonLabel id="Lbl_ProcessCube" style="color: #f59e0b; font-size: 14px; font-weight: 700;">PROCESS SELECTED CUBE (-6 Wh -&gt; 1 STR / 18 MB / 1.8s Tx)</ButtonLabel>
   </Button>
 
   <Button id="Btn_QueueCube" class="action-btn">
-    <ButtonLabel id="Lbl_QueueCube" style="color: #38bdf8; font-size: 13px; font-weight: 700;">ADD SELECTED CUBE TO DOWNLINK BAY</ButtonLabel>
+    <ButtonLabel id="Lbl_QueueCube" style="color: #38bdf8; font-size: 14px; font-weight: 700;">ADD SELECTED CUBE TO DOWNLINK BAY</ButtonLabel>
   </Button>
 
   <Button id="Btn_DiscardCube" class="action-btn">
-    <ButtonLabel id="Lbl_DiscardCube" style="color: #f87171; font-size: 13px; font-weight: 700;">DISCARD SELECTED CUBE (FREE STORAGE)</ButtonLabel>
+    <ButtonLabel id="Lbl_DiscardCube" style="color: #f87171; font-size: 14px; font-weight: 700;">DISCARD SELECTED CUBE (FREE STORAGE)</ButtonLabel>
   </Button>
   <Button id="Btn_CycleCube" class="action-btn">
-    <ButtonLabel style="color: #e2e8f0; font-size: 13px; font-weight: 700;">SELECT NEXT EVIDENCE CUBE</ButtonLabel>
+    <ButtonLabel style="color: #e2e8f0; font-size: 14px; font-weight: 700;">SELECT NEXT EVIDENCE CUBE</ButtonLabel>
   </Button>
   <div id="AudioCaption" class="inspector-science">GROUND CONTROL: one pass, three requests, one final downlink.</div>
   <div style="flex-direction: row; gap: 6px; width: 100%;">
-    <Button id="Btn_Pause" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_Pause" style="color: #e2e8f0; font-size: 13px;">PAUSE PASS</ButtonLabel></Button>
-    <Button id="Btn_Settings" class="action-btn" style="width: 48%;"><ButtonLabel style="color: #e2e8f0; font-size: 13px;">ACCESSIBILITY</ButtonLabel></Button>
+    <Button id="Btn_Pause" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_Pause" style="color: #e2e8f0; font-size: 14px;">PAUSE PASS</ButtonLabel></Button>
+    <Button id="Btn_Settings" class="action-btn" style="width: 48%;"><ButtonLabel style="color: #e2e8f0; font-size: 14px;">ACCESSIBILITY</ButtonLabel></Button>
   </div>
   <div id="AccessibilitySettings" style="display: none; flex-direction: column; width: 100%;">
     <div style="flex-direction: row; gap: 6px; width: 100%;">
-      <Button id="Btn_Guidance" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_Guidance" style="color: #e2e8f0; font-size: 12px;">GUIDANCE: GUIDED</ButtonLabel></Button>
-      <Button id="Btn_DominantHand" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_DominantHand" style="color: #e2e8f0; font-size: 12px;">SCANNER HAND: RIGHT</ButtonLabel></Button>
+      <Button id="Btn_Guidance" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_Guidance" style="color: #e2e8f0; font-size: 13px;">GUIDANCE: GUIDED</ButtonLabel></Button>
+      <Button id="Btn_DominantHand" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_DominantHand" style="color: #e2e8f0; font-size: 13px;">SCANNER HAND: RIGHT</ButtonLabel></Button>
     </div>
     <div style="flex-direction: row; gap: 6px; width: 100%;">
-      <Button id="Btn_OneHanded" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_OneHanded" style="color: #e2e8f0; font-size: 12px;">ONE-HAND ASSIST: OFF</ButtonLabel></Button>
-      <Button id="Btn_LargeText" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_LargeText" style="color: #e2e8f0; font-size: 12px;">LARGE TEXT: OFF</ButtonLabel></Button>
+      <Button id="Btn_OneHanded" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_OneHanded" style="color: #e2e8f0; font-size: 13px;">ONE-HAND ASSIST: OFF</ButtonLabel></Button>
+      <Button id="Btn_LargeText" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_LargeText" style="color: #e2e8f0; font-size: 13px;">LARGE TEXT: OFF</ButtonLabel></Button>
     </div>
     <div style="flex-direction: row; gap: 6px; width: 100%;">
-      <Button id="Btn_HighContrast" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_HighContrast" style="color: #e2e8f0; font-size: 12px;">HIGH CONTRAST: OFF</ButtonLabel></Button>
-      <Button id="Btn_ReducedMotion" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_ReducedMotion" style="color: #e2e8f0; font-size: 12px;">REDUCED MOTION: OFF</ButtonLabel></Button>
+      <Button id="Btn_HighContrast" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_HighContrast" style="color: #e2e8f0; font-size: 13px;">HIGH CONTRAST: OFF</ButtonLabel></Button>
+      <Button id="Btn_ReducedMotion" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_ReducedMotion" style="color: #e2e8f0; font-size: 13px;">REDUCED MOTION: OFF</ButtonLabel></Button>
     </div>
     <div style="flex-direction: row; gap: 6px; width: 100%;">
-      <Button id="Btn_Captions" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_Captions" style="color: #e2e8f0; font-size: 12px;">CAPTIONS: ON</ButtonLabel></Button>
-      <Button id="Btn_AudioLevel" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_AudioLevel" style="color: #e2e8f0; font-size: 12px;">AUDIO: 65%</ButtonLabel></Button>
+      <Button id="Btn_Captions" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_Captions" style="color: #e2e8f0; font-size: 13px;">CAPTIONS: ON</ButtonLabel></Button>
+      <Button id="Btn_AudioLevel" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_AudioLevel" style="color: #e2e8f0; font-size: 13px;">AUDIO: 65%</ButtonLabel></Button>
     </div>
     <div style="flex-direction: row; gap: 6px; width: 100%;">
-      <Button id="Btn_GazeAssist" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_GazeAssist" style="color: #38bdf8; font-size: 12px;">GAZE FOCUS: ON</ButtonLabel></Button>
-      <Button id="Btn_TabletopMode" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_TabletopMode" style="color: #34d399; font-size: 12px;">MR TABLETOP: OFF</ButtonLabel></Button>
+      <Button id="Btn_GazeAssist" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_GazeAssist" style="color: #38bdf8; font-size: 13px;">GAZE FOCUS: ON</ButtonLabel></Button>
+      <Button id="Btn_TabletopMode" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_TabletopMode" style="color: #34d399; font-size: 13px;">MR TABLETOP: OFF</ButtonLabel></Button>
     </div>
   </div>
 </Panel>

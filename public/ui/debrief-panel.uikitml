@@ -4,7 +4,7 @@
 <style>
   .panel-root {
     flex-direction: column;
-    width: 430px;
+    width: 440px;
     padding-top: 14px;
     padding-bottom: 14px;
     padding-left: 16px;
@@ -30,13 +30,13 @@
   }
 
   .banner-title {
-    font-size: 18px;
+    font-size: 19px;
     font-weight: 700;
     color: #38bdf8;
   }
 
   .banner-sub {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
     color: #f8fafc;
     margin-top: 3px;
@@ -57,13 +57,13 @@
   }
 
   .slot-title {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 700;
     color: #f59e0b;
   }
 
   .slot-desc {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
     color: #cbd5e1;
     margin-top: 2px;
@@ -85,14 +85,27 @@
   }
 
   .outcome-line {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
     color: #e2e8f0;
     margin-top: 2px;
   }
 
+  .decision-heading {
+    font-size: 13px;
+    font-weight: 700;
+    color: #38bdf8;
+  }
+
+  .decision-line {
+    font-size: 13px;
+    font-weight: 600;
+    color: #cbd5e1;
+    margin-top: 3px;
+  }
+
   .advice-text {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
     color: #f59e0b;
     margin-top: 4px;
@@ -110,7 +123,7 @@
     padding-bottom: 7px;
   }
 </style>
-<Panel class="panel-root">
+<Panel id="DebriefRoot" class="panel-root">
   <div id="DebriefBannerCard" class="debrief-banner">
     <div id="DebriefRankTitle" class="banner-title">
       DOWNLINK BAY (0/3 SLOTS | 0.0s / 10.0s)
@@ -135,6 +148,13 @@
     <div id="Slot3Desc" class="slot-desc">Drop or queue third evidence cube here.</div>
   </div>
 
+  <div id="DecisionReviewCard" class="outcome-card" style="display: none;">
+    <div class="decision-heading">DECISION REVIEW</div>
+    <div id="DecisionNote1" class="decision-line">-</div>
+    <div id="DecisionNote2" class="decision-line">-</div>
+    <div id="DecisionNote3" class="decision-line">-</div>
+  </div>
+
   <div id="DebriefOutcomeCard" class="outcome-card">
     <div id="OutcomeReq1" class="outcome-line">
       REQ 1 (SEC-B Bolan Canyon Fireline): AWAITING DOWNLINK
@@ -151,22 +171,22 @@
   </div>
 
   <Button id="Btn_ReorderQueue" class="action-btn">
-    <ButtonLabel id="Lbl_ReorderQueue" style="color: #38bdf8; font-size: 13px; font-weight: 700;">PROMOTE SELECTED / ROTATE QUEUE PRIORITY</ButtonLabel>
+    <ButtonLabel id="Lbl_ReorderQueue" style="color: #38bdf8; font-size: 14px; font-weight: 700;">PROMOTE SELECTED / ROTATE QUEUE PRIORITY</ButtonLabel>
   </Button>
 
   <Button id="Btn_CommitDownlink" class="action-btn">
-    <ButtonLabel id="Lbl_CommitDownlink" style="color: #34d399; font-size: 13px; font-weight: 700;">TRANSMIT DOWNLINK QUEUE (10.0s WINDOW)</ButtonLabel>
+    <ButtonLabel id="Lbl_CommitDownlink" style="color: #34d399; font-size: 14px; font-weight: 700;">TRANSMIT DOWNLINK QUEUE (10.0s WINDOW)</ButtonLabel>
   </Button>
 
   <Button id="Btn_RestartMission" class="action-btn">
-    <ButtonLabel id="Lbl_RestartMission" style="color: #cbd5e1; font-size: 13px; font-weight: 700;">RESTART MISSION PASS (RESET)</ButtonLabel>
+    <ButtonLabel id="Lbl_RestartMission" style="color: #cbd5e1; font-size: 14px; font-weight: 700;">RESTART MISSION PASS (RESET)</ButtonLabel>
   </Button>
   <div id="MasteryReadout" class="outcome-line">PROVEN OBJECTIVE: COMPLETE THIS PASS TO EARN MASTERY</div>
-  <div id="MedalsReadout" class="inspector-science" style="color: #e2e8f0; font-size: 11px; margin-top: 4px;">GROUND TRUTH / POWER DISCIPLINE / LINK PRECISION</div>
+  <div id="MedalsReadout" class="inspector-science" style="color: #e2e8f0; font-size: 13px; margin-top: 4px;">GROUND TRUTH / POWER DISCIPLINE / LINK PRECISION</div>
   <div id="ReplayTimeline" class="outcome-line">DECISION REPLAY AVAILABLE AFTER DOWNLINK</div>
   <div style="flex-direction: row; gap: 6px; width: 100%;">
-    <Button id="Btn_NextMission" class="action-btn" style="width: 48%;"><ButtonLabel style="color: #e2e8f0; font-size: 13px;">NEXT ORBITAL PASS</ButtonLabel></Button>
-    <Button id="Btn_DailyPass" class="action-btn" style="width: 48%;"><ButtonLabel style="color: #e2e8f0; font-size: 13px;">DAILY PASS</ButtonLabel></Button>
+    <Button id="Btn_NextMission" class="action-btn" style="width: 48%;"><ButtonLabel style="color: #e2e8f0; font-size: 14px;">NEXT ORBITAL PASS</ButtonLabel></Button>
+    <Button id="Btn_DailyPass" class="action-btn" style="width: 48%;"><ButtonLabel style="color: #e2e8f0; font-size: 14px;">DAILY PASS</ButtonLabel></Button>
   </div>
-  <Button id="Btn_ReplayDecision" class="action-btn"><ButtonLabel style="color: #e2e8f0; font-size: 13px;">REVIEW NEXT DECISION</ButtonLabel></Button>
+  <Button id="Btn_ReplayDecision" class="action-btn"><ButtonLabel style="color: #e2e8f0; font-size: 14px;">REVIEW NEXT DECISION</ButtonLabel></Button>
 </Panel>

@@ -472,7 +472,8 @@ try {
   assert.equal(failedDebrief.outcome, 'FAILED');
   assert.equal(failedDebrief.failureReasonCode, 'WRONG_SENSOR_FOR_WEATHER');
   const diagText = await page.locator('#debrief-failure-diagnostic').innerText();
-  assert.ok(diagText.includes('WRONG_SENSOR_FOR_WEATHER'), 'Failure screen must display diagnostic reason code');
+  assert.ok(/wrong sensor for the conditions/i.test(diagText), 'Failure screen must show plain-language retry guidance');
+  assert.ok(!/[A-Z]{3,}_[A-Z_]{3,}/.test(diagText), 'Failure screen must not expose raw internal reason codes');
   await page.screenshot({ path: join(artifacts, '08-mission-failure-diagnostics.png') });
   stageReport.push({
     stage: 8,

@@ -1,78 +1,65 @@
 # Runtime Asset Attribution & Provenance Manifest
 
-**Project:** ORBIT ZERO: THE LAST DOWNLINK  
-**Revision:** Build Distribution Manifest  
-**Target Platform:** Meta Quest Browser (Horizon OS) WebXR / Desktop  
-**Policy:** Zero proprietary, unlicensed, or infringing assets. Incoming source files in `public/assets/models/incoming/` are developer working files and are strictly excluded from production distribution builds via Vite build hooks (`vite.config.ts`).
+**Project:** ORBIT ZERO: THE LAST DOWNLINK (fictional, simulated gameplay; not a real satellite system)
+**Audit date:** 2026-11-07
+**Policy:** Incoming source files in `public/assets/models/incoming/` are developer working files and are excluded from production builds by `excludeIncomingSources` in `vite.config.ts`.
+
+Status vocabulary: **MATCHED** = the shipped file was compared against the named upstream source and agrees. **NAME ONLY** = the source is named by the project but the file was not compared to upstream. **UNVERIFIED** = no source could be confirmed; treat the license as unknown.
 
 ---
 
-## 1. Shipped 3D Models (`dist/assets/models/`)
+## 1. Credit required by license (CC BY 4.0)
 
-| File Name | Size (Bytes) | Provenance / Creator | License | Attribution Citation & Source URL | Status |
-|---|---|---|---|---|---|
-| `nasa-cubesat-icecube.glb` | 309,880 | NASA Goddard Space Flight Center / Earth Science Technology Office (ESTO) | NASA Open Data Policy (Public Domain / US Govt Work) | NASA 3U CubeSat demonstration platform for submillimeter-wave radiometry (857 GHz cloud ice radiometer). NASA 3D Resources / ESTO. | `[VERIFIED CC0 / PUBLIC DOMAIN]` |
-| `nasa-cubesat-mirata.glb` | 444,564 | NASA Earth Science Technology Office / MIT Lincoln Laboratory | NASA Open Data Policy (Public Domain / US Govt Work) | Microwave Radiometer Technology Acceleration (MiRaTA) CubeSat model. Atmospheric sounding radiometer validation. NASA ESTO. | `[VERIFIED CC0 / PUBLIC DOMAIN]` |
-| `nasa_acrimsat.glb` | 1,091,672 | NASA / Jet Propulsion Laboratory (JPL) | NASA Open Data Policy (Public Domain / US Govt Work) | Active Cavity Radiometer Irradiance Monitor Satellite (AcrimSAT) model. NASA JPL 3D Resources. | `[VERIFIED CC0 / PUBLIC DOMAIN]` |
+Earth day, night and relief maps: **Solar System Scope** (solarsystemscope.com/textures), licensed CC BY 4.0, based on NASA elevation and imagery data. The same credit is shown on the landing page.
 
 ---
 
-## 2. Shipped Planetary Textures (`dist/assets/textures/`)
+## 2. 3D models (`assets/models/`)
 
-| File Name | Size (Bytes) | Resolution | Source / Agency | License | Technical Role | Status |
-|---|---|---|---|---|---|---|
-| `earth_atmos_4096.jpg` | 1,004,147 | 4096 × 2048 | NASA Visible Earth / Goddard Space Flight Center | Public Domain (NASA Open Data) | Primary RGB8 Earth surface reflectance albedo (desktop / high-VRAM). | `[VERIFIED PUBLIC DOMAIN]` |
-| `earth_atmos_2048.jpg` | 512,606 | 2048 × 1024 | NASA Visible Earth / Goddard Space Flight Center | Public Domain (NASA Open Data) | Standalone Quest mobile fallback Earth albedo texture. | `[VERIFIED PUBLIC DOMAIN]` |
-| `earth_normal_4096.jpg` | 710,237 | 4096 × 2048 | NASA Earth Observatory / Shuttle Radar Topography Mission (SRTM) | Public Domain (NASA Open Data) | Tangent-space topographic relief normal perturbation. | `[VERIFIED PUBLIC DOMAIN]` |
-| `earth_normal_2048.jpg` | 336,774 | 2048 × 1024 | NASA Earth Observatory / SRTM | Public Domain (NASA Open Data) | Standalone Quest mobile fallback normal perturbation map. | `[VERIFIED PUBLIC DOMAIN]` |
-| `earth_specular_4096.jpg` | 549,994 | 4096 × 2048 | NASA Goddard Space Flight Center | Public Domain (NASA Open Data) | Continental vs oceanic specular reflection mask (4K). | `[VERIFIED PUBLIC DOMAIN]` |
-| `earth_specular_2048.jpg` | 223,421 | 2048 × 1024 | NASA Goddard Space Flight Center | Public Domain (NASA Open Data) | Continental vs oceanic specular reflection mask (2K fallback). | `[VERIFIED PUBLIC DOMAIN]` |
-| `earth_lights_4096.png` | 2,629,386 | 4096 × 2048 | NASA / NOAA Suomi NPP VIIRS (Day-Night Band) | Public Domain (NASA/NOAA Open Data) | Nocturnal urban illumination emissions map (additive blending). | `[VERIFIED PUBLIC DOMAIN]` |
-| `earth_lights_2048.png` | 410,160 | 2048 × 1024 | NASA / NOAA Suomi NPP VIIRS | Public Domain (NASA/NOAA Open Data) | 2K mobile nocturnal urban illumination texture. | `[VERIFIED PUBLIC DOMAIN]` |
-| `earth_clouds_1024.png` | 226,113 | 1024 × 512 | NASA Visible Earth | Public Domain (NASA Open Data) | Alpha-masked revolving atmospheric cloud layer sphere. | `[VERIFIED PUBLIC DOMAIN]` |
-| `milky_way_skybox_4096.jpg` | 2,754,824 | 4096 × 2048 | ESO / Serge Brunier / NASA | CC0 1.0 Universal (Public Domain Dedication) | 360-degree deep space background panorama. | `[VERIFIED CC0 / PUBLIC DOMAIN]` |
+| File | Source | License | Status | Used at runtime |
+|---|---|---|---|---|
+| `nasa_acrimsat.glb` | NASA 3D Resources, "Active Cavity Irradiance Monitor Satellite (AcrimSAT) (B)" (github.com/nasa/NASA-3D-Resources). Identical to the project's `incoming/` copy of that model. | NASA media usage guidelines (generally not copyrighted; no NASA endorsement implied) | NAME ONLY | Yes (`src/assets.ts`) |
+| `nasa-cubesat-icecube.glb` | NASA 3D Resources, "CubeSat - ICECube" | NASA media usage guidelines | NAME ONLY | No (shipped, unreferenced) |
+| `nasa-cubesat-mirata.glb` | NASA 3D Resources, "CubeSat - MiRaTa" | NASA media usage guidelines | NAME ONLY | No (shipped, unreferenced) |
+
+The in-game CubeSat, console, globe overlays and cubes are procedural geometry written for this project.
 
 ---
 
-## 3. Shipped PBR Material Textures (`dist/assets/textures/pbr/`)
+## 3. Textures (`assets/textures/`)
 
-| File Name | Size (Bytes) | Resolution | Source / Creator | License | Derived From | Status |
-|---|---|---|---|---|---|---|
-| `hull_metal_ao_2k.jpg` | 1,142,975 | 2048 × 2048 | ambientCG (Lennart Demes) | CC0 1.0 Universal (Public Domain) | `MetalPlates015A_2K-JPG_AmbientOcclusion.jpg` | `[VERIFIED CC0]` |
-| `hull_metal_color_2k.jpg` | 1,606,534 | 2048 × 2048 | ambientCG (Lennart Demes) | CC0 1.0 Universal (Public Domain) | `MetalPlates015A_2K-JPG_Color.jpg` | `[VERIFIED CC0]` |
-| `hull_metal_metalness_2k.jpg` | 633,970 | 2048 × 2048 | ambientCG (Lennart Demes) | CC0 1.0 Universal (Public Domain) | `MetalPlates015A_2K-JPG_Metalness.jpg` | `[VERIFIED CC0]` |
-| `hull_metal_normal_2k.jpg` | 3,099,380 | 2048 × 2048 | ambientCG (Lennart Demes) | CC0 1.0 Universal (Public Domain) | `MetalPlates015A_2K-JPG_NormalGL.jpg` | `[VERIFIED CC0]` |
-| `hull_metal_roughness_2k.jpg` | 1,605,380 | 2048 × 2048 | ambientCG (Lennart Demes) | CC0 1.0 Universal (Public Domain) | `MetalPlates015A_2K-JPG_Roughness.jpg` | `[VERIFIED CC0]` |
-
----
-
-## 4. Excluded Source-Only Assets (`public/assets/models/incoming/`)
-
-The following files exist in the source repository for asset authoring, baking, and development inspection. **None of these files are included in the production build or deployed to users** (enforced by the Vite build exclusion hook `excludeIncomingSources` in `vite.config.ts`):
-
-- `8k_earth_daymap.jpg`, `8k_earth_nightmap.jpg`, `8k_earth_specular_map.tif` (Raw 8K NASA maps; downscaled to 4K/2K runtime assets)
-- `Active Cavity Irradiance Monitor Satellite (AcrimSAT) (B).glb` (Uncompressed NASA source model; normalized to `nasa_acrimsat.glb`)
-- `Fabric004_*` (Source texture pack from ambientCG; not referenced by runtime code)
-- `MetalPlates006_*` (Source texture pack from ambientCG; not referenced by runtime code)
-- `MetalPlates015A_*` (Source material archive and Blender files; baked into `textures/pbr/hull_metal_*`)
-- `milky_way*.jpg`, `Nasa_Black_marble*.jpg` (Raw exploratory tiles; baked into unified skybox/lights)
-- `pexels-*.jpg` (Mood reference stock photos; never referenced by runtime shaders or scenes)
+| File | Origin found | License | Status | Used at runtime |
+|---|---|---|---|---|
+| `earth_atmos_2048.jpg`, `earth_normal_2048.jpg`, `earth_specular_2048.jpg`, `earth_lights_2048.png`, `earth_clouds_1024.png` | Byte-identical to the files in the three.js repository, `examples/textures/planets/`. The upstream origin of the pixels is not documented there. | three.js repo is MIT; license of the underlying imagery is **UNVERIFIED** | MATCHED to three.js, UNVERIFIED upstream | Yes (game and landing) |
+| `earth_atmos_4096.jpg` | Matches Solar System Scope 8K Earth day map (mean gray difference 0.15 of 255 at 128x64) | CC BY 4.0 | MATCHED | Landing scene |
+| `earth_lights_4096.png` | Matches Solar System Scope 8K Earth night map (0.04) | CC BY 4.0 | MATCHED | No (shipped, unreferenced) |
+| `earth_specular_4096.jpg` | Matches Solar System Scope 8K specular map (0.27) | CC BY 4.0 | MATCHED | Landing scene |
+| `earth_normal_4096.jpg` | Not compared. Presumed Solar System Scope derivative. | Unknown | UNVERIFIED | Landing scene |
+| `milky_way_skybox_4096.jpg` | Previously labelled "ESO / Serge Brunier, CC0". Not matched to ESO image eso0932a (difference 17), and ESO publishes under CC BY 4.0, not CC0. Real source unknown. | Unknown | **UNVERIFIED** | Yes (game and landing) |
+| `pbr/hull_metal_*_2k.jpg` (5 files) | ambientCG "MetalPlates015A", byte-identical to the `incoming/` files. ambientCG states all assets are CC0. | CC0 1.0 | MATCHED | No (shipped, unreferenced) |
 
 ---
 
-## 5. Procedural Runtime Assets (Zero File I/O)
+## 4. Media (`media/`)
 
-All of the following interactive elements are procedurally synthesized in memory at runtime without external asset downloads:
+| File | Origin | License | Status |
+|---|---|---|---|
+| `gemini_generated_video_0a69bdeb.mp4` | Landing-page voice-over ("Welcome to ORBIT ZERO..."), played as audio. The file name indicates it was generated with Google Gemini tooling. | Governed by the generating tool's terms; not reviewed | **AI-GENERATED, TERMS UNVERIFIED** |
 
-1. **Tactile Cockpit & Orbital Console Geometries:**
-   - Procedural geometries authored in `src/scene-assets/*.scene-asset.ts` using Three.js primitives (`BoxGeometry`, `CylinderGeometry`, `TorusGeometry`, `ExtrudeGeometry`).
-   - License: MIT (Original Developer Work).
+---
 
-2. **Tactile Evidence Cube Displays:**
-   - Dynamically generated 512 × 512 HTML5 `<canvas>` textures updating at 10 Hz with telemetry, QR data matrices, and scientific metadata.
-   - License: MIT (Original Developer Work).
+## 5. Audio
 
-3. **Audio Synthesis:**
-   - Zero pre-recorded audio sample files (`.mp3`, `.wav`, `.ogg`). 100% procedurally synthesized Web Audio nodes (sine/saw oscillators, biquad filters, exponential gain ramps, pink noise).
-   - Source: `src/systems/orbitalAudio.ts`.
-   - License: MIT (Original Developer Work).
+In-game sound effects and the landing drone are synthesized at runtime with the Web Audio API (`src/systems/orbitalAudio.ts`, `src/landing/landingAudio.ts`) and use no sample files. The one pre-recorded audio asset is the landing voice-over in section 4.
+
+---
+
+## 6. Excluded source-only assets (`public/assets/models/incoming/`, not deployed)
+
+`8k_earth_*` (Solar System Scope, CC BY 4.0), AcrimSAT source model, ambientCG `Fabric004`, `MetalPlates006`, `MetalPlates015A` packs (CC0), `milky_way*.jpg` and `Nasa_Black_marble*.jpg` exploratory tiles (origin not recorded), `pexels-*.jpg` mood references (Pexels license, never referenced).
+
+---
+
+## 7. Software dependencies
+
+Runtime dependencies are listed in `package.json` and `package-lock.json` (Meta Immersive Web SDK, three.js, @pmndrs/uikit and others). Their licenses ship with each package in `node_modules`; no separate third-party notice file has been generated for the bundle.

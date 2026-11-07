@@ -18,8 +18,9 @@ import type {
 } from './types';
 
 const confidenceRank = { UNVERIFIED: 0, PROBABLE: 1, CONFIRMED: 2 };
-// Cache keyed by "scenarioId|customScenarioId" to handle procedural scenarios correctly.
+// Static scenarios are cached by id; custom (procedural) scenarios by config object identity.
 const solutionCache = new Map<string, MissionSolution>();
+const customSolutionCache = new WeakMap<object, MissionSolution>();
 
 export function getQueueSchedule(state: MissionState): QueueScheduleEntry[] {
   let cursor = 0;
@@ -188,8 +189,9 @@ export function solveMission(state: Pick<MissionState, 'scenarioId' | 'power' | 
 }
 
 export function getMissionBenchmark(scenarioId: MissionScenarioId, customScenario?: MissionScenarioConfig | null): MissionSolution {
-  const cacheKey = `${scenarioId}|${customScenario?.id ?? ''}`;
-  let solution = solutionCache.get(cacheKey);
+  // Procedural configs reuse the base scenario id for every seed, so they are cached by the
+  // identity of the generated config object, never by id (otherwise seed B inherits seed A's plan).
+  let solution = customScenario ? customSolutionCache.get(customScenario) : solutionCache.get(scenarioId);
   if (!solution) {
     const scenario = customScenario ?? MISSION_SCENARIOS[scenarioId] ?? MISSION_SCENARIOS.STANDARD_INDUS_PASS;
     const budget = scenario.budget;
@@ -197,7 +199,8 @@ export function getMissionBenchmark(scenarioId: MissionScenarioId, customScenari
       scenarioId, power: budget.initialPower, maxPower: budget.initialPower,
       maxStorage: budget.maxStorage, downlinkWindowSec: budget.downlinkDurationSec, packets: [],
     }, customScenario);
-    solutionCache.set(cacheKey, solution);
+    if (customScenario) customSolutionCache.set(customScenario, solution);
+    else solutionCache.set(scenarioId, solution);
   }
   return { ...solution, actions: solution.actions.map((action) => ({ ...action })) };
 }

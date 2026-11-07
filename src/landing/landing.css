@@ -778,3 +778,99 @@
     display: none;
   }
 }
+
+
+/* ------------------------------------------------------------------
+   TACTILE ORBITAL INSTRUMENTATION: shared interaction states
+   One visible focus ring, one press response and reduced-motion support
+   for every landing control. Uses existing tokens only.
+   ------------------------------------------------------------------ */
+.oz-btn-mute-toggle:focus-visible,
+.oz-btn-primary:focus-visible,
+.oz-btn-hero-secondary:focus-visible,
+.oz-op-card:focus-visible,
+.oz-btn-back:focus-visible,
+.oz-card:focus-visible,
+.oz-btn-desktop:focus-visible,
+.oz-btn-vr:focus-visible {
+  outline: 2px solid var(--oz-gold);
+  outline-offset: 3px;
+}
+
+.oz-btn-mute-toggle:active,
+.oz-btn-primary:active,
+.oz-btn-hero-secondary:active,
+.oz-op-card:active,
+.oz-btn-back:active,
+.oz-card:active,
+.oz-btn-desktop:active,
+.oz-btn-vr:active {
+  transform: translateY(1px) scale(0.99);
+  transition-duration: 60ms;
+}
+
+.oz-op-card[aria-checked="true"],
+.oz-op-card[aria-pressed="true"] {
+  outline: 1px solid var(--oz-cyan);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #oz-hero-screen *,
+  #oz-selection-screen *,
+  .oz-btn-mute-toggle,
+  .oz-btn-primary,
+  .oz-btn-hero-secondary,
+  .oz-op-card,
+  .oz-btn-back,
+  .oz-card,
+  .oz-btn-desktop,
+  .oz-btn-vr {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+/* ------------------------------------------------------------------
+   Consistency pass: campaign cards stay legible in every state,
+   selection header stays readable over the bright Earth limb.
+   ------------------------------------------------------------------ */
+.oz-op-card:hover,
+.oz-op-card:focus-visible {
+  /* Never let hover/focus turn the card translucent: text contrast must not depend on the Earth behind it. */
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.14), rgba(6, 14, 28, 0.94));
+}
+.oz-op-card-active,
+.oz-op-card-active:hover,
+.oz-op-card-active:focus-visible {
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.22), rgba(6, 14, 28, 0.96));
+}
+.oz-op-meta {
+  text-wrap: balance;
+}
+.oz-selection-heading,
+.oz-selection-subheading {
+  text-shadow: 0 1px 2px rgba(2, 5, 12, 0.95), 0 0 18px rgba(2, 5, 12, 0.85);
+}
+.oz-selection-subheading {
+  color: var(--oz-text-secondary);
+}
+
+/* Visible asset credit required by CC BY 4.0 (Solar System Scope textures). Kept small and low-contrast but readable. */
+.oz-credit-line {
+  margin: 10px 0 0;
+  text-align: center;
+  font-family: var(--oz-font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  color: #9fb4c8;
+}
+.oz-credit-line a {
+  color: #7dd3fc;
+  text-decoration: underline;
+}
+.oz-credit-line a:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}

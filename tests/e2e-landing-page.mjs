@@ -133,12 +133,13 @@ try {
   assert.ok(heroTitle.includes('THE LAST DOWNLINK'), 'Hero title must contain "THE LAST DOWNLINK"');
 
   const supportingLine = await page.locator('.oz-supporting-line').innerText();
-  assert.equal(supportingLine.trim(), 'A SATELLITE OPERATIONS EXPERIENCE');
+  // Current intentional copy (landingUI.ts): states the genre, the hands-first premise and that the game is a simulation.
+  assert.equal(supportingLine.trim(), 'HANDS-FIRST SPATIAL SATELLITE TRIAGE STRATEGY GAME [SIMULATED]');
 
   const missionText = await page.locator('.oz-hero-welcome').innerText();
-  assert.ok(missionText.includes('Welcome to ORBIT ZERO.'), 'Mission text must include greeting');
-  assert.ok(missionText.includes('every observation matters'), 'Mission text must include observation premise');
-  assert.ok(missionText.includes('Every decision has a consequence'), 'Mission text must include consequence premise');
+  assert.ok(missionText.includes('Every scan costs capacitor energy'), 'Mission text must state the energy cost of scanning');
+  assert.ok(missionText.includes('competes for the last downlink'), 'Mission text must state the downlink competition premise');
+  assert.ok(missionText.includes('Karachi Ground Station before Loss of Signal'), 'Mission text must state the transmission objective');
 
   // Verify Audio Mute Button
   const muteBtn = page.locator('#btn-landing-mute');
@@ -177,13 +178,35 @@ try {
   assert.ok(selectionActive, 'Screen 2 (Experience Selection) must become active');
 
   const selectionHeading = await page.locator('.oz-selection-heading').innerText();
-  assert.equal(selectionHeading.trim(), 'CHOOSE YOUR EXPERIENCE');
+  assert.equal(selectionHeading.trim(), 'SELECT CAMPAIGN OPERATION & TERMINAL');
 
   const hasDesktopCard = await page.locator('#card-desktop').isVisible();
   assert.ok(hasDesktopCard, 'Desktop Experience option card must be present');
 
   const hasVRCard = await page.locator('#card-vr').isVisible();
   assert.ok(hasVRCard, 'VR Experience option card must be present');
+
+  // Campaign cards are a real radio group: one tab stop, aria-checked follows selection, arrows move it.
+  const radioState = () => page.evaluate(() => Array.from(document.querySelectorAll('#oz-campaign-grid [role="radio"]')).map((el) => ({
+    id: el.id, checked: el.getAttribute('aria-checked'), tab: el.tabIndex,
+  })));
+  let radios = await radioState();
+  assert.equal(radios.length, 4, 'Four campaign radios expected');
+  assert.equal(radios.filter((r) => r.checked === 'true').length, 1, 'Exactly one card is checked');
+  assert.equal(radios.filter((r) => r.tab === 0).length, 1, 'Roving tabindex: exactly one tab stop');
+  assert.equal(radios.find((r) => r.checked === 'true').id, 'card-op-fireline', 'Fireline is the default selection');
+  await page.locator('#card-op-fireline').focus();
+  await page.keyboard.press('ArrowRight');
+  radios = await radioState();
+  assert.equal(radios.find((r) => r.checked === 'true').id, 'card-op-monsoon', 'ArrowRight selects the next card');
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'card-op-monsoon', 'Focus follows selection');
+  await page.keyboard.press('End');
+  assert.equal((await radioState()).find((r) => r.checked === 'true').id, 'card-op-aftershock', 'End selects the last card');
+  await page.keyboard.press('ArrowRight');
+  assert.equal((await radioState()).find((r) => r.checked === 'true').id, 'card-op-academy', 'Selection wraps around');
+  await page.keyboard.press('Home');
+  await page.locator('#card-op-fireline').click(); // restore the default for the launch test
+  assert.equal((await radioState()).find((r) => r.checked === 'true').id, 'card-op-fireline');
 
   await page.screenshot({ path: join(artifacts, '02-landing-selection.png'), fullPage: true });
   console.log('✓ Smooth transition to Experience Selection screen verified');

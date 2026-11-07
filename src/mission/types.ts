@@ -205,6 +205,8 @@ export interface RequestEvaluation {
   matchedSensorMode: SensorMode | null;
   matchedConfidence: ConfidenceLevel | null;
   explanation: string;
+  /** Why this outcome followed from the player's sensor, processing and staging choices. */
+  decisionNote?: string;
   groundConsequence: string;
 }
 

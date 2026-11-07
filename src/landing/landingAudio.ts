@@ -30,7 +30,9 @@ export class LandingAudioController {
   private initVoiceAudio(): void {
     if (typeof window === 'undefined') return;
     try {
-      this.voiceAudio = new Audio('/media/gemini_generated_video_0a69bdeb.mp4');
+      // Relative to the deployment base so subpath hosting (e.g. /orbit-zero/) still finds the file.
+      const base: string = (import.meta as any).env?.BASE_URL ?? './';
+      this.voiceAudio = new Audio(`${base}media/gemini_generated_video_0a69bdeb.mp4`);
       this.voiceAudio.preload = 'auto';
       this.voiceAudio.volume = 0.85;
       this.voiceAudio.muted = this.isMuted;

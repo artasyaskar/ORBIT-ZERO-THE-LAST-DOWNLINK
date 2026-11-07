@@ -12,6 +12,7 @@
  * 6. Zero XR Conflict: Automatically hides when presenting in an immersive WebXR headset session.
  */
 
+import { OUTCOME_LABELS, retryGuidanceFor, escapeHtml, clipText, requestStatusChip, type DebriefOutcome } from '../ui/debriefText';
 import {
   Camera,
   Object3D,
@@ -1882,7 +1883,7 @@ export class DesktopControlsManager {
     const objText = `OBJECTIVE: SCAN ${secName} [${recSensor}]`;
 
     // 1. Sector Reticle Leader Line & Callout Badge (Concept Image 2)
-    const globe = this.host.world.getSceneObject('earth-globe');
+    const globe = this.host.getSceneObject('earth-globe');
     const reticle = globe?.getObjectByName('ActiveSectorReticleGroup');
     if (reticle && this.host.camera) {
       const worldPos = new Vector3();
@@ -2177,6 +2178,12 @@ export class DesktopControlsManager {
   private renderTopBanner(state: MissionState): void {
     if (!this.bannerEl) return;
 
+    this.bannerEl.style.borderColor = 'rgba(56, 189, 248, 0.35)';
+    this.bannerEl.style.maxWidth = '660px';
+    this.bannerEl.style.minWidth = '440px';
+    this.bannerEl.style.maxHeight = '';
+    this.bannerEl.style.overflowY = '';
+
     if (state.phase === 'DEBRIEF') {
       this.bannerEl.style.display = 'block';
       const debrief = state.debrief!;
@@ -2198,25 +2205,59 @@ export class DesktopControlsManager {
       const payloadMb = debrief.transmittedPayloadMb ?? Math.round(debrief.downlinkUsedSec * 10);
       const throughput = debrief.downlinkThroughputMbps ?? 10;
 
+      const outcomeKey = (debrief.outcome ?? 'FAILED') as DebriefOutcome;
+      const chip = (text: string, color: string) =>
+        `<span style="display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: 0.6px; color: ${color}; border: 1px solid ${color}; border-radius: 4px; padding: 1px 6px;">${text}</span>`;
+      const resourceChips = [
+        `<span style="color: #94a3b8;">DOWNLINK</span> <b style="color: #f8fafc;">${payloadMb} MB</b> <span style="color: #94a3b8;">(${debrief.downlinkUsedSec.toFixed(1)}s of ${debrief.downlinkWindowSec.toFixed(1)}s @ ${throughput} MB/s)</span>`,
+        `<span style="color: #94a3b8;">BATTERY</span> <b style="color: #38bdf8;">${debrief.powerRemaining} Wh left</b>`,
+      ].join('<span style="color: #475569;"> &nbsp;|&nbsp; </span>');
+      const requestRows = isAcademyPass
+        ? ''
+        : debrief.evaluations
+            .map((ev) => {
+              const s = requestStatusChip(ev.status);
+              return `
+          <div class="aar-row" style="display: grid; grid-template-columns: 76px 1fr; gap: 4px 10px; align-items: start; text-align: left; padding: 7px 0; border-top: 1px solid rgba(148, 163, 184, 0.16);">
+            <div>${chip(s.label, s.color)}</div>
+            <div>
+              <div style="font-size: 12px; font-weight: 700; color: #f8fafc;">${escapeHtml(ev.shortLabel)} <span style="color: #94a3b8; font-weight: 600;">${ev.scorePoints}/${ev.maxPoints} pts</span></div>
+              <div style="font-size: 12px; color: #cbd5e1; margin-top: 1px;">${escapeHtml(clipText(ev.groundConsequence, 150))}</div>
+              ${ev.decisionNote ? `<div style="font-size: 11px; color: #7dd3fc; margin-top: 2px;"><b>Your decision:</b> ${escapeHtml(ev.decisionNote)}</div>` : ''}
+            </div>
+          </div>`;
+            })
+            .join('');
+      const guidance = isAcademyPass
+        ? ''
+        : debrief.outcome === 'SUCCESS'
+          ? escapeHtml(clipText(debrief.deterministicRecommendation, 280))
+          : (() => {
+              const g = retryGuidanceFor(debrief);
+              return g ? `<b style="color: ${outcomeColor};">${escapeHtml(g.title)}.</b> ${escapeHtml(clipText(g.body, 340))}` : escapeHtml(clipText(debrief.deterministicRecommendation, 280));
+            })();
+
+      this.bannerEl.style.borderColor = outcomeColor;
+      this.bannerEl.style.maxWidth = '780px';
+      this.bannerEl.style.minWidth = '620px';
+      this.bannerEl.style.maxHeight = 'calc(100vh - 28px)';
+      this.bannerEl.style.overflowY = 'auto';
       this.bannerEl.innerHTML = `
-        <div style="font-size: 11px; color: #38bdf8; font-weight: 700; letter-spacing: 1px; margin-bottom: 2px;">
-          ${isAcademyPass ? 'ORBITAL ACADEMY QUALIFICATION REVIEW' : 'MISSION AFTER-ACTION REVIEW (AAR) — GROUND OUTCOMES'}
+        <div style="font-size: 10px; color: #38bdf8; font-weight: 700; letter-spacing: 1.2px;">
+          ${isAcademyPass ? 'ORBITAL ACADEMY QUALIFICATION REVIEW' : 'MISSION AFTER-ACTION REVIEW [SIMULATED]'}
         </div>
-        <div id="debrief-outcome-headline" style="font-size: 17px; font-weight: 800; color: ${outcomeColor}; margin-bottom: 4px;">
-          ${isAcademyPass ? `${outcomeLabel} — ${debrief.missionRank} | ${debrief.totalScore}/${debrief.maxScore} PTS` : `${outcomeLabel} — GRADE ${debrief.efficiencyGrade} (${debrief.certification}) | ${debrief.totalScore}/${debrief.maxScore} PTS`}
+        <div id="debrief-outcome-headline" style="font-size: 20px; font-weight: 800; color: ${outcomeColor}; margin: 3px 0 4px;">
+          ${isAcademyPass ? `${outcomeLabel} - ${debrief.missionRank} | ${debrief.totalScore}/${debrief.maxScore} PTS` : `${OUTCOME_LABELS[outcomeKey]} - GRADE ${debrief.efficiencyGrade}${debrief.certification && debrief.certification !== 'NONE' ? ` (${debrief.certification})` : ''} | ${debrief.totalScore}/${debrief.maxScore} PTS`}
         </div>
-        <div style="font-size: 11px; color: #94a3b8; font-family: monospace; margin-bottom: 4px;">
-          DOWNLINK: <b style="color: #f8fafc;">${payloadMb} MB @ ${throughput} MB/s</b> (${debrief.downlinkUsedSec.toFixed(1)}s / ${debrief.downlinkWindowSec.toFixed(1)}s) | BATTERY: <b style="color: #38bdf8;">${debrief.powerRemaining} Wh LEFT</b>
-        </div>
-        <div style="font-size: 12px; color: #cbd5e1; margin-bottom: 6px;">
-          ${debrief.summaryHeadline}
-        </div>
-        ${debrief.outcome !== 'SUCCESS' && debrief.failureExplanation ? `
-          <div id="debrief-failure-diagnostic" style="background: rgba(127, 29, 29, 0.38); border: 1px solid ${outcomeColor}; border-radius: 6px; padding: 6px 10px; margin-bottom: 8px; font-size: 11px; color: #fecaca; text-align: left;">
-            <b style="color: ${outcomeColor};">[DIAGNOSTIC: ${debrief.failureReasonCode || 'INSUFFICIENT_VERIFIED_EVIDENCE'}]</b> ${debrief.failureExplanation}
-          </div>
-        ` : ''}
-        <div style="display: flex; justify-content: center; gap: 10px;">
+        <div style="font-size: 11px; font-family: monospace; margin-bottom: 4px;">${resourceChips}</div>
+        <div style="font-size: 12px; color: #cbd5e1; margin-bottom: 6px;">${escapeHtml(debrief.summaryHeadline)}</div>
+        ${requestRows}
+        ${guidance ? `
+          <div id="debrief-failure-diagnostic" style="text-align: left; background: rgba(15, 23, 42, 0.7); border-left: 3px solid ${outcomeColor}; border-radius: 0 6px 6px 0; padding: 6px 10px; margin: 6px 0 4px; font-size: 11px; color: #e2e8f0;">
+            <span style="color: #94a3b8; font-weight: 700;">${debrief.outcome === 'SUCCESS' ? 'NEXT STEP' : 'RETRY GUIDANCE'}</span> ${guidance}
+            <div style="color: #94a3b8; margin-top: 3px;">CEILING ${debrief.achievableScore}/100 | ${debrief.benchmarkDownlinkSec.toFixed(1)}s | ${debrief.benchmarkPowerUsed} Wh</div>
+          </div>` : ''}
+        <div style="display: flex; justify-content: center; gap: 10px; margin-top: 8px;">
           <button id="btn-aar-restart" style="${this.btnStyle('#38bdf8')}">${isAcademyPass ? 'REPLAY ACADEMY [R]' : 'RESTART PASS [R]'}</button>
           <button id="btn-aar-next" style="${this.btnStyle('#34d399')}">${isAcademyPass ? 'LAUNCH OP 01: FIRELINE [N]' : 'NEXT PASS [N]'}</button>
           ${isAcademyPass ? `<button id="btn-aar-campaign" style="${this.btnStyle('#a855f7')}">CAMPAIGN SELECT</button>` : ''}
@@ -2401,6 +2442,7 @@ export class DesktopControlsManager {
               <div style="font-size: 9px; color: #94a3b8; font-style: italic;">
                 <b>Telemetry Evidence:</b> ${ev.explanation}
               </div>
+              ${ev.decisionNote ? `<div style="font-size: 9px; color: #cbd5e1; margin-top: 2px;"><b>Decision review:</b> ${ev.decisionNote}</div>` : ''}
             </div>
           `;
       }).join('')}

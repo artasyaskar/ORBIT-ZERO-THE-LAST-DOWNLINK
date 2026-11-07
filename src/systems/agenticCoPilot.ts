@@ -15,7 +15,7 @@
  *      executes the triage action on the deterministic MissionEngine and reports back via Quindar telemetry.
  */
 
-import type { MissionAction, MissionState, SectorId, SensorMode } from '../mission/types';
+import type { MissionAction, MissionSolution, MissionState, SectorId, SensorMode } from '../mission/types';
 import { getNextPlanAction, solveMission } from '../mission/missionPlanner';
 import { SECTORS } from '../mission/missionConfig';
 import type { OrbitalAudioController } from './orbitalAudio';
@@ -35,6 +35,8 @@ export interface AgenticIntervention {
 
 export interface AgenticCoPilotHost {
   getState: () => MissionState;
+  /** Memoized solver owned by the host. Falls back to an uncached solve when absent. */
+  getSolution?: (state: MissionState) => MissionSolution;
   applyAction: (action: MissionAction) => { ok: boolean; message: string };
   playCue?: (cue: string) => void;
   voiceCommander?: VoiceCommander;
@@ -128,7 +130,7 @@ export class AgenticCoPilot {
 
     // 3. ADVISORY / HESITATION: Player idle > 5 seconds
     if (this.idleTimeSec >= 5.0 && this.coPilotCooldownSec <= 0) {
-      const solution = solveMission(state);
+      const solution = this.host.getSolution ? this.host.getSolution(state) : solveMission(state);
       const planAction = getNextPlanAction(state, solution);
       if (planAction) {
         let headline = 'TACTICAL ASSIST READY';

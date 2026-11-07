@@ -15,9 +15,78 @@ import type {
 
 const confidenceRank: Record<ConfidenceLevel, number> = { UNVERIFIED: 0, PROBABLE: 1, CONFIRMED: 2 };
 
+interface DecisionContext {
+  allPackets: DataPacket[];
+  scenarioId: MissionScenarioId;
+  customScenario?: MissionScenarioConfig | null;
+}
+
+/**
+ * Explains what the player's actual sensor / processing / staging decisions meant for one ground
+ * request: whether the sensor was the strongest available one, whether a different sensor was a
+ * valid alternative, what the evidence still cannot tell responders, and (when evidence never
+ * arrived) why. Pure and deterministic; it only reads the packets and the scenario tables.
+ */
+export function describeRequestDecision(
+  request: GroundRequest,
+  status: RequestEvaluation['status'],
+  best: DataPacket | null,
+  packet: DataPacket | null,
+  transmittedPackets: DataPacket[],
+  ctx: DecisionContext,
+): string {
+  const recommended = getRecommendedSensor(ctx.scenarioId, request.targetSectorId, ctx.customScenario);
+  const sector = getScenarioSector(ctx.scenarioId, request.targetSectorId, ctx.customScenario);
+  const ceiling = sector.outcomes[recommended] ?? sector.outcomes.OPTICAL;
+  const ceilingMeets = confidenceRank[ceiling.confidence] >= confidenceRank[request.minimumConfidence];
+  const parts: string[] = [];
+
+  if (status === 'VERIFIED' && best) {
+    if (best.sensorMode === recommended) {
+      parts.push(`${best.sensorMode} was the strongest sensor available for Sector ${request.targetSectorId}.`);
+    } else {
+      parts.push(
+        `Valid alternative: ${best.sensorMode} met the threshold (${best.confidence}); ${recommended} would reach ${ceiling.confidence}.`,
+      );
+    }
+    if (best.confidence === 'PROBABLE') parts.push('Residual uncertainty: confirm on site.');
+    if (best.processed && best.compressionAlgorithm) {
+      parts.push('Compression kept extracted features only; it added no certainty.');
+    }
+  } else if (status === 'PARTIAL' && best) {
+    parts.push(
+      ceilingMeets
+        ? `${best.sensorMode} reached only ${best.confidence}; ${recommended} could reach ${ceiling.confidence} here.`
+        : `${best.sensorMode} reached only ${best.confidence}; no sensor this pass reaches ${request.requiredBadge} here (best: ${recommended}, ${ceiling.confidence}).`,
+    );
+  } else {
+    const transmittedIds = new Set(transmittedPackets.map((p) => p.id));
+    const usableNotSent = ctx.allPackets.find(
+      (p) => p.satisfiesRequestId === request.id && p.confidence !== 'UNVERIFIED' && !transmittedIds.has(p.id),
+    );
+    if (usableNotSent) {
+      parts.push(
+        `A ${usableNotSent.sensorMode} observation (${usableNotSent.confidence}) was captured but never reached the ground (unqueued, discarded or cut off).`,
+      );
+    } else if (
+      (packet ?? ctx.allPackets.find((p) => p.sectorId === request.targetSectorId && p.confidence === 'UNVERIFIED'))?.confidence === 'UNVERIFIED'
+    ) {
+      const blocked = (packet ?? ctx.allPackets.find((p) => p.sectorId === request.targetSectorId && p.confidence === 'UNVERIFIED'))!;
+      parts.push(
+        `${blocked.sensorMode} returned no usable evidence for Sector ${request.targetSectorId} (${blocked.phenomenologyTag.replace(/_/g, ' ').toLowerCase()}); ${recommended} reaches ${ceiling.confidence} here.`,
+      );
+    } else if (ctx.allPackets.some((p) => p.sectorId === request.targetSectorId)) {
+      parts.push(`Sector ${request.targetSectorId} was observed but nothing usable for this request was transmitted.`);
+    } else {
+      parts.push(`Sector ${request.targetSectorId} was never observed, so ground teams received nothing for this request.`);
+    }
+  }
+  return parts.join(' ');
+}
 export function evaluateRequestWithPackets(
   request: GroundRequest,
   transmittedPackets: DataPacket[],
+  context?: DecisionContext,
 ): RequestEvaluation {
   const matching = transmittedPackets.filter((packet) => packet.satisfiesRequestId === request.id && packet.confidence !== 'UNVERIFIED');
   const best = matching.reduce<DataPacket | null>((current, packet) =>
@@ -53,6 +122,7 @@ export function evaluateRequestWithPackets(
     matchedSectorId: packet?.sectorId ?? null, matchedSensorMode: packet?.sensorMode ?? null,
     matchedConfidence: packet?.confidence ?? null,
     explanation,
+    decisionNote: context ? describeRequestDecision(request, status, best, packet, transmittedPackets, context) : undefined,
     groundConsequence: status === 'VERIFIED' ? (request.consequenceOnSuccess.includes('740 K') && packet?.sensorMode !== 'THERMAL'
       ? 'Processed SAR change-detection flagged probable surface disturbance around the Sector E substation; no temperature was measured, so grid engineers still verify the transformer on site.'
       : request.consequenceOnSuccess) : status === 'PARTIAL' ? request.consequenceOnPartial : request.consequenceOnFailure,
@@ -81,7 +151,7 @@ export function buildDebriefReport(params: {
   } = params;
   const benchmark = getMissionBenchmark(scenarioId, customScenario);
   const requests = getScenarioRequests(scenarioId, customScenario);
-  const evaluations = GROUND_REQUEST_ORDER.map((id) => evaluateRequestWithPackets(requests[id], transmittedPackets));
+  const evaluations = GROUND_REQUEST_ORDER.map((id) => evaluateRequestWithPackets(requests[id], transmittedPackets, { allPackets, scenarioId, customScenario }));
   const requestsVerifiedCount = evaluations.filter((ev) => ev.status === 'VERIFIED').length;
   const requestsPartialCount = evaluations.filter((ev) => ev.status === 'PARTIAL').length;
   const requestsUnverifiedCount = evaluations.filter((ev) => ev.status === 'UNVERIFIED').length;
@@ -258,8 +328,11 @@ export function buildDebriefReport(params: {
         `WINDOW CUTOFF OVERFLOW: ${droppedPackets.length} queued packet(s) (${droppedPackets.map((p) => p.id).join(', ')}) exceeded the ${downlinkWindowSec.toFixed(1)}s S-Band pass window (@ 10.0 MB/s). Compress raw cubes (40-45 MB -> 18 MB / 1.8s) in the Processing Cradle before committing downlink.`;
     } else if (hasUnverifiedTransmitted || (hasUnverifiedScanned && requestsUnverifiedCount > 0)) {
       failureReasonCode = 'WRONG_SENSOR_FOR_WEATHER';
+      const mismatches = evaluations
+        .filter((ev) => ev.status === 'UNVERIFIED' && ev.matchedSensorMode && ev.matchedSectorId)
+        .map((ev) => `Sector ${ev.matchedSectorId} ${ev.matchedSensorMode} returned no usable evidence; ${getRecommendedSensor(scenarioId, ev.matchedSectorId!, customScenario)} is required there.`);
       failureExplanation =
-        'SENSOR-ATMOSPHERE MISMATCH: Passive Optical scans were blocked by storm clouds or dense smoke ([X] UNVERIFIED). Use SAR Radar (5.4 GHz) for storm-cloud flood sectors and Thermal IR (3.9 um) for smoke-obscured wildfire hotspots.';
+        `SENSOR-ATMOSPHERE MISMATCH: ${mismatches.length ? mismatches.join(' ') : 'A scan was blocked by weather or obscuration ([X] UNVERIFIED).'} Optical energy does not pass through dense cloud or smoke; SAR (microwave) penetrates cloud, and Thermal IR (3.9 um) sees through smoke to heat.`;
     } else if (storageUsed >= 6 && allPackets.every((p) => !p.processed) && requestsUnverifiedCount > 0) {
       failureReasonCode = 'UNPROCESSED_STORAGE_BOTTLENECK';
       failureExplanation =
@@ -267,7 +340,7 @@ export function buildDebriefReport(params: {
     } else {
       failureReasonCode = 'INSUFFICIENT_VERIFIED_EVIDENCE';
       failureExplanation =
-        `INCOMPLETE TRIAGE COVERAGE: Only ${requestsVerifiedCount}/3 ground requests were verified (${requestsPartialCount} partial, ${requestsUnverifiedCount} unverified). Scan and queue all three priority target sectors (B, C, E) before committing downlink.`;
+        `INCOMPLETE TRIAGE COVERAGE: Only ${requestsVerifiedCount}/3 ground requests were verified (${requestsPartialCount} partial, ${requestsUnverifiedCount} unverified). Scan and queue evidence for every priority target sector (${GROUND_REQUEST_ORDER.map((id) => requests[id].targetSectorId).join(', ')}) before committing downlink.`;
     }
   }
 
