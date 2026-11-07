@@ -142,6 +142,8 @@ describe('Desktop Controls & First-Time Player Experience', () => {
     };
 
     const manager = new DesktopControlsManager(host);
+    // A fresh pass opens the Mission Card, which blocks gameplay keys until the player starts the pass.
+    for (const fn of listeners['keydown'] || []) fn({ key: 'Enter', preventDefault: vi.fn() });
     return { engine, host, manager };
   }
 
@@ -255,6 +257,20 @@ describe('Desktop Controls & First-Time Player Experience', () => {
     expect(engine.getState().phase).toBe('DEBRIEF');
     expect(engine.getState().debrief).toBeDefined();
     expect(engine.getState().debrief?.totalScore).toBeGreaterThanOrEqual(60);
+
+    manager.dispose();
+  });
+
+  it('blocks gameplay keys while the Mission Card is open so a stray key cannot spend battery', () => {
+    const { engine, host, manager } = createTestHarness();
+    engine.reset();
+    (manager as any).briefingModalOpen = true;
+    (manager as any).updateHud();
+    dispatchKey(' ');
+    expect(host.scan).not.toHaveBeenCalled();
+    dispatchKey('Enter');
+    dispatchKey(' ');
+    expect(host.scan).toHaveBeenCalled();
 
     manager.dispose();
   });

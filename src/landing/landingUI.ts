@@ -10,6 +10,18 @@
  */
 
 import type { MissionScenarioId } from '../mission/types';
+import {
+  describeWeather,
+  getScenarioRequests,
+  getScenarioSector,
+  getScenarioThresholds,
+  GROUND_REQUEST_ORDER,
+  MISSION_SCENARIOS,
+  requestValue,
+  SENSOR_PLAIN_GUIDE,
+} from '../mission/missionConfig';
+import { formatClock } from '../mission/guidance';
+import { loadMissionProfile } from '../systems/missionProfile';
 
 export interface CampaignCardSpec {
   id: 'ORBITAL_ACADEMY' | 'FIRELINE_PASS' | 'STANDARD_INDUS_PASS' | 'AFTERSHOCK_PASS';
@@ -24,7 +36,7 @@ export interface CampaignCardSpec {
   requestsSummary: string;
 }
 
-export const CAMPAIGN_MENU_CARDS: readonly CampaignCardSpec[] = [
+const RAW_CAMPAIGN_CARDS: readonly CampaignCardSpec[] = [
   {
     id: 'ORBITAL_ACADEMY',
     scenarioId: 'ORBITAL_ACADEMY',
@@ -83,6 +95,34 @@ export const CAMPAIGN_MENU_CARDS: readonly CampaignCardSpec[] = [
   },
 ] as const;
 
+/**
+ * Card text is derived from the scenario config so the landing page can never disagree with the game
+ * (budgets, clock, win line) and never prints the sensor answer: only the weather clue.
+ */
+function deriveCard(card: CampaignCardSpec): CampaignCardSpec {
+  const s = MISSION_SCENARIOS[card.scenarioId];
+  if (!s) return card;
+  const requests = getScenarioRequests(card.scenarioId);
+  const { successScore } = getScenarioThresholds(card.scenarioId);
+  const clock = s.passDurationSec ? ` pass clock` : 'no clock';
+  const sensors = (s.availableSensors ?? ['RADAR', 'OPTICAL']).map((m) => SENSOR_PLAIN_GUIDE[m].label).join(' • ');
+  return {
+    ...card,
+    budgetLine: ` Wh battery •  memory blocks • s window •  • win at + pts`,
+    sensorsLine: card.startTutorial ? card.sensorsLine : `Sensors: `,
+    briefing: s.storyLine ?? card.briefing,
+    requestsSummary: card.startTutorial
+      ? card.requestsSummary
+      : GROUND_REQUEST_ORDER.map((id) => {
+        const r = requests[id];
+        const sector = getScenarioSector(card.scenarioId, r.targetSectorId);
+        return `Sector :  ( pts, )`;
+      }).join(' • '),
+  };
+}
+
+export const CAMPAIGN_MENU_CARDS: readonly CampaignCardSpec[] = RAW_CAMPAIGN_CARDS.map(deriveCard);
+
 export interface LandingLaunchSelection {
   launchXR: boolean;
   scenarioId: MissionScenarioId;
@@ -109,7 +149,8 @@ export class LandingUI {
   private vrAdvisoryEl!: HTMLDivElement;
 
   private isWebXRSupported = false;
-  private selectedCard: CampaignCardSpec = CAMPAIGN_MENU_CARDS[1]; // Default to OP 01: FIRELINE
+  // First-time players start in the 90-second Academy; returning players go straight to OP 01.
+  private selectedCard: CampaignCardSpec = loadMissionProfile().tutorialComplete ? CAMPAIGN_MENU_CARDS[1] : CAMPAIGN_MENU_CARDS[0];
 
   constructor(container: HTMLElement, events: LandingUIEvents) {
     this.container = container;
@@ -117,6 +158,7 @@ export class LandingUI {
 
     this.checkWebXRSupport();
     this.buildDOM();
+    this.refreshCardsFromConfig();
     this.attachListeners();
   }
 
@@ -159,7 +201,7 @@ export class LandingUI {
       <main id="oz-hero-screen" class="oz-screen oz-screen-active">
         <div class="oz-hero-content">
           <div class="oz-telemetry-stamp">
-            <span>ROLE: ORBITAL TRIAGE OFFICER</span> • <span>LINK: 10.0 MB/s S-BAND</span> • <span>50–55 Wh BUDGET</span>
+            <span>ROLE: ORBITAL TRIAGE OFFICER</span> • <span>ONE PASS</span> • <span>THREE REQUESTS</span> • <span>ONE DOWNLINK</span>
           </div>
 
           <h1 class="oz-hero-title">
@@ -174,7 +216,7 @@ export class LandingUI {
             <p class="oz-welcome-line">Every scan costs capacitor energy (Wh). Every data cube (MB) competes for the last downlink.</p>
             <p class="oz-welcome-text">
               Command a multi-sensor Earth-observation satellite passing over South Asia.<br />
-              Inspect Optical, Thermal IR, and SAR Radar physics, compress valid evidence in the Processing Cradle (45 MB → 18 MB), and transmit verified intelligence to Karachi Ground Station before Loss of Signal.
+              Read the weather, pick the sensor that can see through it, shrink the evidence, and choose what reaches the ground before the window closes. You cannot always save everyone.
             </p>
           </div>
 
@@ -329,6 +371,28 @@ export class LandingUI {
     this.selectionScreenEl = this.rootEl.querySelector('#oz-selection-screen')!;
     this.muteBtnEl = this.rootEl.querySelector('#btn-landing-mute')!;
     this.vrAdvisoryEl = this.rootEl.querySelector('#oz-vr-advisory')!;
+  }
+
+  /** Writes config-derived text into the card grid and the briefing preview for the default card. */
+  private refreshCardsFromConfig(): void {
+    const metaFor: Record<string, string> = {};
+    for (const card of CAMPAIGN_MENU_CARDS) {
+      const s = MISSION_SCENARIOS[card.scenarioId];
+      metaFor[card.id] = card.startTutorial ? 'No clock • learn the 5 moves in 90s' : ` Wh • s window •  clock`;
+    }
+    this.rootEl.querySelectorAll<HTMLButtonElement>('.oz-op-card').forEach((btn) => {
+      const id = btn.getAttribute('data-op-id') ?? '';
+      const meta = btn.querySelector('.oz-op-meta');
+      if (meta && metaFor[id]) meta.textContent = metaFor[id];
+      btn.classList.toggle('oz-op-card-active', id === this.selectedCard.id);
+    });
+    const set = (sel: string, text: string) => { const el = this.rootEl.querySelector(sel); if (el) el.textContent = text; };
+    set('#oz-briefing-opcode', this.selectedCard.opCode);
+    set('#oz-briefing-title', ` — `);
+    set('#oz-briefing-budget', this.selectedCard.budgetLine);
+    set('#oz-briefing-text', this.selectedCard.briefing);
+    set('#oz-briefing-requests', this.selectedCard.requestsSummary);
+    this.syncCampaignCardA11y();
   }
 
   private updateVRCardState(): void {

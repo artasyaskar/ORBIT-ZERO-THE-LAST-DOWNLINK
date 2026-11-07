@@ -47,9 +47,13 @@ import {
 } from '../components';
 import { DesktopControlsManager } from './desktopControls';
 import {
+  describeWeather,
   getScenarioSector,
   getScenarioRequests,
+  getScenarioThresholds,
   getRecommendedSensor,
+  requestValue,
+  SENSOR_PLAIN_GUIDE,
   GROUND_REQUEST_ORDER,
   GROUND_REQUESTS,
   MISSION_BUDGET,
@@ -63,6 +67,7 @@ import { CubeInteractions, cubeStationTargets, nearestCubeStation, isVisible, se
 import { TutorialEngine } from '../mission/tutorialEngine';
 import { describeMissionPlan, getMissionBenchmark, getNextPlanAction, getQueueSchedule, solveMission } from '../mission/missionPlanner';
 import { SolverMemo } from '../mission/solverMemo';
+import { coveredRequestIds, formatClock, getNextStep, isPassStalled } from '../mission/guidance';
 import { SceneObjectCache } from './sceneObjectCache';
 import { clipText, retryGuidanceFor } from '../ui/debriefText';
 import { isStrayScannerGrab, pressOwner } from './scannerArbitration';
@@ -312,6 +317,7 @@ export class MissionControlSystem extends createSystem({
         this.tutorial.start(Boolean(this.world.renderer?.xr?.isPresenting));
       }
     }
+    if (this.profile.preferences.relaxedClock) this.engine.setRelaxedMode(true);
     const inputSystem = this.world.getSystem(InputSystem);
     if (inputSystem) inputSystem.config.maintainScenePointers.value = true;
     this.scene.traverse((object) => {
@@ -574,6 +580,16 @@ export class MissionControlSystem extends createSystem({
       releaseCube: (object) => this.withInputSource('desktop', () => this.releaseCube(object)),
       previewCubeDrop: (target) => this.highlightDropZones(true, target),
       syncAll: () => this.syncAll(),
+      setSensor: (mode) => {
+        this.applyAction({ type: 'SET_SENSOR', sensorMode: mode });
+        this.syncSensorSwitchHardware(this.engine.getState().activeSensorMode);
+        this.playCue('SELECT_SECTOR');
+        this.syncAll();
+      },
+      requestHint: () => this.requestAriaHint(),
+      abortPass: () => this.handleAbortPass(),
+      startAcademy: () => this.launchScenario('ORBITAL_ACADEMY'),
+      launchScenario: (id) => this.launchScenario(id as MissionScenarioId),
     });
     this.cleanupFuncs.push(() => this.desktopControls?.dispose());
 
@@ -719,6 +735,11 @@ export class MissionControlSystem extends createSystem({
           return this.engine.getState();
         },
         restart: () => this.handleRestartMission(),
+        requestHint: () => this.requestAriaHint(),
+        abortPass: () => this.handleAbortPass(),
+        closeLink: () => { this.applyAction({ type: 'CLOSE_LINK' }); this.syncAll(); return this.engine.getState(); },
+        setRelaxedMode: (enabled: boolean) => this.setRelaxedMode(enabled),
+        getNextStep: () => getNextStep(this.engine.getState(), this.engine.getActiveCustomScenario()),
         startProceduralCrisis: (seed?: string | number) => this.startProceduralPass(seed),
         executeCoPilotDelegation: () => this.handleAriaDelegate(),
         getCoPilotIntervention: () => this.coPilot.getActiveIntervention(),
@@ -1767,6 +1788,41 @@ export class MissionControlSystem extends createSystem({
       }
     }
 
+    // Orbital pass clock: runs during OPERATIONS after the first scan; at zero the window opens itself.
+    if (
+      this.frameSnapshot.phase === 'OPERATIONS' && this.frameSnapshot.passStarted &&
+      this.frameSnapshot.passRemainingSec !== null && !this.frameSnapshot.paused && !this.tutorial.isActive()
+    ) {
+      const before = this.frameSnapshot.passRemainingSec;
+      const nextState = this.engine.dispatch({ type: 'TICK', seconds: simulationDelta }, this.missionElapsedTime) as MissionState;
+      this.frameSnapshot = nextState;
+      const remaining = nextState.passRemainingSec ?? 0;
+      if (Math.ceil(before) !== Math.ceil(remaining) && remaining <= 10 && remaining > 0) {
+        this.playCue('DOWNLINK_TICK');
+        if (remaining <= 5) this.audio.playTensionHeartbeat();
+      }
+      if (nextState.phase === 'DOWNLINK') {
+        // Window opened automatically: same feedback as a manual commit.
+        this.lastTransmittedCount = 0;
+        this.downlinkUiSyncAccumulator = 0;
+        this.lastDownlinkTickSecond = -1;
+        this.playCue('DOWNLINK_COMMIT');
+        this.audio.playCarrierAcquisition();
+        this.voiceCommander?.speakDirect(
+          'Contact window open. Dock your remaining cubes now.',
+          '[ARIA-7] PASS CLOCK EXPIRED: window opened automatically. Dock your cubes now!',
+          'CRITICAL',
+        );
+        this.syncAll();
+      } else if (nextState.phase === 'DEBRIEF') {
+        this.playCue('LINK_CUTOFF');
+        this.voiceCommander?.trigger('DEBRIEF_RETRY');
+        this.syncAll();
+      } else if (Math.floor(before) !== Math.floor(remaining)) {
+        this.syncAll();
+      }
+    }
+
     // Live animated downlink window progression during DOWNLINK phase
     let currentPhase = this.frameSnapshot.phase;
     if (currentPhase === 'DOWNLINK') {
@@ -1956,26 +2012,28 @@ export class MissionControlSystem extends createSystem({
       }
     }
 
-    if (currentPhase === 'OPERATIONS' && this.profile.preferences.guidance === 'GUIDED' && !this.isAnyObjectGrabbed()) {
+    // GUIDED mode pulses the station for the next *kind* of step (from the Next Step card).
+    // It never highlights the sensor switch for a specific sensor: choosing it is the puzzle.
+    if ((currentPhase === 'OPERATIONS' || currentPhase === 'DOWNLINK') && this.profile.preferences.guidance === 'GUIDED' && !this.isAnyObjectGrabbed()) {
       const state = this.frameSnapshot;
-      const solution = this.getSolution(state);
-      const next = getNextPlanAction(state, solution);
+      const step = getNextStep(state, this.engine.getActiveCustomScenario());
       const intensity = reducedMotion ? 1.15 : 0.9 + 0.25 * Math.sin(this.elapsedTime * 4);
-      let targetId = 'pad-commit-downlink';
+      let targetId: string | null = null;
       let color = 0x34d399;
-      if (next?.type === 'SCAN') {
-        targetId = state.activeSensorMode !== next.sensorMode ? 'pad-toggle-sensor'
-          : state.selectedSectorId !== next.sectorId ? `sector-${next.sectorId.toLowerCase()}` : 'scanner-tool';
-        color =
-          next.sensorMode === 'RADAR'
-            ? 0xfbbf24
-            : next.sensorMode === 'THERMAL'
-              ? 0xff6b2b
-              : 0x38bdf8;
-      } else if (next?.type === 'PROCESS') { targetId = 'pad-process-cradle'; color = 0xfbbf24; }
-      else if (next?.type === 'DISCARD') { targetId = 'pad-discard-chute'; color = 0xf87171; }
-      else if (next?.type === 'QUEUE' || next?.type === 'UNQUEUE') { targetId = 'pad-queue-downlink'; color = 0x38bdf8; }
-      const target = this.sceneObject(targetId);
+      if (/^.*SCAN SECTOR/.test(step.title)) { targetId = 'scanner-tool'; color = 0x67e8f9; }
+      else if (/PICK A TARGET/.test(step.title)) {
+        const open = [...'BCDEAF'].find((s) => {
+          const covered = coveredRequestIds(state);
+          const reqs = Object.values(this.engine.getActiveScenario().requests ?? {});
+          return reqs.some((r) => r.targetSectorId === s && !covered.has(r.id));
+        });
+        if (open) { targetId = `sector-${open.toLowerCase()}`; color = 0x67e8f9; }
+      }
+      else if (/BAY TOO FULL|MEMORY FULL/.test(step.title)) { targetId = 'pad-process-cradle'; color = 0xfbbf24; }
+      else if (/BLOCKED SCAN|TRAY FULL/.test(step.title)) { targetId = 'pad-discard-chute'; color = 0xf87171; }
+      else if (/LOAD THE DOWNLINK BAY|LIVE WINDOW/.test(step.title)) { targetId = 'pad-queue-downlink'; color = 0x38bdf8; }
+      else if (/READY TO TRANSMIT|NO WAY TO FINISH/.test(step.title)) { targetId = 'pad-commit-downlink'; color = 0x34d399; }
+      const target = targetId ? this.sceneObject(targetId) : undefined;
       if (target) this.setObjectTint(target, color, intensity);
     }
   }
@@ -2811,13 +2869,16 @@ export class MissionControlSystem extends createSystem({
         resolved.cubeEntity &&
         typeof resolved.slotIndex === 'number'
       ) {
+        const grabPhase = this.engine.getState().phase;
         if (
-          this.engine.getState().phase !== 'OPERATIONS' ||
+          (grabPhase !== 'OPERATIONS' && grabPhase !== 'DOWNLINK') ||
           this.engine.getState().paused
         ) {
           return;
         }
         const pkt = this.engine.getState().packets[resolved.slotIndex];
+        // During the live window only tray cubes can be picked up (streaming cubes are locked).
+        if (grabPhase === 'DOWNLINK' && pkt?.queued) return;
         const obj = resolved.cubeEntity.object3D;
         if (!obj || !pkt || !this.cubeInteractions.acquire(sample.device, obj, pkt.id)) return;
         this.activeXRHandGrabs.set(sample.handedness, {
@@ -3361,7 +3422,7 @@ export class MissionControlSystem extends createSystem({
       this.settingsOpen = !this.settingsOpen;
       this.telemetryPanel?.getElementById('AccessibilitySettings')?.setProperties({ display: this.settingsOpen ? 'flex' : 'none' });
     });
-    const preferenceIds = { guidance: 'Guidance', dominantHand: 'DominantHand', oneHanded: 'OneHanded', gazeAssist: 'GazeAssist', tabletopMode: 'TabletopMode', largeText: 'LargeText', highContrast: 'HighContrast', reducedMotion: 'ReducedMotion', captions: 'Captions', audioLevel: 'AudioLevel' } as const;
+    const preferenceIds = { guidance: 'Guidance', dominantHand: 'DominantHand', oneHanded: 'OneHanded', gazeAssist: 'GazeAssist', tabletopMode: 'TabletopMode', largeText: 'LargeText', highContrast: 'HighContrast', reducedMotion: 'ReducedMotion', captions: 'Captions', audioLevel: 'AudioLevel', relaxedClock: 'RelaxedClock' } as const;
     for (const key of Object.keys(preferenceIds) as (keyof typeof preferenceIds)[]) {
       bindClick(this.telemetryPanel, `Btn_${preferenceIds[key]}`, () => this.cyclePreference(key));
     }
@@ -3641,7 +3702,6 @@ export class MissionControlSystem extends createSystem({
     this.tutorial.notifyTransmitActivated(this.currentInputSource);
     const res = this.applyAction({ type: 'COMMIT' });
     if (res.ok) {
-      this.forceReleaseAllGrabs();
       this.cubeTransitions.clear();
       this.lastDownlinkTickSecond = -1;
       this.playCue('SOLENOID_LATCH');
@@ -3666,13 +3726,60 @@ export class MissionControlSystem extends createSystem({
     return res.ok;
   }
 
+  /**
+   * The physical TRANSMIT lever is context-sensitive so the whole pass stays hands-completable:
+   * OPERATIONS -> open the link (or abort when no finish is possible); DOWNLINK -> close the link
+   * once docked cubes finish; DEBRIEF -> restart.
+   */
   private handleCommitDownlinkButton(): void {
-    const phase = this.engine.getState().phase;
+    const state = this.engine.getState();
+    const phase = state.phase;
     if (phase === 'OPERATIONS') {
+      if (isPassStalled(state, this.engine.getActiveCustomScenario())) {
+        this.handleAbortPass();
+        return;
+      }
       this.handleStartDownlink();
+    } else if (phase === 'DOWNLINK') {
+      const res = this.applyAction({ type: 'CLOSE_LINK' });
+      this.playCue(res.ok ? 'HANDSHAKE_CONFIRM' : 'ERROR_REJECT');
+      this.syncAll();
     } else if (phase === 'DEBRIEF') {
       this.handleRestartMission();
     }
+  }
+
+  /** Single entry point for loading an operation from any menu (desktop campaign, landing, panels). */
+  public launchScenario(id: MissionScenarioId): void {
+    if (!MISSION_SCENARIOS[id] || this.engine.getState().phase === 'DOWNLINK') return;
+    if (this.tutorial.isActive()) this.tutorial.skip();
+    this.forceReleaseAllGrabs();
+    this.dailyDate = null;
+    this.engine.setScenario(id);
+    this.handleRestartMission();
+    if (id === 'ORBITAL_ACADEMY') this.tutorial.start(Boolean(this.world.renderer?.xr?.isPresenting));
+    this.syncAll();
+  }
+
+  public handleAbortPass(): void {
+    const res = this.applyAction({ type: 'ABORT' });
+    this.forceReleaseAllGrabs();
+    this.playCue(res.ok ? 'LINK_CUTOFF' : 'ERROR_REJECT');
+    if (res.ok) this.voiceCommander?.trigger('DEBRIEF_RETRY');
+    this.syncAll();
+  }
+
+  public requestAriaHint(): string {
+    const res = this.coPilot.executeActiveIntervention();
+    if (!res.ok) this.playCue('ERROR_REJECT');
+    else this.caption = res.message;
+    this.syncAll();
+    return res.message;
+  }
+
+  public setRelaxedMode(enabled: boolean): void {
+    this.engine.setRelaxedMode(enabled);
+    this.syncAll();
   }
 
   private handleRestartMission(): void {
@@ -3765,6 +3872,7 @@ export class MissionControlSystem extends createSystem({
     } else if (key === 'audioLevel') preferences.audioLevel = preferences.audioLevel > 0.7 ? 0 : preferences.audioLevel === 0 ? 0.4 : preferences.audioLevel < 0.5 ? 0.65 : 1;
     else if (key !== 'seatOffset') preferences[key] = !preferences[key];
     this.audio.setVolume(preferences.audioLevel);
+    if (key === 'relaxedClock') this.engine.setRelaxedMode(preferences.relaxedClock);
     saveMissionProfile(this.profile);
     this.applyAccessibility();
     this.syncAll();
@@ -3954,6 +4062,7 @@ export class MissionControlSystem extends createSystem({
       Lbl_HighContrast: `HIGH CONTRAST: ${p.highContrast ? 'ON' : 'OFF'}`,
       Lbl_ReducedMotion: `REDUCED MOTION: ${p.reducedMotion ? 'ON' : 'OFF'}`,
       Lbl_Captions: `CAPTIONS: ${p.captions ? 'ON' : 'OFF'}`,
+      Lbl_RelaxedClock: `PASS CLOCK: ${p.relaxedClock ? 'OFF (RELAXED)' : 'ON'}`,
       Lbl_AudioLevel: `AUDIO: ${Math.round(p.audioLevel * 100)}%`,
       Lbl_GazeAssist: `HEAD POINT ASSIST: ${p.gazeAssist ? 'ON' : 'OFF'}`,
       Lbl_TabletopMode: `MR TABLETOP: ${p.tabletopMode
@@ -4043,14 +4152,9 @@ export class MissionControlSystem extends createSystem({
     this.syncAll();
   }
 
+  /** Poking / pinching ARIA asks for a paid hint (never an autonomous move). */
   public handleAriaDelegate(): void {
-    const res = this.coPilot.executeActiveIntervention();
-    if (res.ok) {
-      this.playCue('PROCESS_SUCCESS');
-      this.syncAll();
-    } else {
-      this.playCue('ERROR_REJECT');
-    }
+    this.requestAriaHint();
   }
 
   public startProceduralPass(seedInput?: string | number): void {
@@ -4183,7 +4287,30 @@ export class MissionControlSystem extends createSystem({
   }
 
   private handleCubeReleased(entity: Entity): void {
-    if (this.suppressReleaseActions || this.engine.getState().phase !== 'OPERATIONS' || this.engine.getState().paused) {
+    const releasePhase = this.engine.getState().phase;
+    if (this.suppressReleaseActions || (releasePhase !== 'OPERATIONS' && releasePhase !== 'DOWNLINK') || this.engine.getState().paused) {
+      this.syncAll();
+      return;
+    }
+    if (releasePhase === 'DOWNLINK') {
+      // Live window: only docking into the bay (or putting a cube back) is possible.
+      const liveObj = entity.object3D;
+      const liveSlot = entity.getValue(EvidenceCubeNode, 'slotIndex') ?? 0;
+      const livePkt = this.engine.getState().packets[liveSlot];
+      if (!liveObj || !livePkt) { this.syncAll(); return; }
+      liveObj.updateWorldMatrix(true, false);
+      const liveTarget = nearestCubeStation(liveObj.getWorldPosition(new Vector3()), this.getCubeDropTargets());
+      if (liveTarget?.kind === 'QUEUE' && !livePkt.queued) {
+        this.applyAction({ type: 'SELECT_PACKET', packetId: livePkt.id });
+        const res = this.applyAction({ type: 'QUEUE', packetId: livePkt.id });
+        this.playCue(res.ok ? 'QUEUE_SLOT' : 'ERROR_REJECT');
+        if (res.ok) this.audio.playMagneticSnap();
+      } else if (liveTarget?.kind === 'RAW_TRAY' && livePkt.queued) {
+        const res = this.applyAction({ type: 'UNQUEUE', packetId: livePkt.id });
+        this.playCue(res.ok ? 'QUEUE_SLOT' : 'ERROR_REJECT');
+      } else if (liveTarget) {
+        this.playCue('ERROR_REJECT');
+      }
       this.syncAll();
       return;
     }
@@ -5013,10 +5140,12 @@ export class MissionControlSystem extends createSystem({
 
     const threatBadge = threat ? `[ALERT: ${threat.name} (SEV ${threat.severity}/5)] ` : '';
     const opLabel = scenario.operationCode ?? scenario.name.toUpperCase();
+    const thresholds = getScenarioThresholds(state.scenarioId, this.engine.getActiveCustomScenario());
+    const clockLabel = state.passRemainingSec === null ? 'NO CLOCK' : `CLOCK ${formatClock(state.passRemainingSec)}${state.passStarted ? '' : ' (starts at first scan)'}`;
     this.setText(
       this.briefingPanel,
       'BriefingSubtitle',
-      `${threatBadge}${opLabel} | ${state.downlinkWindowSec.toFixed(1)}s @ 10 MB/s | ${state.maxPower} Wh`,
+      `${threatBadge}${opLabel} | WIN ${thresholds.successScore}+ pts | ${clockLabel} | ${state.downlinkWindowSec.toFixed(1)}s window`,
     );
 
     const payloadMb = scanCost.payloadMb ?? Number((scanCost.transmitSec * 10).toFixed(0));
@@ -5025,10 +5154,11 @@ export class MissionControlSystem extends createSystem({
       'SelectedSectorTitle',
       `TARGET: ${sector.code} ${sector.name} (${sector.cloudCover !== 'CLEAR' ? sector.cloudCover.replace(/_/g, ' ') : 'CLEAR SKY'})`,
     );
+    const guide = SENSOR_PLAIN_GUIDE[state.activeSensorMode];
     this.setText(
       this.briefingPanel,
       'SelectedSectorDesc',
-      `Sensor: ${state.activeSensorMode} (${scanCost.powerCost} Wh, ${scanCost.storageCost} STR, ${payloadMb} MB / ${scanCost.transmitSec.toFixed(1)}s Tx) | ${sector.terrainSummary}`,
+      `WEATHER: ${describeWeather(sector.cloudCover)}. ${guide.label}: ${guide.sees}; ${guide.blind.toLowerCase()} (${scanCost.powerCost} Wh, ${payloadMb} MB / ${scanCost.transmitSec.toFixed(1)}s).`,
     );
     const availableModes = (scenario.availableSensors ?? ['RADAR', 'OPTICAL']).join(' / ');
     this.setText(
@@ -5105,7 +5235,7 @@ export class MissionControlSystem extends createSystem({
             this.setText(
               this.briefingPanel,
               statusId,
-              `[!] Will drop at ${state.downlinkWindowSec.toFixed(1)}s cutoff! Compress in Cradle (-6 PWR -> 1.8s) or reorder queue.`,
+              `[!] Will be cut off at ${state.downlinkWindowSec.toFixed(1)}s! Compress in the Cradle (-${scenario.budget.onboardProcess.powerCost} Wh -> ${scenario.budget.onboardProcess.compressedTransmitSec.toFixed(1)}s) or reorder the bay.`,
             );
             this.setBg(this.briefingPanel, cardId, '#7f1d1d');
           }
@@ -5131,10 +5261,11 @@ export class MissionControlSystem extends createSystem({
           `${req.shortLabel} [${state.scenarioId === 'ORBITAL_ACADEMY' && i > 0 ? 'OPTIONAL IN TRAINING' : 'AWAITING SCAN'}]`,
         );
         const reqSector = getScenarioSector(state.scenarioId, req.targetSectorId, scenario);
+        // Weather is the clue; the matching sensor is for the player to deduce (or buy via an ARIA hint).
         this.setText(
           this.briefingPanel,
           statusId,
-          `[?] Best sensor: ${getRecommendedSensor(state.scenarioId, req.targetSectorId, scenario)} on SEC-${req.targetSectorId} | ${reqSector.cloudCover !== 'CLEAR' ? reqSector.cloudCover.toLowerCase().replace(/_/g, ' ') : 'clear sky'} | target ${req.requiredBadge}`,
+          `SECTOR ${req.targetSectorId}: ${describeWeather(reqSector.cloudCover)} | needs ${req.minimumConfidence} | worth ${requestValue(req)} pts`,
         );
         this.setBg(this.briefingPanel, cardId, '#152238');
       }
@@ -5212,10 +5343,15 @@ export class MissionControlSystem extends createSystem({
     const strFilled = Math.max(0, Math.min(state.maxStorage, state.storageUsed));
     const strBar = `[${'#'.repeat(strFilled)}${'-'.repeat(state.maxStorage - strFilled)}]`;
 
+    const clockText = state.passRemainingSec === null
+      ? 'PASS CLOCK: OFF'
+      : state.passStarted
+        ? `PASS CLOCK: ${formatClock(state.passRemainingSec)}`
+        : `PASS CLOCK: ${formatClock(state.passRemainingSec)} (starts at first scan)`;
     this.setText(
       this.telemetryPanel,
       'ResourceReadout',
-      `POWER: ${pwrBar} ${state.power}/${state.maxPower} Wh  |  STORAGE: ${strBar} ${state.storageUsed}/${state.maxStorage} STR (18 MB/UNIT)`,
+      `BATTERY ${pwrBar} ${state.power}/${state.maxPower} Wh  |  MEMORY ${strBar} ${state.storageUsed}/${state.maxStorage}  |  ${clockText}`,
     );
 
     const winRatio = Math.max(
@@ -5239,13 +5375,13 @@ export class MissionControlSystem extends createSystem({
       );
       const remFilled = Math.round(remRatio * 10);
       const remBar = `[${'#'.repeat(remFilled)}${'-'.repeat(10 - remFilled)}]`;
-      windowText = `TX STREAM (10 MB/s): ${remBar} ${state.downlinkRemainingSec.toFixed(1)}s REMAINING  |  PHASE: DOWNLINK`;
+      windowText = `LIVE LINK: ${remBar} ${state.downlinkRemainingSec.toFixed(1)}s LEFT  |  DOCK REMAINING CUBES NOW`;
     } else if (state.phase === 'DEBRIEF') {
-      windowText = `WINDOW CLOSED: ${state.debrief?.downlinkUsedSec.toFixed(1)}s USED / ${state.downlinkWindowSec.toFixed(1)}s | ${state.debrief?.transmittedPacketIds.length ?? 0} PACKETS (${state.debrief?.transmittedPayloadMb ?? 0} MB @ 10 MB/s)`;
+      windowText = `LINK CLOSED: ${state.debrief?.downlinkUsedSec.toFixed(1)}s used of ${state.downlinkWindowSec.toFixed(1)}s | ${state.debrief?.transmittedPacketIds.length ?? 0} cube(s) delivered`;
     } else if (windowOverflow) {
-      windowText = `WINDOW (10 MB/s): ${winBar} ${state.downlinkCommittedSec.toFixed(1)}s / ${state.downlinkWindowSec.toFixed(1)}s [OVERFLOW +${(state.downlinkCommittedSec - state.downlinkWindowSec).toFixed(1)}s!]`;
+      windowText = `TRANSMIT TIME: ${winBar} ${state.downlinkCommittedSec.toFixed(1)}s / ${state.downlinkWindowSec.toFixed(1)}s  OVER BY ${(state.downlinkCommittedSec - state.downlinkWindowSec).toFixed(1)}s - LAST SLOT WILL BE CUT`;
     } else {
-      windowText = `WINDOW (10 MB/s): ${winBar} ${state.downlinkCommittedSec.toFixed(1)}s / ${state.downlinkWindowSec.toFixed(1)}s [MARGIN: ${marginSec.toFixed(1)}s]`;
+      windowText = `TRANSMIT TIME: ${winBar} ${state.downlinkCommittedSec.toFixed(1)}s / ${state.downlinkWindowSec.toFixed(1)}s loaded (${marginSec.toFixed(1)}s spare)`;
     }
 
     this.setText(this.telemetryPanel, 'WindowReadout', windowText);
@@ -5261,7 +5397,11 @@ export class MissionControlSystem extends createSystem({
             : '#132036',
     );
 
-    const statusMsg = state.lastActionOk ? this.getNextTacticalHint(state) : state.lastStatusMessage;
+    const step = getNextStep(state, this.engine.getActiveCustomScenario());
+    const tutorialText = tutStep ? `${tutStep.title}\n${this.world.renderer?.xr?.isPresenting ? tutStep.vrInstruction : tutStep.desktopInstruction}` : null;
+    const statusMsg = !state.lastActionOk
+      ? `> ${state.lastStatusMessage}`
+      : tutorialText ?? `> ${step.title}\n${step.body}\nHANDS: ${step.hands}`;
 
     this.setText(
       this.telemetryPanel,
@@ -5291,14 +5431,14 @@ export class MissionControlSystem extends createSystem({
       this.setText(
         this.telemetryPanel,
         'InspectorScience',
-        'Onboard Processing (6 Wh) compresses CONFIRMED or PROBABLE cubes from 3 STR (40-45 MB) -> 1 STR (18 MB / 1.8s @ 10 MB/s).',
+        `Compress (${scenario.budget.onboardProcess.powerCost} Wh): any cube with evidence shrinks to ${scenario.budget.onboardProcess.compressedStorageCost} memory block / ${scenario.budget.onboardProcess.compressedTransmitSec.toFixed(1)}s. It cannot rescue a blocked [X] scan.`,
       );
       this.setText(this.telemetryPanel, 'InspectorCost', '');
       this.setBg(this.telemetryPanel, 'CubeInspectorCard', '#152238');
       this.setText(
         this.telemetryPanel,
         'Lbl_ProcessCube',
-        'PROCESS SELECTED CUBE (-6 Wh -> 1 STR / 18 MB / 1.8s Tx)',
+        `COMPRESS SELECTED CUBE (-${scenario.budget.onboardProcess.powerCost} Wh)`,
       );
       this.setText(
         this.telemetryPanel,
@@ -5323,7 +5463,7 @@ export class MissionControlSystem extends createSystem({
       this.setText(
         this.telemetryPanel,
         'InspectorCost',
-        `${selectedPkt.storageCost} STR | ${mb} MB | ${selectedPkt.transmitSec.toFixed(1)}s @ 10 MB/s | ${selectedPkt.headline}`,
+        `${selectedPkt.storageCost} memory | ${mb} MB | ${selectedPkt.transmitSec.toFixed(1)}s to send | ${selectedPkt.satisfiesRequestId ? `answers ${selectedPkt.satisfiesRequestId.replace('_', ' ')}` : 'answers no request'} | ${selectedPkt.headline}`,
       );
       this.setText(
         this.telemetryPanel,

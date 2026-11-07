@@ -28,7 +28,9 @@ import {
 import type { MissionEngine } from '../mission/missionEngine';
 import { CubeInteractions, cubeStationTargets, nearestCubeStation, setWorldPosition, type CubeDropTarget } from './cubeInteractions';
 import type { MissionState, SectorId, SensorMode } from '../mission/types';
-import { getRecommendedSensor, getScenarioRequests, getScenarioSector, GROUND_REQUESTS, MISSION_SCENARIOS, SECTORS } from '../mission/missionConfig';
+import { describeWeather, getScenarioRequests, getScenarioSector, requestValue, SCORING, SENSOR_PLAIN_GUIDE } from '../mission/missionConfig';
+import { formatClock, getNextStep, isPassStalled } from '../mission/guidance';
+import { actionBarHtml, campaignHtml, debriefScoreLine, helpHtml, missionCardHtml, nextStepBannerHtml } from '../ui/desktopHudViews';
 
 export interface DesktopControllerHost {
   engine: MissionEngine;
@@ -69,6 +71,11 @@ export interface DesktopControllerHost {
   getCubeDropTargets?: () => CubeDropTarget[];
   releaseCube?: (object: Object3D) => boolean;
   previewCubeDrop?: (target: CubeDropTarget | null) => void;
+  setSensor?: (mode: SensorMode) => void;
+  requestHint?: () => string;
+  abortPass?: () => void;
+  startAcademy?: () => void;
+  launchScenario?: (id: string) => void;
 }
 
 export type TutorialStep =
@@ -119,6 +126,11 @@ export class DesktopControlsManager {
   private lastActionMessage = 'System Ready';
   private lastActionOk = true;
   private cleanupCallbacks: (() => void)[] = [];
+  private lastHintText = '';
+  private lastHintStep = -1;
+  private lastSeenScenario = '';
+  private lastSeenStepCounter = -1;
+  private pendingConfirm: { key: string; until: number } | null = null;
 
   // 3D Drag-and-Drop & Tactility
   private isDragging = false;
@@ -271,7 +283,7 @@ export class DesktopControlsManager {
       if (sectorMatch) {
         const secId = sectorMatch[1].toUpperCase() as SectorId;
         const cfg = getScenarioSector(state.scenarioId, secId);
-        return `🎯 Target Sector ${secId}: ${cfg?.name || 'Sector'} [Click to Lock]`;
+        return `Sector ${secId}: ${cfg?.name || 'Sector'} · ${describeWeather(cfg.cloudCover)} [click to select]`;
       }
       if (name === 'earth-globe' || name === 'TacticalEarthGlobe' || name === 'GlobeCoreSphere' || name === 'GlobeCloudSphere') {
         return `🌍 Tactical Earth Globe [Drag to Rotate | Wheel to Zoom | Click to Target]`;
@@ -283,20 +295,20 @@ export class DesktopControlsManager {
         return `🔴 Swath Plunger Button: Fire Active Ground Track Scan [Click to Scan]`;
       }
       if (/desk-gauges/i.test(name) || /Gauge/i.test(name)) {
-        return `📊 Diegetic Desk Gauges: Battery Bus (${state.maxPower} Wh), Storage Buffer (${state.maxStorage} STR • 18 MB/STR), Downlink Window (${state.downlinkWindowSec.toFixed(1)}s)`;
+        return `Gauges: battery ${state.power}/${state.maxPower} Wh · memory ${state.storageUsed}/${state.maxStorage} · transmit ${state.downlinkCommittedSec.toFixed(1)}/${state.downlinkWindowSec.toFixed(1)}s`;
       }
       if (/pad-toggle-sensor/i.test(name)) {
         const mode = state.activeSensorMode;
-        return `🔄 Sensor Mode Switch: Armed with ${mode} [Click to Toggle]`;
+        return `Sensor switch: ${SENSOR_PLAIN_GUIDE[mode].label} armed [click for next sensor]`;
       }
       if (/pad-process-cradle/i.test(name) || /ProcessingCradle/i.test(name)) {
-        return `⚙️ Processing Cradle: Feature Extraction & Compression (6 Wh) [Click to Process]`;
+        return `Processing Cradle: compress the selected cube (-${this.host.engine.getActiveScenario().budget.onboardProcess.powerCost} Wh) [click or drop a cube]`;
       }
       if (/pad-queue-downlink/i.test(name) || /DownlinkBay/i.test(name)) {
         return `📥 Downlink Bay Tray: Stage Active Cube for Telemetry [Click to Queue]`;
       }
       if (/pad-commit-downlink/i.test(name)) {
-        return `🚀 S-Band Telemetry Transmitter [Click to Downlink to Ground]`;
+        return state.phase === 'DOWNLINK' ? 'Transmit lever: close the link early' : 'Transmit lever: open the ground-station link';
       }
       if (/pad-recenter-desk/i.test(name) || /RecenterDesk/i.test(name) || /RecenterCap/i.test(name)) {
         return `🎯 Recenter Physical Button: Reset Cockpit Seated Envelope [Click]`;
@@ -313,7 +325,7 @@ export class DesktopControlsManager {
         /AriaCranium/i.test(name) ||
         /AriaVisage/i.test(name)
       ) {
-        return `🤖 Commander ARIA-7 AI Hologram: Spatial Delegation [Click to Delegate Triage]`;
+        return `ARIA-7: click for a hint (-${SCORING.hintPenalty} pts)`;
       }
       const idx = this.cubeSlot(curr);
       if (idx !== null) {
@@ -646,30 +658,11 @@ export class DesktopControlsManager {
       this.lastCubeClickTime = now;
       this.lastClickedCubePacketId = pktId;
 
-      if (isDoubleClick && pkt) {
-        if (!pkt.processed && state.power >= 6) {
-          this.processPacket();
-          this.notifyAction(`⚡ QUICK-ROUTE: ${pkt.headline} auto-routed to Amber Cradle for compression`);
-          this.dragCandidate = undefined;
-          this.updateHud();
-          return;
-        } else if (!pkt.queued) {
-          this.queuePacket();
-          this.notifyAction(`⚡ QUICK-ROUTE: ${pkt.headline} auto-routed to Downlink Bay`);
-          this.dragCandidate = undefined;
-          this.updateHud();
-          return;
-        } else if (pkt.queued) {
-          this.unqueuePacket();
-          this.notifyAction(`⚡ QUICK-ROUTE: ${pkt.headline} returned to Storage Tray`);
-          this.dragCandidate = undefined;
-          this.updateHud();
-          return;
-        }
-      }
+      // Double-click used to auto-process/queue silently; removed so no action is hidden from the player.
+      void isDoubleClick;
 
       if (pkt) {
-        this.notifyAction(`Selected Evidence Cube: ${pkt.headline} (${pkt.payloadMb ?? Math.round(pkt.transmitSec * 10)} MB | ${pkt.storageCost} STR)`);
+        this.notifyAction(`Selected cube: Sector ${pkt.sectorId} ${pkt.confidence} - ${pkt.headline}. Drag it to a station or use the buttons below.`);
         this.advanceTutorial('SELECT_CUBE');
       }
       this.dragCandidate = undefined;
@@ -813,8 +806,7 @@ export class DesktopControlsManager {
         /AriaCranium/i.test(name) ||
         /AriaVisage/i.test(name)
       ) {
-        this.host.handleControlAction?.('ARIA_DELEGATE');
-        this.notifyAction('🤖 ARIA-7 Tactical Delegation executed autonomously.');
+        this.requestHint();
         return true;
       }
 
@@ -851,6 +843,10 @@ export class DesktopControlsManager {
     if (this.host.world.renderer.xr.isPresenting) return;
     const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
     if (tag === 'input' || tag === 'textarea') return;
+
+    // While a dialog is open only dialog keys work, so a stray key cannot spend battery.
+    const dialogKeys = ['Escape', 'Enter', '?', 'c', 'C'];
+    if (this.isModalOpen(this.host.engine.getState()) && !dialogKeys.includes(e.key)) return;
 
     switch (e.key) {
       case '1':
@@ -914,12 +910,17 @@ export class DesktopControlsManager {
       }
       case 'Enter': {
         e.preventDefault();
-        if (this.tutorialActive && this.tutorialStep === 'INTRO') {
-          this.advanceTutorial('SELECT_SECTOR');
-          this.notifyAction('🚀 CRISIS PASS COMMENCED: Evaluate Target Sectors', true);
-        } else {
+        if (this.isModalOpen(this.host.engine.getState()) && this.briefingModalOpen && !this.campaignModalOpen && !this.showHelp) {
+          this.handleUiAction('start-pass');
+        } else if (!this.isModalOpen(this.host.engine.getState())) {
           this.queuePacket();
         }
+        break;
+      }
+      case 'a':
+      case 'A': {
+        e.preventDefault();
+        this.requestHint();
         break;
       }
       case 'u':
@@ -944,15 +945,18 @@ export class DesktopControlsManager {
       case 'r':
       case 'R': {
         e.preventDefault();
-        this.restartMission();
+        if (this.confirmDestructive('r', 'restart this pass')) this.restartMission();
         break;
       }
       case 'n':
       case 'N': {
         e.preventDefault();
-        this.host.nextMission();
-        this.notifyAction('Switched to Next Scenario Pass');
-        this.updateHud();
+        if (this.confirmDestructive('n', 'switch to the next operation')) {
+          this.host.nextMission();
+          this.briefingModalOpen = true;
+          this.notifyAction('Next operation loaded');
+          this.updateHud();
+        }
         break;
       }
       case 'ArrowLeft':
@@ -1005,6 +1009,9 @@ export class DesktopControlsManager {
       }
       case 'Escape': {
         e.preventDefault();
+        if (this.showHelp) { this.toggleHelpModal(); break; }
+        if (this.campaignModalOpen) { this.campaignModalOpen = false; this.updateHud(); break; }
+        if (this.isModalOpen(this.host.engine.getState())) { this.handleUiAction('start-pass'); break; }
         this.host.togglePause();
         const paused = this.host.engine.getState().paused;
         this.notifyAction(paused ? 'MISSION PAUSED' : 'MISSION RESUMED');
@@ -1045,8 +1052,8 @@ export class DesktopControlsManager {
       this.host.toggleSensor();
     }
     const mode = this.host.engine.getState().activeSensorMode;
-    const desc = mode === 'RADAR' ? 'MICROWAVE RADAR (SAR - Cloud Penetrating)' : 'OPTICAL CAMERA (High-Res Daylight)';
-    this.notifyAction(`Sensor Mode: ${desc}`);
+    const g = SENSOR_PLAIN_GUIDE[mode];
+    this.notifyAction(`Sensor: ${g.label} - ${g.sees}. ${g.blind}.`);
     if (this.tutorialStep === 'SELECT_SENSOR') {
       this.advanceTutorial('SCAN_SECTOR');
     }
@@ -1159,9 +1166,20 @@ export class DesktopControlsManager {
 
   public commitDownlink(): void {
     const state = this.host.engine.getState();
+    if (state.phase === 'DOWNLINK') {
+      this.host.handleControlAction ? this.host.handleControlAction('COMMIT_DOWNLINK') : this.host.commitDownlink();
+      this.notifyAction('Link closed after the docked cubes finished.', true);
+      this.updateHud();
+      return;
+    }
     if (state.phase === 'OPERATIONS') {
+      if (isPassStalled(state, this.host.engine.getActiveCustomScenario())) {
+        this.host.abortPass?.();
+        this.updateHud();
+        return;
+      }
       if (state.queuePacketIds.length === 0) {
-        this.notifyAction('⚠️ DOWNLINK BLOCKED: Downlink Bay is empty! Queue at least 1 evidence packet [Q].', false);
+        this.notifyAction('The Downlink Bay is empty. Load at least one cube first (drag it to the Bay or press Q).', false);
         return;
       }
       if (this.host.handleControlAction) {
@@ -1180,6 +1198,7 @@ export class DesktopControlsManager {
   public restartMission(): void {
     this.host.restartMission();
     this.tutorialStep = 'INTRO';
+    this.briefingModalOpen = true;
     this.notifyAction('Mission Pass Restarted');
     this.updateHud();
   }
@@ -1576,18 +1595,16 @@ export class DesktopControlsManager {
       -webkit-backdrop-filter: blur(12px);
       border: 1px solid rgba(56, 189, 248, 0.25);
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
-      border-radius: 9999px;
-      padding: 3px 10px;
+      border-radius: 12px;
+      padding: 8px 12px;
       display: flex;
       gap: 6px;
       align-items: center;
+      max-width: 96vw;
       pointer-events: auto;
-      opacity: 0;
-      transition: opacity 0.3s ease;
+      opacity: 1;
       z-index: 9999;
     `;
-    this.toolbarEl.addEventListener('mouseenter', () => { if (this.toolbarEl) this.toolbarEl.style.opacity = '1.0'; });
-    this.toolbarEl.addEventListener('mouseleave', () => { if (this.toolbarEl) this.toolbarEl.style.opacity = '0'; });
     this.containerEl.appendChild(this.toolbarEl);
 
     // 3b. Left Window Blade: Tactical Objective Card (Concept Image 2)
@@ -1727,6 +1744,15 @@ export class DesktopControlsManager {
       }
     }
 
+    // Every HUD button with data-action is handled by one delegated listener.
+    this.containerEl.addEventListener('click', (event) => {
+      const target = (event.target as HTMLElement | null)?.closest?.('[data-action]') as HTMLElement | null;
+      if (!target || (target as HTMLButtonElement).disabled) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.handleUiAction(target.dataset.action ?? '');
+    });
+
     document.body.appendChild(this.containerEl);
   }
 
@@ -1734,9 +1760,102 @@ export class DesktopControlsManager {
   // HUD Update & Render Loop
   // ==========================================================================
 
+  /** True while a full-screen dialog (mission card, campaign, help) is covering the cockpit. */
+  private isModalOpen(state: MissionState): boolean {
+    const academyActive = Boolean((window as any).__ORBIT_ZERO__?.getTutorialState?.()?.active);
+    const card = this.briefingModalOpen && state.phase === 'OPERATIONS' && !state.passStarted && state.packets.length === 0 && !academyActive;
+    return card || this.campaignModalOpen || this.showHelp;
+  }
+
+  /** Re-open the Mission Card whenever a fresh pass begins (restart, next operation, campaign). */
+  private trackPassStart(state: MissionState): void {
+    const freshPass = state.phase === 'OPERATIONS' && state.stepCounter === 0 && state.packets.length === 0;
+    if (state.scenarioId !== this.lastSeenScenario || (freshPass && this.lastSeenStepCounter > 0)) {
+      if (freshPass) this.briefingModalOpen = true;
+      this.hasUserSelectedSector = false;
+      this.lastHintText = '';
+    }
+    this.lastSeenScenario = state.scenarioId;
+    this.lastSeenStepCounter = state.stepCounter;
+  }
+
+  /** One handler for every HUD button carrying data-action (mission card, action bar, campaign). */
+  private handleUiAction(action: string): void {
+    const state = this.host.engine.getState();
+    const [verb, arg] = action.split(':');
+    switch (verb) {
+      case 'start-pass':
+        this.briefingModalOpen = false;
+        this.notifyAction('Pass ready: click a target sector on the globe.', true);
+        break;
+      case 'academy':
+        this.campaignModalOpen = false;
+        this.briefingModalOpen = false;
+        if (this.host.startAcademy) this.host.startAcademy();
+        else (window as any).__ORBIT_ZERO__?.startTutorial?.();
+        break;
+      case 'campaign': this.toggleCampaignModal(); return;
+      case 'close-campaign': this.campaignModalOpen = false; break;
+      case 'launch':
+        this.campaignModalOpen = false;
+        this.briefingModalOpen = true;
+        this.host.launchScenario?.(arg);
+        this.host.playCue?.('CRISIS_ALERT');
+        break;
+      case 'sensor':
+        this.host.setSensor?.(arg as SensorMode);
+        this.notifyAction(`${SENSOR_PLAIN_GUIDE[arg as SensorMode].label}: ${SENSOR_PLAIN_GUIDE[arg as SensorMode].sees}. ${SENSOR_PLAIN_GUIDE[arg as SensorMode].blind}.`, true);
+        break;
+      case 'select': this.host.selectPacket(arg); break;
+      case 'scan': this.scanSector(); return;
+      case 'process': this.processPacket(); return;
+      case 'queue': this.queuePacket(); return;
+      case 'unqueue': this.unqueuePacket(); return;
+      case 'discard': this.discardPacket(); return;
+      case 'transmit': this.commitDownlink(); return;
+      case 'abort': this.host.abortPass?.(); break;
+      case 'hint': this.requestHint(); return;
+      case 'cycle': this.host.cycleCube(); break;
+      case 'pause': this.host.togglePause(); break;
+      case 'help': this.toggleHelpModal(); return;
+      default: return;
+    }
+    void state;
+    this.updateHud();
+  }
+
+  public requestHint(): void {
+    const text = this.host.requestHint?.() ?? '';
+    const state = this.host.engine.getState();
+    if (text && state.lastActionOk) {
+      this.lastHintText = text;
+      this.lastHintStep = state.stepCounter;
+      this.notifyAction(text, true);
+    } else if (text) {
+      this.notifyAction(text, false);
+    }
+    this.updateHud();
+  }
+
+  /** Destructive keys (R / N) need a second press within 2s while a pass has progress. */
+  private confirmDestructive(key: string, label: string): boolean {
+    const state = this.host.engine.getState();
+    const hasProgress = state.phase !== 'DEBRIEF' && (state.packets.length > 0 || state.passStarted);
+    if (!hasProgress) return true;
+    const now = performance.now();
+    if (this.pendingConfirm?.key === key && now < this.pendingConfirm.until) {
+      this.pendingConfirm = null;
+      return true;
+    }
+    this.pendingConfirm = { key, until: now + 2000 };
+    this.notifyAction(`Press ${key.toUpperCase()} again to ${label} (current progress will be lost).`, false);
+    return false;
+  }
+
   public updateHud(): void {
     if (!this.bannerEl || !this.toolbarEl) return;
     const state = this.host.engine.getState();
+    this.trackPassStart(state);
 
     // 0a. Digital Monospace Countdown Timer Pill (Concept Image 1 & 2)
     this.renderTimerWidget(state);
@@ -1777,21 +1896,25 @@ export class DesktopControlsManager {
 
   private renderTimerWidget(state: MissionState): void {
     if (!this.timerWidgetEl) return;
+    const label = (text: string, color: string) => `<span style="font-size: 10px; color: ${color}; display: block; letter-spacing: 1px; font-weight: 800;">${text}</span>`;
     if (state.phase === 'DOWNLINK') {
       const rem = Math.max(0, state.downlinkWindowSec - state.downlinkElapsedSec);
-      const sec = rem.toFixed(1);
-      const timeStr = rem < 10 ? `00:0${sec}` : `00:${sec}`;
       this.timerWidgetEl.style.borderColor = '#ef4444';
       this.timerWidgetEl.style.color = '#f87171';
-      this.timerWidgetEl.innerHTML = `<span style="font-size: 9px; color: #fca5a5; display: block; letter-spacing: 1px; font-weight: 800;">DOWNLINK PASS</span>${timeStr}`;
+      this.timerWidgetEl.innerHTML = `${label('LIVE LINK - LOSS OF SIGNAL IN', '#fca5a5')}${rem.toFixed(1)}s`;
     } else if (state.phase === 'DEBRIEF') {
       this.timerWidgetEl.style.borderColor = '#10b981';
       this.timerWidgetEl.style.color = '#34d399';
-      this.timerWidgetEl.innerHTML = `<span style="font-size: 9px; color: #6ee7b7; display: block; letter-spacing: 1px; font-weight: 800;">ORBIT PASS</span>CONCLUDED`;
+      this.timerWidgetEl.innerHTML = `${label('ORBIT PASS', '#6ee7b7')}COMPLETE`;
+    } else if (state.passRemainingSec === null) {
+      this.timerWidgetEl.style.borderColor = 'rgba(52, 211, 153, 0.45)';
+      this.timerWidgetEl.style.color = '#34d399';
+      this.timerWidgetEl.innerHTML = `${label('PASS CLOCK', '#94a3b8')}NO CLOCK`;
     } else {
-      this.timerWidgetEl.style.borderColor = 'rgba(56, 189, 248, 0.35)';
-      this.timerWidgetEl.style.color = '#38bdf8';
-      this.timerWidgetEl.innerHTML = `<span style="font-size: 9px; color: #94a3b8; display: block; letter-spacing: 1px; font-weight: 800;">PHASE 1: RECON & STAGING</span>QUEUE: ${state.downlinkCommittedSec.toFixed(1)}s / ${state.downlinkWindowSec.toFixed(1)}s`;
+      const urgent = state.passStarted && state.passRemainingSec <= 25;
+      this.timerWidgetEl.style.borderColor = urgent ? '#ef4444' : 'rgba(245, 158, 11, 0.55)';
+      this.timerWidgetEl.style.color = urgent ? '#f87171' : '#fbbf24';
+      this.timerWidgetEl.innerHTML = `${label(state.passStarted ? 'PASS CLOCK - LINK OPENS IN' : 'PASS CLOCK - STARTS AT FIRST SCAN', '#94a3b8')}${formatClock(state.passRemainingSec)}`;
     }
   }
 
@@ -1811,140 +1934,69 @@ export class DesktopControlsManager {
 
   private renderAriaHud(state: MissionState): void {
     if (!this.ariaHudEl) return;
-
-    const isOverflow = state.downlinkCommittedSec > state.downlinkWindowSec + 0.01;
-    let line = `Phase 1 Recon & Staging (Untimed). Stage cubes for ${state.downlinkWindowSec.toFixed(1)}s Karachi window.`;
+    const intervention = (window as any).__ORBIT_ZERO__?.getCoPilotIntervention?.() as { headline: string; detailedAdvice: string; urgency: string } | null | undefined;
+    const sector = getScenarioSector(state.scenarioId, state.selectedSectorId, this.host.engine.getActiveCustomScenario());
+    let badge = 'ARIA-7';
+    let line = `Sector ${state.selectedSectorId} (${sector.name}): ${describeWeather(sector.cloudCover)}. ${sector.terrainSummary}`;
     let isCritical = false;
-
-    if (isOverflow) {
-      isCritical = true;
-      line = `DOWNLINK OVERFLOW: Queue (${state.downlinkCommittedSec.toFixed(1)}s) exceeds ${state.downlinkWindowSec.toFixed(1)}s window! Compress packets in Amber Cradle.`;
-    } else if (state.phase === 'DOWNLINK') {
-      const rem = Math.max(0, state.downlinkWindowSec - state.downlinkElapsedSec).toFixed(1);
-      line = `Downlink active. Horizon contact closing in ${rem}s.`;
-    } else if (state.phase === 'DEBRIEF') {
-      line = `Pass concluded. Efficiency Grade: ${state.debrief?.efficiencyGrade || 'S'}. Ground rescue dispatched.`;
-    } else if (
-      state.selectedSectorId === 'D' &&
-      (state.scenarioId === 'FIRELINE_PASS' || state.scenarioId === 'ORBITAL_ACADEMY')
-    ) {
-      const sec = getScenarioSector(state.scenarioId, 'D');
-      line = `Pre-Scan Clue — Sector D (${sec.name}): Thermal anomaly detected (~345 K). Surface signature resembles industrial surface heating rather than active vegetation combustion.`;
-    } else if (state.selectedSectorId === 'B' || state.selectedSectorId === 'C' || state.selectedSectorId === 'E') {
-      const rec = getRecommendedSensor(state.scenarioId, state.selectedSectorId);
-      const sec = getScenarioSector(state.scenarioId, state.selectedSectorId);
-      line = state.activeSensorMode === rec
-        ? `Sector ${state.selectedSectorId} (${sec.name}): ${rec} armed and optimal for ${sec.cloudCover.replace('_', ' ')}.`
-        : `Advisory: Sector ${state.selectedSectorId} (${sec.name}) has ${sec.cloudCover.replace('_', ' ')}. Recommended sensor: ${rec}!`;
-    } else if (state.selectedSectorId) {
-      const sec = getScenarioSector(state.scenarioId, state.selectedSectorId);
-      line = `Sector ${state.selectedSectorId} (${sec.name}): ${sec.terrainSummary}`;
+    if (state.phase === 'DEBRIEF') {
+      line = `Pass complete: ${state.debrief?.totalScore ?? 0} pts. Retry to beat it, or move to the next operation.`;
+    } else if (this.lastHintText && state.hintsUsed > 0 && this.lastHintStep === state.stepCounter) {
+      badge = `ARIA-7 HINT (${state.hintsUsed} used)`;
+      line = this.lastHintText;
+    } else if (intervention) {
+      badge = `ARIA-7 // ${intervention.headline}`;
+      line = intervention.detailedAdvice;
+      isCritical = intervention.urgency === 'CRITICAL' || intervention.urgency === 'EMERGENCY';
     }
-
-    const borderColor = isCritical ? 'rgba(239, 68, 68, 0.85)' : 'rgba(34, 211, 238, 0.42)';
-    const shadowColor = isCritical ? 'rgba(239, 68, 68, 0.35)' : 'rgba(34, 211, 238, 0.15)';
-    const badgeColor = isCritical ? '#f87171' : '#22d3ee';
-
-    // Concept Image 1 & 2 faithful: Clean frosted glass subtitle card beneath 3D ARIA-7 bust
+    const borderColor = isCritical ? 'rgba(239, 68, 68, 0.85)' : 'rgba(167, 139, 250, 0.5)';
+    const badgeColor = isCritical ? '#f87171' : '#c4b5fd';
     this.ariaHudEl.innerHTML = `
-      <div id="aria-subtitle-bar" style="
-        background: rgba(6, 12, 24, 0.85);
-        backdrop-filter: blur(14px);
-        -webkit-backdrop-filter: blur(14px);
-        border: 1px solid ${borderColor};
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7), 0 0 14px ${shadowColor};
-        border-radius: 6px;
-        padding: 8px 14px;
-        display: flex;
-        flex-direction: column;
-        gap: 3px;
-        opacity: 1;
-      ">
-        <div id="aria-subtitle-badge" style="font-size: 11px; font-weight: 800; color: ${badgeColor}; letter-spacing: 1.5px;">ARIA-7</div>
-        <div id="aria-subtitle-text" style="font-size: 11px; color: #e2e8f0; font-weight: 500; line-height: 1.4; letter-spacing: 0.3px;">${line}</div>
+      <div id="aria-subtitle-bar" style="background: rgba(6, 12, 24, 0.88); border: 1px solid ${borderColor}; border-radius: 6px; padding: 8px 14px; display: flex; flex-direction: column; gap: 3px;">
+        <div id="aria-subtitle-badge" style="font-size: 11px; font-weight: 800; color: ${badgeColor}; letter-spacing: 1.2px;">${escapeHtml(badge)}</div>
+        <div id="aria-subtitle-text" style="font-size: 13px; color: #e2e8f0; font-weight: 500; line-height: 1.45;">${escapeHtml(line)}</div>
       </div>
     `;
   }
 
   private renderSectorCallout(state: MissionState): void {
     if (!this.sectorCalloutEl || !this.tacticalObjectiveEl || !this.groundStationTrackingEl) return;
+    // The old objective bar printed the answer ("SCAN X [RADAR]"); the Next Step card replaces it.
+    this.tacticalObjectiveEl.style.display = 'none';
+    this.groundStationTrackingEl.style.display = 'none';
 
-    if (state.phase !== 'OPERATIONS' || !state.selectedSectorId || !this.hasUserSelectedSector) {
+    if (state.phase !== 'OPERATIONS' || !this.hasUserSelectedSector || this.isModalOpen(state)) {
       this.sectorCalloutEl.style.display = 'none';
-      this.tacticalObjectiveEl.style.display = 'none';
-      this.groundStationTrackingEl.style.display = 'none';
       return;
     }
-
+    const custom = this.host.engine.getActiveCustomScenario();
     const secId = state.selectedSectorId;
-    const secCfg = getScenarioSector(state.scenarioId, secId);
-    const recSensor = getRecommendedSensor(state.scenarioId, secId);
-    const secName = (secCfg?.name ?? `ZONE ${secId}`).toUpperCase();
-    const objText = `OBJECTIVE: SCAN ${secName} [${recSensor}]`;
-
-    // 1. Sector Reticle Leader Line & Callout Badge (Concept Image 2)
+    const secCfg = getScenarioSector(state.scenarioId, secId, custom);
+    const requests = getScenarioRequests(state.scenarioId, custom);
+    const req = Object.values(requests).find((r) => r.targetSectorId === secId);
     const globe = this.host.getSceneObject('earth-globe');
     const reticle = globe?.getObjectByName('ActiveSectorReticleGroup');
-    if (reticle && this.host.camera) {
-      const worldPos = new Vector3();
-      reticle.getWorldPosition(worldPos);
-      worldPos.project(this.host.camera);
-      const isVisible = worldPos.z < 1.0;
-      if (isVisible) {
-        const cx = (worldPos.x * 0.5 + 0.5) * window.innerWidth;
-        const cy = (-(worldPos.y * 0.5) + 0.5) * window.innerHeight;
-
-        this.sectorCalloutEl.style.display = 'flex';
-        this.sectorCalloutEl.style.left = `${Math.round(cx + 36)}px`;
-        this.sectorCalloutEl.style.top = `${Math.round(cy - 24)}px`;
-
-        this.sectorCalloutEl.innerHTML = `
-          <div style="position: relative; display: flex; align-items: center; gap: 8px;">
-            <svg style="position: absolute; right: 100%; top: 50%; transform: translateY(-50%); overflow: visible; pointer-events: none;" width="38" height="20">
-              <path d="M 0 10 L 24 10 L 38 10" stroke="#38bdf8" stroke-width="1.5" fill="none" stroke-dasharray="2 2"></path>
-              <circle cx="0" cy="10" r="2.5" fill="#38bdf8"></circle>
-            </svg>
-            <div style="background: rgba(6, 12, 24, 0.78); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(56, 189, 248, 0.45); box-shadow: 0 4px 16px rgba(0,0,0,0.6), 0 0 12px rgba(56,189,248,0.25); border-radius: 4px; padding: 6px 12px; pointer-events: auto; cursor: pointer;">
-              <div style="font-size: 11px; font-weight: 800; color: #38bdf8; letter-spacing: 1.5px; text-transform: uppercase;">SECTOR ${secId} //</div>
-              <div style="font-size: 9px; font-weight: 700; color: #94a3b8; letter-spacing: 1px; margin-top: 2px;">${secName}</div>
-            </div>
-          </div>
-        `;
-      } else {
-        this.sectorCalloutEl.style.display = 'none';
-      }
-    } else {
+    if (!reticle || !this.host.camera) {
       this.sectorCalloutEl.style.display = 'none';
+      return;
     }
-
-    // 2. Canopy Visor Tactical Objective HUD (Concept Image 05 Match)
-    this.tacticalObjectiveEl.style.display = 'block';
-    const isRadarArmed = state.activeSensorMode === 'RADAR';
-    const isThermalArmed = state.activeSensorMode === 'THERMAL';
-    const isOpticalArmed = state.activeSensorMode === 'OPTICAL';
-    this.tacticalObjectiveEl.innerHTML = `
-      <div style="background: rgba(6, 18, 38, 0.78); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border: 1.5px solid rgba(0, 240, 255, 0.45); box-shadow: 0 4px 24px rgba(0,0,0,0.7), 0 0 16px rgba(0,240,255,0.22); border-radius: 8px; padding: 7px 20px; display: flex; flex-direction: column; align-items: center; gap: 4px;">
-        <div style="font-size: 11px; font-weight: 800; color: #00f0ff; letter-spacing: 1.5px; text-transform: uppercase;">${objText}</div>
-        <div style="display: flex; gap: 8px; align-items: center;">
-          <div style="font-size: 9px; font-weight: 700; padding: 2px 8px; border-radius: 4px; background: ${isOpticalArmed ? 'rgba(56, 189, 248, 0.25)' : 'rgba(15, 23, 42, 0.6)'}; color: ${isOpticalArmed ? '#38bdf8' : '#64748b'}; border: 1px solid ${isOpticalArmed ? 'rgba(56,189,248,0.5)' : 'rgba(255,255,255,0.08)'};">
-            ◉ OPTICAL (8 Wh)
-          </div>
-          <div style="font-size: 9px; font-weight: 700; padding: 2px 8px; border-radius: 4px; background: ${isThermalArmed ? 'rgba(255, 107, 43, 0.25)' : 'rgba(15, 23, 42, 0.6)'}; color: ${isThermalArmed ? '#ff6b2b' : '#64748b'}; border: 1px solid ${isThermalArmed ? 'rgba(255,107,43,0.6)' : 'rgba(255,255,255,0.08)'};">
-            ◐ THERMAL IR (11 Wh)
-          </div>
-          <div style="font-size: 9px; font-weight: 700; padding: 2px 8px; border-radius: 4px; background: ${isRadarArmed ? 'rgba(0, 240, 255, 0.25)' : 'rgba(15, 23, 42, 0.6)'}; color: ${isRadarArmed ? '#00f0ff' : '#64748b'}; border: 1px solid ${isRadarArmed ? 'rgba(0,240,255,0.6)' : 'rgba(255,255,255,0.08)'};">
-            ⦿ SAR RADAR (14 Wh)
-          </div>
-        </div>
-      </div>
-    `;
-
-    // 3. Ground Station Downlink HUD Card (Concept Image 05/08 Match)
-    this.groundStationTrackingEl.style.display = 'block';
-    this.groundStationTrackingEl.innerHTML = `
-      <div style="background: rgba(6, 14, 28, 0.72); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(56, 189, 248, 0.35); box-shadow: 0 4px 20px rgba(0,0,0,0.6); border-radius: 6px; padding: 6px 12px; min-width: 200px; text-align: right;">
-        <div style="font-size: 10px; font-weight: 800; color: #34d399; letter-spacing: 1px; margin-bottom: 2px;">KARACHI STATION [LOCKED]</div>
-        <div style="font-size: 9px; color: #94a3b8; font-family: monospace;">TELEMETRY DOWNLINK · 10.0s WINDOW</div>
+    const worldPos = new Vector3();
+    reticle.getWorldPosition(worldPos);
+    worldPos.project(this.host.camera);
+    if (worldPos.z >= 1.0) {
+      this.sectorCalloutEl.style.display = 'none';
+      return;
+    }
+    const cx = (worldPos.x * 0.5 + 0.5) * window.innerWidth;
+    const cy = (-(worldPos.y * 0.5) + 0.5) * window.innerHeight;
+    this.sectorCalloutEl.style.display = 'flex';
+    this.sectorCalloutEl.style.left = `${Math.round(cx + 36)}px`;
+    this.sectorCalloutEl.style.top = `${Math.round(cy - 24)}px`;
+    this.sectorCalloutEl.innerHTML = `
+      <div style="background: rgba(6, 12, 24, 0.86); border: 1px solid rgba(56, 189, 248, 0.55); border-radius: 5px; padding: 6px 12px;">
+        <div style="font-size: 12px; font-weight: 800; color: #38bdf8; letter-spacing: 1px;">SECTOR ${secId} · ${escapeHtml(secCfg.name.toUpperCase())}</div>
+        <div style="font-size: 12px; color: #e2e8f0; margin-top: 2px;">Weather: <b>${describeWeather(secCfg.cloudCover)}</b></div>
+        <div style="font-size: 11px; color: ${req ? '#34d399' : '#94a3b8'}; font-weight: 700;">${req ? `${escapeHtml(req.shortLabel.split('|')[1]?.trim() ?? req.id)} · ${requestValue(req)} pts` : 'No ground request here'}</div>
       </div>
     `;
   }
@@ -1963,309 +2015,92 @@ export class DesktopControlsManager {
       this.campaignModalEl.style.display = 'none';
       return;
     }
-
     this.campaignModalEl.style.display = 'block';
-    this.campaignModalEl.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-        <div style="font-size: 11px; color: #00f0ff; font-weight: 800; letter-spacing: 2px;">🛰️ TACTICAL CAMPAIGN SELECTION // HORIZON PASS</div>
-        <button id="btn-close-campaign" style="background: none; border: none; color: #94a3b8; font-size: 16px; cursor: pointer;">✕</button>
-      </div>
-      <div style="font-size: 20px; font-weight: 800; color: #f8fafc; margin-bottom: 4px;">CAMPAIGN OPERATIONS [SIMULATED TELEMETRY]</div>
-      <div style="font-size: 12px; color: #94a3b8; margin-bottom: 22px;">Select a simulated emergency observation operation aboard the ORBIT ZERO multi-sensor orbital platform:</div>
-
-      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 20px;">
-        <!-- Operation 01: Fireline (FIRST major level) -->
-        <div id="camp-card-fire" style="background: rgba(245, 158, 11, ${state.scenarioId === 'FIRELINE_PASS' ? '0.25' : '0.10'}); border: 1px solid ${state.scenarioId === 'FIRELINE_PASS' ? '#f59e0b' : '#b45309'}; border-radius: 8px; padding: 14px; cursor: pointer; transition: all 0.2s ease;">
-          <div style="font-size: 10px; color: #f59e0b; font-weight: 800; margin-bottom: 4px;">OPERATION 01 // FIRELINE</div>
-          <div style="font-size: 14px; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">BOLAN FIRELINE EMERGENCY ZONE</div>
-          <div style="font-size: 11px; color: #cbd5e1; line-height: 1.5; margin-bottom: 12px;">
-            Bolan Canyon &amp; Juniper Ridge wildfire surge [SIMULATED]. Dense smoke obscures Sectors B &amp; E; use Thermal IR (3.9 um) for active flame fronts and 0.75m GSD Optical on clear-sky Sector C (Bolan Viaduct).
-          </div>
-          <div style="font-size: 10px; color: #f59e0b; font-weight: 800;">52 Wh • 9 STR (18 MB/STR) • THERMAL IR + OPTICAL</div>
-          ${state.scenarioId === 'FIRELINE_PASS' ? '<div style="margin-top: 8px; font-size: 10px; color: #10b981; font-weight: bold;">✓ ACTIVE OPERATION</div>' : ''}
-        </div>
-
-        <!-- Operation 02: Monsoon Shield (SECOND major level) -->
-        <div id="camp-card-flood" style="background: rgba(14, 165, 233, ${state.scenarioId === 'STANDARD_INDUS_PASS' || state.scenarioId === 'MONSOON_SUPERCELL_PASS' ? '0.25' : '0.10'}); border: 1px solid ${state.scenarioId === 'STANDARD_INDUS_PASS' ? '#00f0ff' : '#0284c7'}; border-radius: 8px; padding: 14px; cursor: pointer; transition: all 0.2s ease;">
-          <div style="font-size: 10px; color: #38bdf8; font-weight: 800; margin-bottom: 4px;">OPERATION 02 // MONSOON SHIELD</div>
-          <div style="font-size: 14px; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">INDUS RIVER DELUGE</div>
-          <div style="font-size: 11px; color: #cbd5e1; line-height: 1.5; margin-bottom: 12px;">
-            Indus Basin levee breach under 95% Monsoon cloud deck. Active C-Band SAR Radar pierces storm clouds over Sector B; High-Res Optical avoids steel truss dihedral glare on Sector C.
-          </div>
-          <div style="font-size: 10px; color: #00f0ff; font-weight: 800;">SENSORS: SAR RADAR + OPTICAL</div>
-          ${state.scenarioId === 'STANDARD_INDUS_PASS' || state.scenarioId === 'MONSOON_SUPERCELL_PASS' ? '<div style="margin-top: 8px; font-size: 10px; color: #10b981; font-weight: bold;">✓ ACTIVE OPERATION</div>' : ''}
-        </div>
-
-        <!-- Operation 03: Aftershock (THIRD major level) -->
-        <div id="camp-card-defense" style="background: rgba(16, 185, 129, ${state.scenarioId === 'AFTERSHOCK_PASS' || state.scenarioId === 'DEFENSE_SHIELD_PASS' ? '0.25' : '0.10'}); border: 1px solid ${state.scenarioId === 'AFTERSHOCK_PASS' || state.scenarioId === 'DEFENSE_SHIELD_PASS' ? '#10b981' : '#047857'}; border-radius: 8px; padding: 14px; cursor: pointer; transition: all 0.2s ease;">
-          <div style="font-size: 10px; color: #34d399; font-weight: 800; margin-bottom: 4px;">OPERATION 03 // AFTERSHOCK</div>
-          <div style="font-size: 14px; font-weight: 700; color: #f8fafc; margin-bottom: 6px;">QUETTA FAULT SEISMIC PASS</div>
-          <div style="font-size: 11px; color: #cbd5e1; line-height: 1.5; margin-bottom: 12px;">
-            Chaman Fault seismic rupture with a damaged 6 STR buffer. Run Pre-Event vs. Post-Event Interferometric Change Detection in the Processing Cradle to verify bridge & slope stability.
-          </div>
-          <div style="font-size: 10px; color: #34d399; font-weight: 800;">6 STR BUFFER // CHANGE DETECTION</div>
-          ${state.scenarioId === 'AFTERSHOCK_PASS' || state.scenarioId === 'DEFENSE_SHIELD_PASS' ? '<div style="margin-top: 8px; font-size: 10px; color: #10b981; font-weight: bold;">✓ ACTIVE OPERATION</div>' : ''}
-        </div>
-      </div>
-
-      <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
-        <button id="camp-card-academy" style="background: rgba(16, 185, 129, 0.18); border: 1px solid #34d399; color: #34d399; font-size: 12px; font-weight: 800; padding: 8px 18px; border-radius: 6px; cursor: pointer;">🎓 LAUNCH OP 00: ORBITAL ACADEMY (QUEST HAND GESTURE TUTORIAL)</button>
-        <button id="btn-close-campaign-bottom" style="background: rgba(56, 189, 248, 0.15); border: 1px solid #38bdf8; color: #f8fafc; font-size: 12px; font-weight: 700; padding: 8px 20px; border-radius: 6px; cursor: pointer;">RETURN TO COCKPIT</button>
-      </div>
-    `;
-
-    this.campaignModalEl.querySelector('#btn-close-campaign')?.addEventListener('click', () => {
-      this.campaignModalOpen = false;
-      this.updateHud();
-    });
-    this.campaignModalEl.querySelector('#btn-close-campaign-bottom')?.addEventListener('click', () => {
-      this.campaignModalOpen = false;
-      this.updateHud();
-    });
-    this.campaignModalEl.querySelector('#camp-card-academy')?.addEventListener('click', () => {
-      this.campaignModalOpen = false;
-      this.briefingModalOpen = false;
-      this.host.engine.setScenario('ORBITAL_ACADEMY');
-      (window as any).__ORBIT_ZERO__?.startTutorial?.();
-      this.host.syncAll?.();
-      this.updateHud();
-    });
-
-    const selectAndLaunch = (scenarioId: any) => {
-      this.campaignModalOpen = false;
-      this.host.engine.setScenario(scenarioId);
-      this.briefingModalOpen = true;
-      this.briefingModalStep = 0;
-      this.host.playCue?.('CRISIS_ALERT');
-      this.notifyAction(`Switched to Operation: ${scenarioId}`, true);
-      this.host.syncAll?.();
-      this.updateHud();
-    };
-
-    this.campaignModalEl.querySelector('#camp-card-fire')?.addEventListener('click', () => selectAndLaunch('FIRELINE_PASS'));
-    this.campaignModalEl.querySelector('#camp-card-flood')?.addEventListener('click', () => selectAndLaunch('STANDARD_INDUS_PASS'));
-    this.campaignModalEl.querySelector('#camp-card-defense')?.addEventListener('click', () => selectAndLaunch('AFTERSHOCK_PASS'));
+    const profile = (window as any).__ORBIT_ZERO__?.getProfile?.();
+    this.campaignModalEl.innerHTML = campaignHtml(state, profile?.mastery ?? {});
   }
 
   private renderBriefingModal(state: MissionState): void {
     if (!this.briefingModalEl) return;
-    const isOrbitalAcademyActive = Boolean((window as any).__ORBIT_ZERO__?.getTutorialState?.()?.active);
-    if (state.packets.length > 0) {
-      this.briefingModalOpen = false;
-    }
-    if (isOrbitalAcademyActive || !this.briefingModalOpen || state.phase !== 'OPERATIONS' || !this.tutorialActive || this.tutorialStep !== 'INTRO') {
+    const academyActive = Boolean((window as any).__ORBIT_ZERO__?.getTutorialState?.()?.active);
+    if (state.packets.length > 0 || state.passStarted) this.briefingModalOpen = false;
+    if (academyActive || !this.briefingModalOpen || this.campaignModalOpen || state.phase !== 'OPERATIONS') {
       this.briefingModalEl.style.display = 'none';
       return;
     }
-
     this.briefingModalEl.style.display = 'block';
-    let slides = [
-      {
-        badge: 'CRISIS DIRECTIVE // INDUS RIVER BASIN',
-        title: 'OPERATION 02: MONSOON SHIELD — LEVEE BREACH',
-        desc: '[SIMULATED SCENARIO TELEMETRY] A Category 4 Monsoon supercell has breached river levees across Sindh. Low-lying agricultural corridors face rapid inundation. Ground rescue units urgently await verified orbital reconnaissance before the 10.0-second Karachi downlink contact window closes.',
-        callout: '⚠️ Evacuation routes blocked: Sector B (East Levee) & Sector C (Bridge Crossing).'
-      },
-      {
-        badge: 'SENSOR DILEMMA // CLOUD PENETRATION',
-        title: 'RADAR VS OPTICAL SENSOR TRADE-OFF',
-        desc: 'Sector B is covered by 95% convective storm clouds (τ > 15). Passive Optical is completely blinded by cloud scattering. Active C-Band Microwave Radar (SAR, 14 Wh) pierces the clouds to identify water specular forward-scatter across road decks.',
-        callout: '⚡ Cloud cover requires Radar (SAR); clear sky bridge inspection favors Optical.'
-      },
-      {
-        badge: 'TACTICAL OBJECTIVE // KARACHI GROUND STATION',
-        title: 'ONBOARD COMPRESSION & 10.0s DOWNLINK',
-        desc: 'You operate with a 55 Wh battery reserve and a 10.0s transmission pass over the Karachi Ground Station. Compress evidence in the Amber Cradle (costs 6 Wh) to reduce packet sizes, stage into the Downlink Bay, and transmit.',
-        callout: '🎯 S-Rank Strategy: Scan Sector B (Radar) + Sector C (Optical) + Sector E (Radar) -> Compress -> Downlink.'
-      }
-    ];
-
-    if (state.scenarioId === 'FIRELINE_PASS') {
-      slides = [
-        {
-          badge: 'CRISIS DIRECTIVE // BOLAN FIRELINE EMERGENCY ZONE [SIMULATED]',
-          title: 'OPERATION 01: FIRELINE — BOLAN CANYON & JUNIPER RIDGE',
-          desc: '[SIMULATED SCENARIO TELEMETRY] A fast-moving wildfire is advancing across the Bolan Fireline Emergency Zone (52 Wh Power, 9 STR Buffer @ 18 MB/STR, 10.0s Downlink @ 10.0 MB/s). Dense biomass smoke obscures Sector B (Bolan Canyon Highway) and Sector E (Juniper Ridge Fuel Depot), while clear upwind skies hold over Sector C (Bolan Viaduct & Firebreak).',
-          callout: '⚠️ Pre-Scan Clue: A 345 K thermal anomaly is also reported in Sector D (Sibi Basalt & Kiln Flats), where industrial surface heating is a possible alternative explanation to active vegetation combustion.'
-        },
-        {
-          badge: 'SENSOR DILEMMA // SMOKE PENETRATION VS THERMAL RADIOMETRY',
-          title: 'THERMAL IR (11 Wh, 42 MB) VS OPTICAL (8 Wh, 40 MB) VS SAR (14 Wh, 45 MB)',
-          desc: 'Mid-Wave Thermal IR (3.9 μm, 11 Wh, 3 STR / 42 MB) penetrates smoke aerosols to map 860 K active flame fronts, whereas SAR (14 Wh) cannot measure combustion temperature. Use 0.75m GSD Optical (8 Wh, 3 STR / 40 MB) over clear-sky Sector C (Bolan Viaduct & Firebreak) to detect major road blockages and verify the 40m firebreak.',
-          callout: '⚡ Use THERMAL IR on Sector B & Sector E; use OPTICAL on clear-sky Sector C.'
-        },
-        {
-          badge: 'TACTICAL OBJECTIVE // STRICTLY DOMINANT B+E COMPRESSION',
-          title: 'COMPRESS THERMAL CUBES (3 STR -> 1 STR) & DOWNLINK',
-          desc: 'Three raw cubes total 124 MB (12.4s > 10.0s window) and fill 9/9 STR (18 MB/STR). Compress both 42 MB Thermal cubes (B + E) in the Amber Cradle (6 Wh each -> 18 MB / 1 STR each) to reach 76 MB (7.6s Tx, +2.4s link margin, 10 Wh battery reserve), stage all 3 in the Downlink Bay, and commit transmission.',
-          callout: '🎯 Optimal S-Rank Strategy: Scan B (Thermal) + C (Optical) + E (Thermal) -> Compress B & E (76 MB / 7.6s) -> Downlink.'
-        }
-      ];
-    } else if (state.scenarioId === 'AFTERSHOCK_PASS' || state.scenarioId === 'DEFENSE_SHIELD_PASS') {
-      slides = [
-        {
-          badge: 'CRISIS DIRECTIVE // QUETTA FAULT SEISMIC RECON',
-          title: 'OPERATION 03: AFTERSHOCK — SEISMIC CORRIDOR TRIAGE',
-          desc: '[SIMULATED SCENARIO TELEMETRY] A shallow crust earthquake along the Chaman fault system has triggered landslides and masonry collapse across mountain valleys. Radiation-hardened memory is partitioned to 6 STR (2 raw cubes max) after solar proton storm anomalies.',
-          callout: '⚠️ Tight 6 STR onboard buffer: you must compress cubes mid-pass to free memory!'
-        },
-        {
-          badge: 'SENSOR DILEMMA // ONBOARD CHANGE DETECTION',
-          title: 'PRE-EVENT VS POST-EVENT CRADLE PROCESSING',
-          desc: 'Raw single-pass scans over seismic rubble and landslide scarps return [?] PROBABLE confidence because pre-existing terrain roughness mimics fresh collapse. Processing a PROBABLE cube in the Amber Cradle (6 Wh) runs Pre- vs Post-Event Change Detection, upgrading it to [OK] CONFIRMED!',
-          callout: '⚡ Process PROBABLE seismic cubes in the Amber Cradle [P] to upgrade to CONFIRMED.'
-        },
-        {
-          badge: 'TACTICAL OBJECTIVE // MULTI-SENSOR SEISMIC TRIAGE',
-          title: 'SOLVE THE 6 STR MEMORY BOTTLENECK',
-          desc: 'Combine SAR (Sector B fault slip), Optical (Sector C hospital bridge), and Thermal IR (Sector E substation transformer fire), compressing packets in the Cradle to fit within 6 STR and the 8.5s Karachi contact window.',
-          callout: '🎯 S-Rank Strategy: Scan -> Process in Cradle (upgrades to CONFIRMED + 1 STR) -> Queue -> Downlink.'
-        }
-      ];
-    }
-
-    const cur = slides[this.briefingModalStep];
-    this.briefingModalEl.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-        <span style="font-size: 10px; color: #38bdf8; font-weight: 700; letter-spacing: 1px; background: rgba(56, 189, 248, 0.15); padding: 3px 8px; border-radius: 4px;">${cur.badge}</span>
-        <button id="btn-modal-skip" style="background: none; border: none; color: #94a3b8; font-size: 11px; cursor: pointer; text-decoration: underline;">Skip Guide [Esc]</button>
-      </div>
-      <div style="font-size: 18px; font-weight: 700; color: #f8fafc; margin-bottom: 8px;">${cur.title}</div>
-      <div style="font-size: 12px; color: #cbd5e1; line-height: 1.6; margin-bottom: 14px;">${cur.desc}</div>
-      <div style="background: rgba(15, 23, 42, 0.85); border-left: 3px solid #38bdf8; border-radius: 0 6px 6px 0; padding: 8px 12px; margin-bottom: 18px; font-size: 11px; color: #93c5fd;">
-        ${cur.callout}
-      </div>
-      <div style="display: flex; justify-content: space-between; align-items: center;">
-        <div style="display: flex; gap: 6px;">
-          ${[0, 1, 2].map((s) => `
-            <span style="display: inline-block; width: ${s === this.briefingModalStep ? '20px' : '8px'}; height: 6px; border-radius: 3px; background: ${s === this.briefingModalStep ? '#38bdf8' : '#334155'}; transition: all 0.2s ease;"></span>
-          `).join('')}
-        </div>
-        <div style="display: flex; gap: 10px;">
-          ${this.briefingModalStep < 2 ? `
-            <button id="btn-modal-next" style="background: rgba(56, 189, 248, 0.2); border: 1px solid #38bdf8; color: #f8fafc; font-size: 12px; font-weight: 700; padding: 8px 18px; border-radius: 6px; cursor: pointer;">NEXT ▶</button>
-            <button id="btn-commence-pass" style="background: linear-gradient(135deg, #0ea5e9, #10b981); border: none; color: #f8fafc; font-size: 12px; font-weight: 700; padding: 8px 18px; border-radius: 6px; cursor: pointer; box-shadow: 0 0 16px rgba(56,189,248,0.4);">COMMENCE PASS ▶</button>
-          ` : `
-            <button id="btn-commence-pass" style="background: linear-gradient(135deg, #0ea5e9, #10b981); border: none; color: #f8fafc; font-size: 12px; font-weight: 700; padding: 8px 22px; border-radius: 6px; cursor: pointer; box-shadow: 0 0 16px rgba(56,189,248,0.4);">COMMENCE CRISIS PASS [Enter / Click] ▶</button>
-          `}
-        </div>
-      </div>
-    `;
-
-    this.briefingModalEl.querySelector('#btn-modal-skip')?.addEventListener('click', () => {
-      this.briefingModalOpen = false;
-      this.advanceTutorial('SELECT_SECTOR');
-      this.updateHud();
-    });
-    this.briefingModalEl.querySelector('#btn-modal-next')?.addEventListener('click', () => {
-      this.briefingModalStep = Math.min(2, this.briefingModalStep + 1);
-      this.updateHud();
-    });
-    this.briefingModalEl.querySelector('#btn-commence-pass')?.addEventListener('click', () => {
-      this.briefingModalOpen = false;
-      this.advanceTutorial('SELECT_SECTOR');
-      // notifyAction removed for clean canopy presentation
-      this.updateHud();
-    });
-    this.briefingModalEl.querySelector('#btn-modal-engage')?.addEventListener('click', () => {
-      this.briefingModalOpen = false;
-      this.advanceTutorial('SELECT_SECTOR');
-      // notifyAction removed for clean canopy presentation
-      this.updateHud();
-    });
+    this.briefingModalEl.style.width = '640px';
+    this.briefingModalEl.style.maxHeight = 'calc(100vh - 40px)';
+    this.briefingModalEl.style.overflowY = 'auto';
+    const profile = (window as any).__ORBIT_ZERO__?.getProfile?.();
+    this.briefingModalEl.innerHTML = missionCardHtml(state, this.host.engine.getActiveCustomScenario(), profile?.mastery?.[state.scenarioId] ?? null);
   }
 
   private renderTopBanner(state: MissionState): void {
     if (!this.bannerEl) return;
+    const custom = this.host.engine.getActiveCustomScenario();
 
     this.bannerEl.style.borderColor = 'rgba(56, 189, 248, 0.35)';
-    this.bannerEl.style.maxWidth = '660px';
-    this.bannerEl.style.minWidth = '440px';
+    this.bannerEl.style.maxWidth = '720px';
+    this.bannerEl.style.minWidth = '520px';
     this.bannerEl.style.maxHeight = '';
     this.bannerEl.style.overflowY = '';
 
     if (state.phase === 'DEBRIEF') {
       this.bannerEl.style.display = 'block';
       const debrief = state.debrief!;
-      const isAcademyPass =
-        state.scenarioId === 'ORBITAL_ACADEMY' && debrief.outcome === 'SUCCESS';
-      const outcomeLabel = isAcademyPass
-        ? 'TRAINING COMPLETE'
-        : debrief.outcome === 'SUCCESS'
-          ? 'MISSION SUCCESS'
-          : debrief.outcome === 'PARTIAL_SUCCESS'
-          ? 'PARTIAL SUCCESS'
-          : 'MISSION FAILURE';
-      const outcomeColor =
-        debrief.outcome === 'SUCCESS'
-          ? '#34d399'
-          : debrief.outcome === 'PARTIAL_SUCCESS'
-          ? '#f59e0b'
-          : '#ef4444';
-      const payloadMb = debrief.transmittedPayloadMb ?? Math.round(debrief.downlinkUsedSec * 10);
-      const throughput = debrief.downlinkThroughputMbps ?? 10;
-
+      const isAcademyPass = state.scenarioId === 'ORBITAL_ACADEMY' && debrief.outcome === 'SUCCESS';
+      const outcomeColor = debrief.outcome === 'SUCCESS' ? '#34d399' : debrief.outcome === 'PARTIAL_SUCCESS' ? '#f59e0b' : '#ef4444';
       const outcomeKey = (debrief.outcome ?? 'FAILED') as DebriefOutcome;
       const chip = (text: string, color: string) =>
-        `<span style="display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: 0.6px; color: ${color}; border: 1px solid ${color}; border-radius: 4px; padding: 1px 6px;">${text}</span>`;
-      const resourceChips = [
-        `<span style="color: #94a3b8;">DOWNLINK</span> <b style="color: #f8fafc;">${payloadMb} MB</b> <span style="color: #94a3b8;">(${debrief.downlinkUsedSec.toFixed(1)}s of ${debrief.downlinkWindowSec.toFixed(1)}s @ ${throughput} MB/s)</span>`,
-        `<span style="color: #94a3b8;">BATTERY</span> <b style="color: #38bdf8;">${debrief.powerRemaining} Wh left</b>`,
-      ].join('<span style="color: #475569;"> &nbsp;|&nbsp; </span>');
+        `<span style="display: inline-block; font-size: 11px; font-weight: 800; letter-spacing: 0.6px; color: ${color}; border: 1px solid ${color}; border-radius: 4px; padding: 1px 6px;">${text}</span>`;
       const requestRows = isAcademyPass
         ? ''
         : debrief.evaluations
-            .map((ev) => {
-              const s = requestStatusChip(ev.status);
-              return `
-          <div class="aar-row" style="display: grid; grid-template-columns: 76px 1fr; gap: 4px 10px; align-items: start; text-align: left; padding: 7px 0; border-top: 1px solid rgba(148, 163, 184, 0.16);">
+          .map((ev) => {
+            const s = requestStatusChip(ev.status);
+            return `
+          <div class="aar-row" style="display: grid; grid-template-columns: 86px 1fr; gap: 4px 10px; align-items: start; text-align: left; padding: 7px 0; border-top: 1px solid rgba(148, 163, 184, 0.16);">
             <div>${chip(s.label, s.color)}</div>
             <div>
-              <div style="font-size: 12px; font-weight: 700; color: #f8fafc;">${escapeHtml(ev.shortLabel)} <span style="color: #94a3b8; font-weight: 600;">${ev.scorePoints}/${ev.maxPoints} pts</span></div>
-              <div style="font-size: 12px; color: #cbd5e1; margin-top: 1px;">${escapeHtml(clipText(ev.groundConsequence, 150))}</div>
-              ${ev.decisionNote ? `<div style="font-size: 11px; color: #7dd3fc; margin-top: 2px;"><b>Your decision:</b> ${escapeHtml(ev.decisionNote)}</div>` : ''}
+              <div style="font-size: 13px; font-weight: 700; color: #f8fafc;">${escapeHtml(ev.shortLabel)} <span style="color: #94a3b8; font-weight: 600;">${ev.scorePoints}/${ev.maxPoints} pts</span></div>
+              <div style="font-size: 12px; color: #cbd5e1; margin-top: 1px;">${escapeHtml(clipText(ev.groundConsequence, 160))}</div>
+              ${ev.decisionNote ? `<div style="font-size: 12px; color: #7dd3fc; margin-top: 2px;"><b>Your decision:</b> ${escapeHtml(ev.decisionNote)}</div>` : ''}
             </div>
           </div>`;
-            })
-            .join('');
-      const guidance = isAcademyPass
-        ? ''
-        : debrief.outcome === 'SUCCESS'
-          ? escapeHtml(clipText(debrief.deterministicRecommendation, 280))
-          : (() => {
-              const g = retryGuidanceFor(debrief);
-              return g ? `<b style="color: ${outcomeColor};">${escapeHtml(g.title)}.</b> ${escapeHtml(clipText(g.body, 340))}` : escapeHtml(clipText(debrief.deterministicRecommendation, 280));
-            })();
-
+          })
+          .join('');
+      const g = debrief.outcome === 'SUCCESS' ? null : retryGuidanceFor(debrief);
+      const tip = isAcademyPass
+        ? 'You are qualified. Operation 01 has a real pass clock and three requests with different values.'
+        : g ? `<b style="color: ${outcomeColor};">${escapeHtml(g.title)}.</b> ${escapeHtml(clipText(g.body, 340))}` : escapeHtml(clipText(debrief.deterministicRecommendation, 300));
       this.bannerEl.style.borderColor = outcomeColor;
       this.bannerEl.style.maxWidth = '780px';
       this.bannerEl.style.minWidth = '620px';
       this.bannerEl.style.maxHeight = 'calc(100vh - 28px)';
       this.bannerEl.style.overflowY = 'auto';
       this.bannerEl.innerHTML = `
-        <div style="font-size: 10px; color: #38bdf8; font-weight: 700; letter-spacing: 1.2px;">
-          ${isAcademyPass ? 'ORBITAL ACADEMY QUALIFICATION REVIEW' : 'MISSION AFTER-ACTION REVIEW [SIMULATED]'}
+        <div style="font-size: 11px; color: #38bdf8; font-weight: 700; letter-spacing: 1.2px;">${isAcademyPass ? 'ORBITAL ACADEMY RESULT' : 'AFTER-ACTION REVIEW [SIMULATED]'}</div>
+        <div id="debrief-outcome-headline" style="font-size: 24px; font-weight: 800; color: ${outcomeColor}; margin: 3px 0 2px;">
+          ${isAcademyPass ? 'TRAINING COMPLETE' : `${OUTCOME_LABELS[outcomeKey]} · GRADE ${debrief.efficiencyGrade}`}
         </div>
-        <div id="debrief-outcome-headline" style="font-size: 20px; font-weight: 800; color: ${outcomeColor}; margin: 3px 0 4px;">
-          ${isAcademyPass ? `${outcomeLabel} - ${debrief.missionRank} | ${debrief.totalScore}/${debrief.maxScore} PTS` : `${OUTCOME_LABELS[outcomeKey]} - GRADE ${debrief.efficiencyGrade}${debrief.certification && debrief.certification !== 'NONE' ? ` (${debrief.certification})` : ''} | ${debrief.totalScore}/${debrief.maxScore} PTS`}
-        </div>
-        <div style="font-size: 11px; font-family: monospace; margin-bottom: 4px;">${resourceChips}</div>
-        <div style="font-size: 12px; color: #cbd5e1; margin-bottom: 6px;">${escapeHtml(debrief.summaryHeadline)}</div>
+        <div style="font-size: 13px; font-family: monospace; color: #e2e8f0; margin-bottom: 4px;">${escapeHtml(debriefScoreLine(state, custom))}</div>
+        <div style="font-size: 12px; color: #94a3b8; margin-bottom: 6px;">Sent ${debrief.transmittedPacketIds.length} cube(s) in ${debrief.downlinkUsedSec.toFixed(1)}s of ${debrief.downlinkWindowSec.toFixed(1)}s · ${debrief.powerRemaining} Wh battery left${debrief.droppedPacketIds.length ? ` · <b style="color:#f87171;">${debrief.droppedPacketIds.length} cut off</b>` : ''}</div>
+        <div style="font-size: 13px; color: #f8fafc; margin-bottom: 6px;">${escapeHtml(debrief.summaryHeadline)}</div>
         ${requestRows}
-        ${guidance ? `
-          <div id="debrief-failure-diagnostic" style="text-align: left; background: rgba(15, 23, 42, 0.7); border-left: 3px solid ${outcomeColor}; border-radius: 0 6px 6px 0; padding: 6px 10px; margin: 6px 0 4px; font-size: 11px; color: #e2e8f0;">
-            <span style="color: #94a3b8; font-weight: 700;">${debrief.outcome === 'SUCCESS' ? 'NEXT STEP' : 'RETRY GUIDANCE'}</span> ${guidance}
-            <div style="color: #94a3b8; margin-top: 3px;">CEILING ${debrief.achievableScore}/100 | ${debrief.benchmarkDownlinkSec.toFixed(1)}s | ${debrief.benchmarkPowerUsed} Wh</div>
-          </div>` : ''}
+        <div id="debrief-failure-diagnostic" style="text-align: left; background: rgba(15, 23, 42, 0.7); border-left: 3px solid ${outcomeColor}; border-radius: 0 6px 6px 0; padding: 7px 10px; margin: 6px 0 4px; font-size: 12px; color: #e2e8f0;">
+          <span style="color: #94a3b8; font-weight: 800;">${debrief.outcome === 'SUCCESS' ? 'NEXT STEP' : 'TRY THIS'}</span> ${tip}
+        </div>
         <div style="display: flex; justify-content: center; gap: 10px; margin-top: 8px;">
-          <button id="btn-aar-restart" style="${this.btnStyle('#38bdf8')}">${isAcademyPass ? 'REPLAY ACADEMY [R]' : 'RESTART PASS [R]'}</button>
-          <button id="btn-aar-next" style="${this.btnStyle('#34d399')}">${isAcademyPass ? 'LAUNCH OP 01: FIRELINE [N]' : 'NEXT PASS [N]'}</button>
-          ${isAcademyPass ? `<button id="btn-aar-campaign" style="${this.btnStyle('#a855f7')}">CAMPAIGN SELECT</button>` : ''}
+          <button id="btn-aar-restart" style="${this.btnStyle('#38bdf8')}">${isAcademyPass ? 'REPLAY TRAINING [R]' : 'RETRY PASS [R]'}</button>
+          <button id="btn-aar-next" style="${this.btnStyle('#34d399', true)}">${isAcademyPass ? 'START OP 01 [N]' : 'NEXT OPERATION [N]'}</button>
+          <button id="btn-aar-campaign" style="${this.btnStyle('#a855f7')}">CAMPAIGN [C]</button>
         </div>
       `;
       this.bannerEl.querySelector('#btn-aar-restart')?.addEventListener('click', () => this.restartMission());
       this.bannerEl.querySelector('#btn-aar-next')?.addEventListener('click', () => {
         this.host.nextMission();
+        this.briefingModalOpen = true;
         this.updateHud();
       });
       this.bannerEl.querySelector('#btn-aar-campaign')?.addEventListener('click', () => {
@@ -2275,42 +2110,24 @@ export class DesktopControlsManager {
       return;
     }
 
-    if (state.phase === 'DOWNLINK') {
-      this.bannerEl.style.display = 'block';
-      const elapsed = state.downlinkElapsedSec.toFixed(1);
-      const total = state.downlinkWindowSec.toFixed(1);
-      const remaining = Math.max(0, state.downlinkWindowSec - state.downlinkElapsedSec).toFixed(1);
-      const progress = Math.min(100, (state.downlinkElapsedSec / state.downlinkWindowSec) * 100).toFixed(0);
-      const activePkt = state.packets.find((p) => p.id === state.activeDownlinkPacketId);
-      this.bannerEl.innerHTML = `
-        <div style="font-size: 11px; color: #34d399; font-weight: 700; letter-spacing: 1px;">
-          S-BAND DOWNLINK ACTIVE — KARACHI GROUND STATION CONTACT (10.0 MB/s)
-        </div>
-        <div style="font-size: 16px; font-weight: 700; margin: 4px 0;">
-          HORIZON CONTACT: ${elapsed}s / ${total}s (${progress}%) | LOS IN: ${remaining}s
-        </div>
-        <div style="font-size: 12px; color: #cbd5e1;">
-          ${activePkt ? `📡 Streaming: <b style="color: #38bdf8;">${activePkt.sectorCode}: ${activePkt.headline}</b> (${activePkt.payloadMb ?? Math.round(activePkt.transmitSec * 10)} MB / ${activePkt.storageCost} STR, ${activePkt.transmitSec.toFixed(1)}s)` : 'Acquiring next queued packet...'}
-        </div>
-      `;
+    if (this.isModalOpen(state)) {
+      this.bannerEl.style.display = 'none';
       return;
     }
 
     const academyState = (window as any).__ORBIT_ZERO__?.getTutorialState?.();
-    if (academyState?.active && academyState?.stepSpec) {
+    if (academyState?.active && academyState?.stepSpec && state.phase === 'OPERATIONS') {
       this.bannerEl.style.display = 'block';
       const spec = academyState.stepSpec;
       this.bannerEl.innerHTML = `
         <div id="orbital-academy-banner" style="text-align: left;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
-            <span style="font-size: 10px; color: #34d399; font-weight: 800; letter-spacing: 1px; background: rgba(16, 185, 129, 0.18); padding: 2px 8px; border-radius: 4px;">
-              OP 00: ORBITAL ACADEMY // QUEST HAND GESTURE TRAINING (${academyState.completedStepIds.length + 1}/9)
-            </span>
-            <button id="btn-skip-academy" style="background: none; border: none; color: #94a3b8; font-size: 11px; cursor: pointer; text-decoration: underline; pointer-events: auto;">Skip Academy [Esc]</button>
+            <span style="font-size: 11px; color: #34d399; font-weight: 800; letter-spacing: 1px;">OP 00: ORBITAL ACADEMY · STEP ${academyState.completedStepIds.length + 1}/9 · NO CLOCK</span>
+            <button id="btn-skip-academy" style="background: none; border: none; color: #94a3b8; font-size: 11px; cursor: pointer; text-decoration: underline; pointer-events: auto;">Skip training</button>
           </div>
-          <div id="academy-step-title" style="font-size: 14px; font-weight: 800; color: #f8fafc; margin-bottom: 3px;">${spec.title}</div>
-          <div id="academy-step-vr" style="font-size: 11px; color: #e2e8f0; line-height: 1.45; margin-bottom: 4px;"><b>VR Hand Gesture:</b> ${spec.vrInstruction}</div>
-          <div id="academy-step-science" style="font-size: 10px; color: #38bdf8; font-style: italic;">${spec.scientificNote}</div>
+          <div id="academy-step-title" style="font-size: 15px; font-weight: 800; color: #f8fafc; margin-bottom: 3px;">${escapeHtml(spec.title)}</div>
+          <div id="academy-step-desktop" style="font-size: 13px; color: #e2e8f0; line-height: 1.45; margin-bottom: 4px;">${escapeHtml(spec.desktopInstruction)}</div>
+          <div style="font-size: 11px; color: #94a3b8;"><b>In VR:</b> ${escapeHtml(spec.vrInstruction)}</div>
         </div>
       `;
       this.bannerEl.querySelector('#btn-skip-academy')?.addEventListener('click', () => {
@@ -2320,96 +2137,10 @@ export class DesktopControlsManager {
       return;
     }
 
-    this.bannerEl.style.display = 'none';
-    const scenarioTitle = MISSION_SCENARIOS[state.scenarioId]?.name ?? state.scenarioId;
-
-    // OPERATIONS Phase: Guided Tactical Onboarding vs Operator Mode
-    if (this.tutorialActive) {
-      let stepBadge = 'INVESTIGATE';
-      let title = 'EVALUATE SECTORS (INDUS BASIN & LEVEE NETWORK)';
-      let prompt = 'Convoys approaching Sector B. Notice the 95% storm clouds. Optical cannot see through clouds; Active Radar (SAR) pierces storm cover.';
-      let tip = 'Click Sector B on the globe or press [2].';
-
-      switch (this.tutorialStep) {
-        case 'INTRO':
-          stepBadge = 'CRISIS BRIEFING';
-          title = 'INDUS RIVER BASIN: LEVEE BREACH';
-          prompt = '[SIMULATED SCENARIO TELEMETRY] A Category 4 Monsoon supercell has breached river levees in Sindh. Ground rescue teams require verified orbital evidence before the 10.0s Karachi contact window closes.';
-          tip = 'Press [Enter] or click COMMENCE CRISIS PASS to begin.';
-          break;
-        case 'SELECT_SECTOR':
-          stepBadge = 'STEP 2: SENSOR TRADE-OFF';
-          title = 'SOLVE SENSOR DILEMMA: CLOUD PENETRATION';
-          prompt = 'Dense convective nimbus clouds (τ > 15) extinguish optical photons (SNR < 0 dB — Complete Droplet Washout, 8 Wh). Active Microwave Radar (SAR, 14 Wh) pierces clouds with C-band pulses (5.4 GHz) to detect specular floodwaters. Balance your 40 Wh battery reserve against cloud penetration.';
-          tip = 'Switch sensor mode to RADAR [M] or click the sensor button.';
-          break;
-        case 'SCAN_SECTOR':
-          stepBadge = 'STEP 3: ACQUIRE RECONNAISSANCE';
-          title = 'FIRE SATELLITE SWATH';
-          prompt = 'Target armed. Fire active sensor swath (costs 14 Wh). Radar beam pierces storm cover, returning backscatter data and materializing a physical telemetry cube on your tray.';
-          tip = 'Press [Space] or click SCAN to fire.';
-          break;
-        case 'SELECT_CUBE':
-          stepBadge = 'STEP 4: FORENSIC INTERPRETATION';
-          title = 'EVALUATE TELEMETRY & KNAPSACK COST';
-          prompt = 'Specular water boundary detected across 2.4 km of road! Raw packet is 3.0 MB (4.5s transmission — consuming 45% of your 10.0s downlink window). Compress onboard to save contact time for other sectors, or downlink raw?';
-          tip = 'Click the data cube on console tray or press [1].';
-          break;
-        case 'PROCESS_CRADLE':
-          stepBadge = 'STEP 5: ONBOARD FEATURE EXTRACTION';
-          title = 'STRATEGIC CRADLE COMPRESSION';
-          prompt = 'Place cube in Processing Cradle (costs 6 Wh). Onboard AI extracts flood boundaries, reducing packet from 3.0 MB to 1.0 MB (4.5s -> 1.8s TX). Notice: compression shrinks packet size while preserving original observation uncertainty.';
-          tip = 'Press [P] or click Cradle to compress.';
-          break;
-        case 'QUEUE_BAY':
-          stepBadge = 'STEP 6: DOWNLINK STAGING';
-          title = 'STAGE INTO DOWNLINK BAY';
-          prompt = 'Stage compressed telemetry into Downlink Bay. Slot 1 is now locked for transmission, consuming only 1.8s of the 10.0s pass.';
-          tip = 'Press [Q] or click Bay to stage.';
-          break;
-        case 'MULTI_TARGET':
-          stepBadge = 'STEP 7: MULTI-TARGET TRIAGE';
-          title = 'TRIAGE REMAINING HORIZON CAPACITY';
-          prompt = 'You have 8.2s of downlink capacity remaining! Investigate Sector C (Steel Truss Bridge) under clear skies. Compare whether high-res Optical (8 Wh) or Radar (14 Wh) delivers clearer structural clearance evidence to ground engineers.';
-          tip = 'Select Sector C [3], evaluate weather, and triage.';
-          break;
-      }
-
-      this.bannerEl.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
-          <span style="font-size: 10px; color: #38bdf8; font-weight: 700; letter-spacing: 1px; background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px;">${stepBadge}</span>
-          <span style="font-size: 11px; color: #94a3b8;">${scenarioTitle}</span>
-          <button id="btn-skip-tut" style="background: none; border: none; color: #94a3b8; font-size: 11px; cursor: pointer; text-decoration: underline; pointer-events: auto;">Skip Guide [Esc]</button>
-        </div>
-        <div style="font-size: 15px; font-weight: 700; color: #f8fafc; margin-bottom: 3px;">${title}</div>
-        <div style="font-size: 12px; color: #cbd5e1; margin-bottom: 4px;">${prompt}</div>
-        <div style="font-size: 11px; color: #f59e0b; font-style: italic;">Tactical Note: ${tip}</div>
-        ${this.tutorialStep === 'INTRO' ? `
-          <div style="margin-top: 6px;">
-            <button id="btn-commence-pass" style="${this.btnStyle('#38bdf8', true)}">COMMENCE CRISIS PASS [Enter / Click]</button>
-          </div>
-        ` : ''}
-      `;
-      this.bannerEl.querySelector('#btn-skip-tut')?.addEventListener('click', () => this.skipTutorial());
-      this.bannerEl.querySelector('#btn-commence-pass')?.addEventListener('click', () => {
-        this.advanceTutorial('SELECT_SECTOR');
-        this.notifyAction('🚀 CRISIS PASS COMMENCED: Evaluate Target Sectors', true);
-        this.updateHud();
-      });
-    } else {
-      // Free Operator Mode Banner
-      this.bannerEl.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
-          <span style="font-size: 11px; color: #38bdf8; font-weight: 700;">${scenarioTitle}</span>
-          <span style="font-size: 11px; color: #cbd5e1;">PWR: <b style="color: #38bdf8">${state.power}</b>/${state.maxPower} | STORAGE: <b style="color: #f59e0b">${state.storageUsed}</b>/${state.maxStorage} STR (18 MB/STR) | WINDOW: <b style="color: #34d399">${state.downlinkWindowSec}s</b></span>
-          <button id="btn-replay-tut" style="background: none; border: none; color: #94a3b8; font-size: 11px; cursor: pointer; text-decoration: underline; pointer-events: auto;">Replay Guide</button>
-        </div>
-        <div style="font-size: 11px; color: #94a3b8;">
-          CONSOLE TRIAGE: Drag cube to <b style="color: #38bdf8;">Cradle</b> to compress [P] | Drag to <b style="color: #34d399;">Bay</b> to stage [Q] | Drag to <b style="color: #f59e0b;">Tray</b> or press [U] to unqueue!
-        </div>
-      `;
-      this.bannerEl.querySelector('#btn-replay-tut')?.addEventListener('click', () => this.replayTutorial());
-    }
+    this.bannerEl.style.display = 'block';
+    const step = getNextStep(state, custom);
+    this.bannerEl.style.borderColor = step.tone === 'critical' ? 'rgba(248, 113, 113, 0.8)' : step.tone === 'warn' ? 'rgba(245, 158, 11, 0.7)' : 'rgba(56, 189, 248, 0.45)';
+    this.bannerEl.innerHTML = nextStepBannerHtml(step, state, custom);
   }
 
   private renderReconCard(state: MissionState): void {
@@ -2819,7 +2550,7 @@ export class DesktopControlsManager {
     }
 
     if (sel.satisfiesRequestId) {
-      const req = getScenarioRequests(state.scenarioId)[sel.satisfiesRequestId] ?? GROUND_REQUESTS[sel.satisfiesRequestId];
+      const req = getScenarioRequests(state.scenarioId, this.host.engine.getActiveCustomScenario())[sel.satisfiesRequestId];
       const matchOk = sel.confidence === req.minimumConfidence || (req.minimumConfidence === 'PROBABLE' && sel.confidence === 'CONFIRMED');
       reqText = `<b style="color: ${matchOk ? '#10b981' : '#f59e0b'};">${req.shortLabel}</b> — ${matchOk ? '✓ Meets Ground Standard' : '⚠️ Sub-optimal Evidence'}`;
     } else {
@@ -2968,76 +2699,12 @@ ORBIT ZERO — TACTICAL OPERATOR DEBRIEF
 
   private renderBottomToolbar(state: MissionState): void {
     if (!this.toolbarEl) return;
-    const selectedPkt = state.packets.find((p) => p.id === state.selectedPacketId);
-    const hasPackets = state.packets.length > 0;
-    const hasQueue = state.queuePacketIds.length > 0;
-    const sensorLabel = `${state.activeSensorMode} [M]`;
-    const sensorColor = state.activeSensorMode === 'RADAR' ? '#f59e0b' : state.activeSensorMode === 'THERMAL' ? '#ff6b2b' : '#38bdf8';
-
-    this.toolbarEl.innerHTML = `
-      <div style="display: flex; gap: 8px; align-items: center;">
-        <button id="tb-shortcuts-btn" style="background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(56, 189, 248, 0.4); color: #38bdf8; font-size: 11px; font-weight: 700; padding: 4px 12px; border-radius: 9999px; cursor: pointer; display: flex; align-items: center; gap: 4px;">
-          ⌨ CONTROLS [?]
-        </button>
-        <button id="tb-aria-comms" style="background: rgba(6, 182, 212, 0.2); border: 1px solid #06b6d4; color: #22d3ee; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 9999px; cursor: pointer;">
-          🔊 ARIA-7
-        </button>
-        <button id="tb-vr-sim" style="background: rgba(2, 132, 199, 0.2); border: 1px solid #0284c7; color: #38bdf8; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 9999px; cursor: pointer;">
-          🖐️ VR SIM [H]
-        </button>
-        <button id="tb-hud-view" style="background: rgba(148, 163, 184, 0.15); border: 1px solid rgba(255,255,255,0.2); color: #cbd5e1; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 9999px; cursor: pointer;">
-          ${this.hudMinimized ? 'TELEMETRY [V]' : 'MINIMIZE [V]'}
-        </button>
-        <button id="tb-diag" style="background: rgba(100, 116, 139, 0.2); border: 1px solid #475569; color: #94a3b8; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 9999px; cursor: pointer;">
-          DEV [F1]
-        </button>
-      </div>
-
-      <!-- Retain full event buttons in DOM for automated test harnesses -->
-      <div style="display: none;">
-        <button id="tb-sec-a">A [1]</button>
-        <button id="tb-sec-b">B [2]</button>
-        <button id="tb-sec-c">C [3]</button>
-        <button id="tb-sec-d">D [4]</button>
-        <button id="tb-sec-e">E [5]</button>
-        <button id="tb-sensor">${sensorLabel}</button>
-        <button id="tb-scan">SCAN [Space]</button>
-        <button id="tb-process">PROCESS [P]</button>
-        <button id="tb-queue">QUEUE [Q]</button>
-        <button id="tb-discard">DISCARD [X]</button>
-        <button id="tb-transmit">TRANSMIT [T]</button>
-        <button id="tb-help">HELP [?]</button>
-      </div>
-    `;
-
-    // Bind event listeners
-    this.toolbarEl.querySelector('#tb-shortcuts-btn')?.addEventListener('click', () => this.toggleHelpModal());
-    this.toolbarEl.querySelector('#tb-sec-a')?.addEventListener('click', () => this.selectSector('A'));
-    this.toolbarEl.querySelector('#tb-sec-b')?.addEventListener('click', () => this.selectSector('B'));
-    this.toolbarEl.querySelector('#tb-sec-c')?.addEventListener('click', () => this.selectSector('C'));
-    this.toolbarEl.querySelector('#tb-sec-d')?.addEventListener('click', () => this.selectSector('D'));
-    this.toolbarEl.querySelector('#tb-sec-e')?.addEventListener('click', () => this.selectSector('E'));
-    this.toolbarEl.querySelector('#tb-sensor')?.addEventListener('click', () => this.toggleSensor());
-    this.toolbarEl.querySelector('#tb-scan')?.addEventListener('click', () => this.scanSector());
-    this.toolbarEl.querySelector('#tb-process')?.addEventListener('click', () => this.processPacket());
-    this.toolbarEl.querySelector('#tb-queue')?.addEventListener('click', () => this.queuePacket());
-    this.toolbarEl.querySelector('#tb-discard')?.addEventListener('click', () => this.discardPacket());
-    this.toolbarEl.querySelector('#tb-transmit')?.addEventListener('click', () => this.commitDownlink());
-    this.toolbarEl.querySelector('#tb-aria-comms')?.addEventListener('click', () => {
-      const isMuted = (window as any).__ORBIT_ZERO__?.toggleVoiceMute?.();
-      this.notifyAction(isMuted ? 'Commander ARIA-7: Radio Voice MUTED (Subtitles Active)' : 'Commander ARIA-7: Radio Voice ACTIVE');
-      const btn = this.toolbarEl?.querySelector('#tb-aria-comms') as HTMLButtonElement | null;
-      if (btn) btn.innerText = isMuted ? '🔇 ARIA [MUTE]' : '🔊 ARIA-7';
-    });
-    this.toolbarEl.querySelector('#tb-hud-view')?.addEventListener('click', () => this.toggleHud());
-    this.toolbarEl.querySelector('#tb-vr-sim')?.addEventListener('click', () => {
-      const simActive = this.host.toggleVrHandSimulator?.();
-      if (simActive !== undefined) {
-        this.notifyAction(simActive ? '🖐️ VR HAND & ERGONOMIC REACH SIMULATOR: ACTIVE' : 'VR Hand Simulator Disabled');
-      }
-    });
-    this.toolbarEl.querySelector('#tb-help')?.addEventListener('click', () => this.toggleHelpModal());
-    this.toolbarEl.querySelector('#tb-diag')?.addEventListener('click', () => this.toggleDiagnostics());
+    if (state.phase === 'DEBRIEF' || this.isModalOpen(state)) {
+      this.toolbarEl.style.display = 'none';
+      return;
+    }
+    this.toolbarEl.style.display = 'flex';
+    this.toolbarEl.innerHTML = actionBarHtml(state, this.host.engine.getActiveCustomScenario());
   }
 
   private renderDiagnostics(state: MissionState): void {
@@ -3068,44 +2735,12 @@ ORBIT ZERO — TACTICAL OPERATOR DEBRIEF
     `;
   }
 
-  private renderHelpModal(_state: MissionState): void {
+  private renderHelpModal(state: MissionState): void {
     if (!this.helpModalEl) return;
     this.helpModalEl.style.display = this.showHelp ? 'block' : 'none';
     if (!this.showHelp) return;
-
-    this.helpModalEl.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 10px; margin-bottom: 14px;">
-        <div style="font-size: 18px; font-weight: 700; color: #38bdf8;">ORBIT ZERO: MISSION CONTROL MANUAL</div>
-        <button id="btn-close-help" style="background: none; border: 1px solid #64748b; color: #cbd5e1; border-radius: 4px; padding: 4px 8px; cursor: pointer;">Close [H]</button>
-      </div>
-
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; font-size: 12px; line-height: 1.6; color: #cbd5e1;">
-        <div>
-          <div style="font-weight: 700; color: #f8fafc; margin-bottom: 4px;">CORE STRATEGY & PHYSICS</div>
-          <p style="margin: 0 0 8px 0;"><b>1. Optical vs SAR Radar:</b> Optical cameras produce high-confidence surface evidence, but are completely blocked by dense monsoon clouds. Radar (SAR) penetrates storm clouds day or night.</p>
-          <p style="margin: 0 0 8px 0;"><b>2. Processing Cradle:</b> Raw radar packets take 4.5s to transmit. Processing compresses them to 1.8 MB (1.8s TX) for 6 Power, allowing multiple packets to fit into the downlink window.</p>
-          <p style="margin: 0 0 8px 0;"><b>3. Horizon Window:</b> The ground station window is only 10.0s. Any packets queued beyond 10.0s will be cut off by loss of signal.</p>
-        </div>
-
-        <div>
-          <div style="font-weight: 700; color: #f8fafc; margin-bottom: 4px;">KEYBOARD & MOUSE CONTROLS</div>
-          <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
-            <tr><td style="color: #38bdf8; padding: 2px 0;"><b>[1] - [5]</b></td><td>Select Sector A through E</td></tr>
-            <tr><td style="color: #38bdf8; padding: 2px 0;"><b>[Tab]</b></td><td>Cycle target sector</td></tr>
-            <tr><td style="color: #38bdf8; padding: 2px 0;"><b>[M]</b></td><td>Toggle Sensor (Optical <-> Radar)</td></tr>
-            <tr><td style="color: #38bdf8; padding: 2px 0;"><b>[Space]</b></td><td>SCAN active sector</td></tr>
-            <tr><td style="color: #38bdf8; padding: 2px 0;"><b>[P]</b></td><td>PROCESS evidence in cradle</td></tr>
-            <tr><td style="color: #38bdf8; padding: 2px 0;"><b>[Q] / [Enter]</b></td><td>QUEUE evidence to downlink bay</td></tr>
-            <tr><td style="color: #38bdf8; padding: 2px 0;"><b>[X]</b></td><td>DISCARD unneeded evidence</td></tr>
-            <tr><td style="color: #38bdf8; padding: 2px 0;"><b>[T]</b></td><td>TRANSMIT downlink queue</td></tr>
-            <tr><td style="color: #38bdf8; padding: 2px 0;"><b>[R]</b></td><td>RESTART mission pass</td></tr>
-            <tr><td style="color: #38bdf8; padding: 2px 0;"><b>[F1]</b></td><td>Toggle developer diagnostics</td></tr>
-            <tr><td style="color: #38bdf8; padding: 2px 0;"><b>Mouse Click</b></td><td>Click any 3D sector beacon, cube, or pad!</td></tr>
-          </table>
-        </div>
-      </div>
-    `;
-    this.helpModalEl.querySelector('#btn-close-help')?.addEventListener('click', () => this.toggleHelpModal());
+    this.helpModalEl.style.width = '820px';
+    this.helpModalEl.innerHTML = helpHtml(state, this.host.engine.getActiveCustomScenario());
   }
 
   private btnStyle(color: string, prominent = false): string {

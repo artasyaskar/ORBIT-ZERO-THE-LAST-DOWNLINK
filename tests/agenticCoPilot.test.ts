@@ -1,75 +1,61 @@
 import { describe, expect, it } from 'vitest';
 import { AgenticCoPilot } from '../src/systems/agenticCoPilot';
 import { MissionEngine } from '../src/mission/missionEngine';
-import type { MissionAction } from '../src/mission/types';
+import { SCORING } from '../src/mission/missionConfig';
 
-describe('Deep Agentic Systems Integration (AgenticCoPilot)', () => {
-  it('detects player hesitation after 5 seconds of idle during crisis', () => {
+function makeCoPilot(engine: MissionEngine, onCue?: (cue: string) => void) {
+  return new AgenticCoPilot({
+    getState: () => engine.getState(),
+    applyAction: (action) => {
+      const res = engine.dispatch(action);
+      return 'ok' in res ? { ok: res.ok, message: res.message } : { ok: res.lastActionOk, message: res.lastStatusMessage };
+    },
+    playCue: onCue,
+  });
+}
+
+describe('ARIA-7 co-pilot (hint-on-request, never plays for you)', () => {
+  it('offers a hint after the operator hesitates', () => {
     const engine = new MissionEngine();
-    let cuePlayed = '';
-    const coPilot = new AgenticCoPilot({
-      getState: () => engine.getState(),
-      applyAction: (action) => {
-        const res = engine.dispatch(action);
-        return 'ok' in res ? res : { ok: true, message: 'Dispatched' };
-      },
-      playCue: (cue) => { cuePlayed = cue; },
-    });
-
-    // Initial state: not idle yet
-    expect(coPilot.update(1.0)).toBeNull();
-    expect(coPilot.update(2.0)).toBeNull();
-
-    // After 5+ seconds total idle:
-    const intervention = coPilot.update(3.0); // total 6.0s
-    expect(intervention).not.toBeNull();
+    const coPilot = makeCoPilot(engine);
+    expect(coPilot.update(5.0)).toBeNull();
+    const intervention = coPilot.update(8.0);
     expect(intervention?.reasonCode).toBe('HESITATION');
-    expect(intervention?.recommendedAction).toBeDefined();
+    expect(intervention?.recommendedAction).toEqual({ type: 'USE_HINT' });
   });
 
-  it('detects sensor mismatch when scanning dense clouds with optical', () => {
+  it('does not volunteer the correct sensor when optical is aimed at storm clouds', () => {
     const engine = new MissionEngine();
     engine.selectSector('B');
     engine.setSensorMode('OPTICAL');
-
-    const coPilot = new AgenticCoPilot({
-      getState: () => engine.getState(),
-      applyAction: (action) => {
-        const res = engine.dispatch(action);
-        if ('ok' in res) return { ok: res.ok, message: res.message };
-        return { ok: true, message: 'Action dispatched' };
-      },
-    });
-
-    const intervention = coPilot.update(0.1);
-    expect(intervention).not.toBeNull();
-    expect(intervention?.reasonCode).toBe('SENSOR_MISMATCH');
-    expect(intervention?.recommendedAction).toEqual({ type: 'SET_SENSOR', sensorMode: 'RADAR' });
+    const coPilot = makeCoPilot(engine);
+    expect(coPilot.update(0.1)).toBeNull();
   });
 
-  it('executes delegated tactical action when operator pinches/delegates', () => {
+  it('a requested hint names the next best move, costs points and does not change the mission', () => {
     const engine = new MissionEngine();
-    let cuePlayed = '';
-    const coPilot = new AgenticCoPilot({
-      getState: () => engine.getState(),
-      applyAction: (action) => {
-        const res = engine.dispatch(action);
-        if ('ok' in res) return { ok: res.ok, message: res.message };
-        return { ok: true, message: 'Action dispatched' };
-      },
-      playCue: (cue) => { cuePlayed = cue; },
-    });
-
-    // Advance time to trigger hesitation intervention
-    coPilot.update(6.0);
-    const active = coPilot.getActiveIntervention();
-    expect(active).not.toBeNull();
-
-    // Execute delegation
+    let cue = '';
+    const coPilot = makeCoPilot(engine, (c) => { cue = c; });
+    const before = engine.getState();
     const result = coPilot.executeActiveIntervention();
     expect(result.ok).toBe(true);
+    expect(result.message).toMatch(/scan Sector [BCE] with (Radar|Optical)/);
+    expect(result.message).toContain(`-${SCORING.hintPenalty} pts`);
+    const after = engine.getState();
+    expect(after.hintsUsed).toBe(1);
+    expect(after.packets).toHaveLength(before.packets.length);
+    expect(after.power).toBe(before.power);
     expect(coPilot.getTotalDelegations()).toBe(1);
-    expect(cuePlayed).toBe('PROCESS_SUCCESS');
-    expect(coPilot.getActiveIntervention()).toBeNull();
+    expect(cue).toBe('PROCESS_SUCCESS');
+  });
+
+  it('warns about an overflowing bay without naming a sensor', () => {
+    const engine = new MissionEngine();
+    for (const [s, m] of [['B', 'RADAR'], ['C', 'OPTICAL'], ['E', 'RADAR']] as const) {
+      engine.queuePacket(engine.scanSector(s, m).packet!.id);
+    }
+    const intervention = makeCoPilot(engine).update(0.1);
+    expect(intervention?.reasonCode).toBe('QUEUE_OVERFLOW');
+    expect(intervention?.detailedAdvice).not.toMatch(/RADAR|OPTICAL|THERMAL|SAR/);
   });
 });

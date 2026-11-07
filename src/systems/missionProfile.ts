@@ -11,6 +11,8 @@ export interface MissionPreferences {
   highContrast: boolean;
   reducedMotion: boolean;
   captions: boolean;
+  /** Accessibility: no orbital pass clock. */
+  relaxedClock: boolean;
   audioLevel: number;
   seatOffset: [number, number, number];
 }
@@ -37,7 +39,7 @@ export function createMissionProfile(): MissionProfile {
     preferences: {
       guidance: 'GUIDED', dominantHand: 'RIGHT', oneHanded: false,
       gazeAssist: false, tabletopMode: false,
-      largeText: false, highContrast: false, reducedMotion: false, captions: true, audioLevel: 0.65,
+      largeText: false, highContrast: false, reducedMotion: false, captions: true, relaxedClock: false, audioLevel: 0.65,
       seatOffset: [0, 0, 0],
     },
     mastery: {}, tutorialComplete: false,
@@ -55,7 +57,7 @@ export function loadMissionProfile(): MissionProfile {
     const input = value.preferences;
     if (['GUIDED', 'STANDARD', 'EXPERT'].includes(input.guidance)) profile.preferences.guidance = input.guidance;
     if (input.dominantHand === 'LEFT' || input.dominantHand === 'RIGHT') profile.preferences.dominantHand = input.dominantHand;
-    for (const key of ['oneHanded', 'gazeAssist', 'tabletopMode', 'largeText', 'highContrast', 'reducedMotion', 'captions'] as const) {
+    for (const key of ['oneHanded', 'gazeAssist', 'tabletopMode', 'largeText', 'highContrast', 'reducedMotion', 'captions', 'relaxedClock'] as const) {
       if (typeof input[key] === 'boolean') profile.preferences[key] = input[key];
     }
     if (Number.isFinite(input.audioLevel)) profile.preferences.audioLevel = Math.max(0, Math.min(1, input.audioLevel));

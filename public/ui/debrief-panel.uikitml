@@ -166,7 +166,7 @@
       REQ 3 (SEC-E Juniper Ridge Depot): AWAITING DOWNLINK
     </div>
     <div id="DebriefAdviceText" class="advice-text">
-      OPTIMAL: B(THERMAL) + C(OPTICAL) + E(THERMAL), compress B+E (7.6s &lt;= 10.0s).
+      Your result and one lesson to try next appear here after the link closes.
     </div>
   </div>
 
@@ -186,7 +186,7 @@
   <div id="ReplayTimeline" class="outcome-line">DECISION REPLAY AVAILABLE AFTER DOWNLINK</div>
   <div style="flex-direction: row; gap: 6px; width: 100%;">
     <Button id="Btn_NextMission" class="action-btn" style="width: 48%;"><ButtonLabel style="color: #e2e8f0; font-size: 14px;">NEXT ORBITAL PASS</ButtonLabel></Button>
-    <Button id="Btn_DailyPass" class="action-btn" style="width: 48%;"><ButtonLabel style="color: #e2e8f0; font-size: 14px;">DAILY PASS</ButtonLabel></Button>
+    <Button id="Btn_DailyPass" class="action-btn" style="width: 48%; display: none;"><ButtonLabel style="color: #e2e8f0; font-size: 14px;">DAILY PASS</ButtonLabel></Button>
   </div>
   <Button id="Btn_ReplayDecision" class="action-btn"><ButtonLabel style="color: #e2e8f0; font-size: 14px;">REVIEW NEXT DECISION</ButtonLabel></Button>
 </Panel>

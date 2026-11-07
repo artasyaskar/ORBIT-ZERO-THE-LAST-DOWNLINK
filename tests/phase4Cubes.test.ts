@@ -94,7 +94,7 @@ describe('Phase 4: 3D Physical Drag-and-Drop Data Cubes & Holograms', () => {
       delete (globalThis as any).document;
     });
 
-    it('routes uncompressed cube to processing cradle on double click', () => {
+    it('double click only selects the cube (no hidden auto-route)', () => {
       const engine = new MissionEngine('STANDARD_INDUS_PASS');
       // Scan Sector B to spawn an uncompressed packet
       engine.scanSector('B');
@@ -156,7 +156,7 @@ describe('Phase 4: 3D Physical Drag-and-Drop Data Cubes & Holograms', () => {
 
       expect((manager as any).lastClickedCubePacketId).toBe(packet.id);
 
-      // Second click within 380ms -> triggers double click auto-route to cradle
+      // Second click within 380ms no longer auto-routes: every action must be visible and deliberate.
       (manager as any).dragCandidate = {
         cubeRoot: cubeObj,
         slotIndex: 0,
@@ -167,7 +167,8 @@ describe('Phase 4: 3D Physical Drag-and-Drop Data Cubes & Holograms', () => {
       (manager as any).isDragging = false;
       (manager as any).handlePointerUp({ clientX: 100, clientY: 100 } as PointerEvent);
 
-      expect(handleControlActionMock).toHaveBeenCalledWith('PROCESS');
+      expect(handleControlActionMock).not.toHaveBeenCalled();
+      expect(engine.getState().selectedPacketId).toBe(packet.id);
 
       manager.dispose();
     });
