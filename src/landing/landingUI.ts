@@ -104,19 +104,19 @@ function deriveCard(card: CampaignCardSpec): CampaignCardSpec {
   if (!s) return card;
   const requests = getScenarioRequests(card.scenarioId);
   const { successScore } = getScenarioThresholds(card.scenarioId);
-  const clock = s.passDurationSec ? ` pass clock` : 'no clock';
+  const clock = s.passDurationSec ? `${formatClock(s.passDurationSec)} pass clock` : 'no clock';
   const sensors = (s.availableSensors ?? ['RADAR', 'OPTICAL']).map((m) => SENSOR_PLAIN_GUIDE[m].label).join(' • ');
   return {
     ...card,
-    budgetLine: ` Wh battery •  memory blocks • s window •  • win at + pts`,
-    sensorsLine: card.startTutorial ? card.sensorsLine : `Sensors: `,
+    budgetLine: `${s.budget.initialPower} Wh battery • ${s.budget.maxStorage} memory blocks • ${s.budget.downlinkDurationSec.toFixed(1)}s window • ${clock} • win at ${successScore}+ pts`,
+    sensorsLine: card.startTutorial ? card.sensorsLine : `Sensors: ${sensors}`,
     briefing: s.storyLine ?? card.briefing,
     requestsSummary: card.startTutorial
       ? card.requestsSummary
       : GROUND_REQUEST_ORDER.map((id) => {
         const r = requests[id];
         const sector = getScenarioSector(card.scenarioId, r.targetSectorId);
-        return `Sector :  ( pts, )`;
+        return `Sector ${r.targetSectorId}: ${r.shortLabel.split('|')[1]?.trim() ?? r.title} (${requestValue(r)} pts, ${describeWeather(sector.cloudCover).toLowerCase()})`;
       }).join(' • '),
   };
 }
@@ -378,7 +378,9 @@ export class LandingUI {
     const metaFor: Record<string, string> = {};
     for (const card of CAMPAIGN_MENU_CARDS) {
       const s = MISSION_SCENARIOS[card.scenarioId];
-      metaFor[card.id] = card.startTutorial ? 'No clock • learn the 5 moves in 90s' : ` Wh • s window •  clock`;
+      metaFor[card.id] = card.startTutorial
+        ? 'No clock • learn the 5 moves in 90s'
+        : `${s.budget.initialPower} Wh • ${s.budget.downlinkDurationSec.toFixed(1)}s window • ${s.passDurationSec ? formatClock(s.passDurationSec) : 'no'} clock`;
     }
     this.rootEl.querySelectorAll<HTMLButtonElement>('.oz-op-card').forEach((btn) => {
       const id = btn.getAttribute('data-op-id') ?? '';
@@ -388,7 +390,7 @@ export class LandingUI {
     });
     const set = (sel: string, text: string) => { const el = this.rootEl.querySelector(sel); if (el) el.textContent = text; };
     set('#oz-briefing-opcode', this.selectedCard.opCode);
-    set('#oz-briefing-title', ` — `);
+    set('#oz-briefing-title', `${this.selectedCard.title} — ${this.selectedCard.region}`);
     set('#oz-briefing-budget', this.selectedCard.budgetLine);
     set('#oz-briefing-text', this.selectedCard.briefing);
     set('#oz-briefing-requests', this.selectedCard.requestsSummary);

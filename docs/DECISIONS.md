@@ -73,3 +73,18 @@ This document records major technical, gameplay, and tooling decisions for **ORB
 - **Evidence:** `core_concept` and NASA Earth-observation literature establish a clear, scientifically defensible dichotomy: Optical provides high visual clarity in clear skies but is blocked by clouds (`Unverified`), whereas SAR penetrates clouds to map surface water at a higher power cost (`14` vs `8`) but can exhibit geometric/reflection ambiguity (`Probable`) around complex metallic/valley structures.
 - **Decision:** Lock the MVP to **Optical** and **Radar (SAR-inspired)** modes, plus an **Onboard Processing Cradle** that compresses valid (`Confirmed`/`Probable`) observations without upgrading `Unverified` cloud-blocked scans.
 - **Consequences:** Keeps cognitive load clear for a 4–6 minute session while creating a genuine, scientifically grounded optimization puzzle.
+---
+## ADR-006: "Plan calmly, transmit live" gameplay redesign
+- **Date:** 2026-11-07
+- **Status:** Accepted (approved by project owner)
+- **Context:** A first-time desktop playtest found the game confusing and pointless. Root causes found in code: the HUD, ARIA-7, request text and briefing all printed the correct sensor; the recon phase had no clock and nothing could be lost before the debrief; the transmit climax needed no player action; the win rule was never shown; several key hints were wrong and the step-by-step guide never rendered.
+- **Decision:**
+  1. **Deduce, don't follow:** the UI shows sector weather and plain sensor capabilities, never the matching sensor. The answer is only available as a paid ARIA-7 hint (`SCORING.hintPenalty`, blocks Grade S).
+  2. **Orbital pass clock** (`passDurationSec` per scenario) starts at the first scan; at zero the window opens automatically, or the pass fails if nothing usable is on board. Relaxed mode (accessibility) removes it.
+  3. **Live downlink:** cubes can be docked while the window is open; a late cube starts no earlier than its dock time, so idle seconds are lost. The lever closes the link early.
+  4. **Weighted triage:** Fireline and Aftershock requests carry `priorityPoints` (sum 100). Aftershock's battery (42 Wh) cannot confirm all three requests; two strategies reach the win line.
+  5. **Explicit win/lose:** per-scenario `successScore` / `partialScore`, shown on the Mission Card before play and in the debrief. ABORT ends a stalled pass.
+  6. **One source of truth:** `SCORING`, `getScanCost`, `getScenarioThresholds` in `missionConfig.ts` feed engine, planner, debrief, desktop HUD, spatial panels and landing cards.
+  7. Player-facing campaign is Academy + Fireline + Monsoon + Aftershock; Supercell, Brownout and daily passes stay in code but are hidden.
+- **Supersedes:** ADR-005's "two sensor modes" (Thermal IR was already shipped in Fireline/Aftershock); sensors are now enforced per scenario via `availableSensors`.
+- **Consequences:** The puzzle now requires reading weather and choosing what to sacrifice. Balance is verified by `tests/passClockAndLiveDownlink.test.ts` and the planner tests. The pass-clock lengths and Aftershock budget still need human playtest tuning.

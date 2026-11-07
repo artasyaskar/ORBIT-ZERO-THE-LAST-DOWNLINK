@@ -1562,7 +1562,7 @@ export class DesktopControlsManager {
     this.toastEl.id = 'orbit-zero-hud-action';
     this.toastEl.style.cssText = `
       position: absolute;
-      top: 24px; left: 50%;
+      top: 168px; left: 50%;
       transform: translate(-50%, -10px);
       background: rgba(8, 14, 26, 0.88);
       backdrop-filter: blur(12px);

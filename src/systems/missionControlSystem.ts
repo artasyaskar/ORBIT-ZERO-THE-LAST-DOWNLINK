@@ -249,7 +249,8 @@ export class MissionControlSystem extends createSystem({
   private briefingPanel?: UIKitMLAsset;
   private telemetryPanel?: UIKitMLAsset;
   private debriefPanel?: UIKitMLAsset;
-  public spatialHudVisible = true;
+  /** World-space panels on a flat screen duplicate the DOM HUD at unreadable size; XR / IWER always show them. */
+  public spatialHudVisible = false;
 
   // Desktop Controls & First-Time Player Experience
   private desktopControls?: DesktopControlsManager;
@@ -317,7 +318,9 @@ export class MissionControlSystem extends createSystem({
         this.tutorial.start(Boolean(this.world.renderer?.xr?.isPresenting));
       }
     }
-    if (this.profile.preferences.relaxedClock) this.engine.setRelaxedMode(true);
+    if (this.profile.preferences.relaxedClock) {
+      this.engine.setRelaxedMode(true);
+    }
     const inputSystem = this.world.getSystem(InputSystem);
     if (inputSystem) inputSystem.config.maintainScenePointers.value = true;
     this.scene.traverse((object) => {
