@@ -30,7 +30,9 @@ describe('Mission oracle, schedule, replay and fairness', () => {
       expect(engine.getState().debrief!.totalScore).toBe(solution.score);
       expect(engine.getState().debrief!.efficiencyGrade).toBe(scenarioId === 'ORBITAL_ACADEMY' ? 'A' : 'S');
       expect(replayMission(scenarioId, engine.getJournal()).getStateHash()).toBe(engine.getStateHash());
-      expect(solution.score).toBe(scenarioId === 'MONSOON_SUPERCELL_PASS' ? 83 : 100);
+      // Supercell is a damage-limitation pass; Aftershock is a forced-triage pass (only two of three requests are affordable).
+      const ceilings: Partial<Record<MissionScenarioId, number>> = { MONSOON_SUPERCELL_PASS: 83, AFTERSHOCK_PASS: 70, DEFENSE_SHIELD_PASS: 100 };
+      expect(solution.score).toBe(ceilings[scenarioId] ?? 100);
       expect(solution.transmitSec).toBeLessThanOrEqual(MISSION_SCENARIOS[scenarioId].budget.downlinkDurationSec);
     });
   }

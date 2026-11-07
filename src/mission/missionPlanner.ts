@@ -1,10 +1,14 @@
 import {
   CONFIDENCE_BADGES,
+  getScanCost,
   getScenarioRequests,
   getScenarioSector,
   GROUND_REQUEST_ORDER,
   MAX_EVIDENCE_CUBES,
   MISSION_SCENARIOS,
+  requestPointsFor,
+  SCORING,
+  verificationBonus,
 } from './missionConfig';
 import type {
   DataPacket,
@@ -24,11 +28,13 @@ const customSolutionCache = new WeakMap<object, MissionSolution>();
 
 export function getQueueSchedule(state: MissionState): QueueScheduleEntry[] {
   let cursor = 0;
+  const live = state.phase === 'DOWNLINK' || state.phase === 'DEBRIEF';
   return state.queuePacketIds.flatMap((packetId, slotIndex) => {
     const packet = state.packets.find((p) => p.id === packetId);
     if (!packet) return [];
-    const startSec = cursor;
-    cursor = Number((cursor + packet.transmitSec).toFixed(6));
+    // During the live window a cube docked late cannot start before it was docked.
+    const startSec = live && typeof packet.txStartSec === 'number' ? Math.max(cursor, packet.txStartSec) : cursor;
+    cursor = Number((startSec + packet.transmitSec).toFixed(6));
     return [{
       packetId,
       slotIndex,
@@ -54,20 +60,21 @@ export function scoreEvidence(
     const rank = packets.reduce((best, packet) =>
       packet.satisfiesRequestId === id ? Math.max(best, confidenceRank[packet.confidence]) : best, 0);
     if (rank >= confidenceRank[request.minimumConfidence]) {
-      points += 30;
+      points += requestPointsFor(request, 'VERIFIED');
       verified++;
     } else if (rank > 0) {
-      points += 18;
+      points += requestPointsFor(request, 'PARTIAL');
       partial++;
     }
   }
-  return { score: points + (verified === 3 ? 10 : verified >= 2 ? 5 : 0), verified, partial };
+  return { score: points + verificationBonus(requests, verified, 0), verified, partial };
 }
 
 function better(candidate: MissionSolution, best: MissionSolution, downlinkWindowSec: number): boolean {
   if (candidate.score !== best.score) return candidate.score > best.score;
-  const candSafe = candidate.transmitSec <= downlinkWindowSec - 0.35 + 1e-6;
-  const bestSafe = best.transmitSec > 0 && best.transmitSec <= downlinkWindowSec - 0.35 + 1e-6;
+  const margin = SCORING.linkSafetyMarginSec;
+  const candSafe = candidate.transmitSec <= downlinkWindowSec - margin + 1e-6;
+  const bestSafe = best.transmitSec > 0 && best.transmitSec <= downlinkWindowSec - margin + 1e-6;
   if (candSafe !== bestSafe) return candSafe;
   return (
     candidate.powerUsed < best.powerUsed ||
@@ -157,12 +164,7 @@ export function solveMission(state: Pick<MissionState, 'scenarioId' | 'power' | 
       const sector = getScenarioSector(state.scenarioId, request.targetSectorId, customScenario);
       for (const sensorMode of availableSensors) {
         const outcome = sector.outcomes[sensorMode] ?? sector.outcomes.OPTICAL;
-        const cost =
-          sensorMode === 'RADAR'
-            ? budget.radarScan
-            : sensorMode === 'THERMAL'
-              ? (budget.thermalScan ?? { powerCost: 11, storageCost: 3, transmitSec: 4.2 })
-              : budget.opticalScan;
+        const cost = getScanCost(budget, sensorMode);
         if (outcome.satisfiesRequestId !== requestId || outcome.confidence === 'UNVERIFIED' ||
           power < cost.powerCost || storage + cost.storageCost > state.maxStorage ||
           packets.some((p) => p.satisfiesRequestId === requestId &&

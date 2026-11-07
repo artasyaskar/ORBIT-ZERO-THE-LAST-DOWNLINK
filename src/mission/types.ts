@@ -72,7 +72,15 @@ export interface GroundRequest {
   minimumConfidence: 'CONFIRMED' | 'PROBABLE';
   requiredBadge: string;
   targetSectorId: SectorId;
+  /** Designer reference only. Never shown to players: they must deduce the sensor from the weather. */
   recommendedSensor: SensorMode;
+  /**
+   * Triage value of this request when VERIFIED (PARTIAL earns 60%). When every request in a
+   * scenario defines it, the values sum to 100 and the all-verified bonus is disabled.
+   */
+  priorityPoints?: number;
+  /** Plain-language stake shown on the Mission Card (e.g. "1,200 evacuees on the canyon road"). */
+  stakeLabel?: string;
   consequenceOnSuccess: string;
   consequenceOnPartial: string;
   consequenceOnFailure: string;
@@ -135,6 +143,10 @@ export interface DataPacket {
   transmitted: boolean;
   droppedByWindow: boolean;
   createdAtStep: number;
+  /** Downlink-window second at which this packet was docked (0 = staged before the window opened). */
+  txDockSec?: number | null;
+  /** Scheduled transmission start inside the live window. */
+  txStartSec?: number | null;
 }
 
 export interface ResourceBudgetConfig {
@@ -183,7 +195,8 @@ export type ActionResultCode =
   | 'CANNOT_PROCESS_UNVERIFIED'
   | 'QUEUE_FULL'
   | 'NOT_QUEUED'
-  | 'EMPTY_QUEUE';
+  | 'EMPTY_QUEUE'
+  | 'ALREADY_TRANSMITTING';
 
 export interface ActionResult {
   ok: boolean;
@@ -219,7 +232,9 @@ export type FailureReasonCode =
   | 'WRONG_SENSOR_FOR_WEATHER'
   | 'WINDOW_CUTOFF_DROPPED_PACKETS'
   | 'UNPROCESSED_STORAGE_BOTTLENECK'
-  | 'INSUFFICIENT_VERIFIED_EVIDENCE';
+  | 'INSUFFICIENT_VERIFIED_EVIDENCE'
+  | 'PASS_CLOCK_EXPIRED'
+  | 'MISSION_ABORTED';
 
 export type MissionCertification = 'GOLD' | 'SILVER' | 'BRONZE' | 'NONE';
 
@@ -243,6 +258,17 @@ export interface MissionScenarioConfig {
   performsChangeDetection?: boolean;
   requests?: Record<GroundRequestId, GroundRequest>;
   sectorOverrides?: Partial<Record<SectorId, SectorOverrideConfig>>;
+  /**
+   * Orbital pass clock in seconds. Starts at the first scan; when it reaches zero the ground-station
+   * window opens automatically with whatever is staged. Undefined = untimed (training).
+   */
+  passDurationSec?: number;
+  /** Minimum score for MISSION SUCCESS (default 75). */
+  successScore?: number;
+  /** Minimum score for PARTIAL SUCCESS (default 50). */
+  partialScore?: number;
+  /** Two-line player-facing story for the Mission Card (no sensor answers). */
+  storyLine?: string;
 }
 
 export interface EvidenceProvenanceRecord {
@@ -299,6 +325,11 @@ export interface DebriefReport {
   windowMarginSec: number;
   benchmarkPowerUsed: number;
   benchmarkDownlinkSec: number;
+  /** Score thresholds used for this pass (shown to the player before and after). */
+  successScore?: number;
+  partialScore?: number;
+  hintsUsed?: number;
+  hintPenalty?: number;
 }
 
 export interface MissionState {
@@ -323,6 +354,16 @@ export interface MissionState {
   lastActionOk: boolean;
   stepCounter: number;
   debrief: DebriefReport | null;
+  /** Total orbital pass seconds, or null when the pass is untimed. */
+  passDurationSec: number | null;
+  /** Seconds left before the window opens automatically, or null when untimed. */
+  passRemainingSec: number | null;
+  /** The pass clock starts with the first scan. */
+  passStarted: boolean;
+  /** ARIA-7 hints requested this pass (each costs points). */
+  hintsUsed: number;
+  /** How the pass ended: by player commit, by the pass clock, or by abort. */
+  endReason: 'NONE' | 'COMMITTED' | 'CLOCK_EXPIRED' | 'ABORTED';
 }
 
 export type MissionAction =
@@ -334,6 +375,7 @@ export type MissionAction =
   | { type: 'QUEUE'; packetId: string | null; slotIndex?: number }
   | { type: 'REORDER'; packetIds: string[] }
   | { type: 'COMMIT' | 'PAUSE' | 'RESUME' }
+  | { type: 'CLOSE_LINK' | 'ABORT' | 'USE_HINT' }
   | { type: 'TICK'; seconds: number };
 
 export interface MissionJournalEntry {

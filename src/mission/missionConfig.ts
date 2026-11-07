@@ -439,7 +439,8 @@ export const GROUND_REQUESTS: Record<GroundRequestId, GroundRequest> = {
     shortLabel: 'REQ 1 | ROAD INUNDATION',
     title: 'Assess Highway Surface Inundation',
     question: 'Which primary transport corridor shows specular floodwater encroachment?',
-    targetDescription: 'Sector B (East Levee Highway) - Cloud-obscured; requires active microwave SAR for [OK] CONFIRMED.',
+    targetDescription: 'Sector B (East Levee Highway) - under a dense monsoon storm deck. Needs CONFIRMED evidence.',
+    stakeLabel: 'Relief convoy of 40 trucks heading for this road',
     minimumConfidence: 'CONFIRMED',
     requiredBadge: '[OK] CONFIRMED',
     targetSectorId: 'B',
@@ -456,7 +457,8 @@ export const GROUND_REQUESTS: Record<GroundRequestId, GroundRequest> = {
     shortLabel: 'REQ 2 | CROSSING APPROACH',
     title: 'Assess River Crossing Approach Clearance',
     question: 'Does the Sector C crossing approach show clear, unflooded roadway access?',
-    targetDescription: 'Sector C (Steel Truss Crossing) - Clear sky slot; requires high-res OPTICAL for [OK] CONFIRMED.',
+    targetDescription: 'Sector C (Steel Truss Crossing) - clear sky over a metal bridge. Needs CONFIRMED evidence.',
+    stakeLabel: 'Medical units waiting to cross the river',
     minimumConfidence: 'CONFIRMED',
     requiredBadge: '[OK] CONFIRMED',
     targetSectorId: 'C',
@@ -473,7 +475,8 @@ export const GROUND_REQUESTS: Record<GroundRequestId, GroundRequest> = {
     shortLabel: 'REQ 3 | SHELTER SPUR',
     title: 'Evaluate Highland Evacuation Spur Floodline',
     question: 'Does the cloud-locked highland evacuation spur show terrain elevated above the standing water boundary?',
-    targetDescription: 'Sector E (Shelter Ridge Spur) - Cloud-obscured; requires active microwave SAR for [?] PROBABLE.',
+    targetDescription: 'Sector E (Shelter Ridge Spur) - steep ridge under storm clouds. PROBABLE evidence is enough.',
+    stakeLabel: 'Evacuees walking to the hill shelter',
     minimumConfidence: 'PROBABLE',
     requiredBadge: '[?] PROBABLE',
     targetSectorId: 'E',
@@ -495,7 +498,9 @@ export const FIRELINE_REQUESTS: Record<GroundRequestId, GroundRequest> = {
     shortLabel: 'REQ 1 | CANYON FIRELINE',
     title: 'Locate Active Crown-Fire Front Along Canyon Highway',
     question: 'Where has the active 860 K wildfire front encroached on the Sector B evacuation highway?',
-    targetDescription: 'Sector B (Bolan Canyon Highway) - Smoke-obscured; requires Mid-Wave THERMAL IR for [OK] CONFIRMED.',
+    targetDescription: 'Sector B (Bolan Canyon Highway) - buried under thick wildfire smoke. Needs CONFIRMED evidence.',
+    priorityPoints: 40,
+    stakeLabel: '1,200 evacuees driving through the canyon',
     minimumConfidence: 'CONFIRMED',
     requiredBadge: '[OK] CONFIRMED',
     targetSectorId: 'B',
@@ -512,7 +517,9 @@ export const FIRELINE_REQUESTS: Record<GroundRequestId, GroundRequest> = {
     shortLabel: 'REQ 2 | VIADUCT FIREBREAK',
     title: 'Verify Upwind Viaduct Deck & Firebreak Clearance',
     question: 'Does the clear-sky Sector C viaduct show unobstructed roadway and cleared firebreak buffer?',
-    targetDescription: 'Sector C (Bolan Viaduct) - Clear upwind slot; requires high-res 0.75m OPTICAL for [OK] CONFIRMED.',
+    targetDescription: 'Sector C (Bolan Viaduct) - clear upwind sky over a narrow bridge deck. Needs CONFIRMED evidence.',
+    priorityPoints: 25,
+    stakeLabel: 'Water tankers need the viaduct open',
     minimumConfidence: 'CONFIRMED',
     requiredBadge: '[OK] CONFIRMED',
     targetSectorId: 'C',
@@ -529,7 +536,9 @@ export const FIRELINE_REQUESTS: Record<GroundRequestId, GroundRequest> = {
     shortLabel: 'REQ 3 | RIDGE DEPOT',
     title: 'Assess Smoke-Locked Juniper Ridge Fuel Depot Perimeter',
     question: 'Has the wind-driven spot-fire perimeter reached the Sector E highland fuel and medical depot?',
-    targetDescription: 'Sector E (Juniper Ridge Depot) - Dense smoke plume; requires THERMAL IR for [OK] CONFIRMED.',
+    targetDescription: 'Sector E (Juniper Ridge Depot) - dense smoke plume over a fuel depot. Needs CONFIRMED evidence.',
+    priorityPoints: 35,
+    stakeLabel: 'Fuel and medical depot with 60 staff',
     minimumConfidence: 'CONFIRMED',
     requiredBadge: '[OK] CONFIRMED',
     targetSectorId: 'E',
@@ -549,7 +558,9 @@ export const AFTERSHOCK_REQUESTS: Record<GroundRequestId, GroundRequest> = {
     shortLabel: 'REQ 1 | LANDSLIDE DAM',
     title: 'Map Seismic Landslide Scarp & Valley Impoundment',
     question: 'Has post-earthquake slope failure blocked the Sector B valley spillway channel?',
-    targetDescription: 'Sector B (Hanna Valley Gorge) - Dust-obscured; requires active SAR RADAR for [OK] CONFIRMED.',
+    targetDescription: 'Sector B (Hanna Valley Gorge) - hidden under a post-quake dust veil. Needs CONFIRMED evidence.',
+    priorityPoints: 40,
+    stakeLabel: 'Landslide dam above a village of 3,000',
     minimumConfidence: 'CONFIRMED',
     requiredBadge: '[OK] CONFIRMED',
     targetSectorId: 'B',
@@ -566,7 +577,9 @@ export const AFTERSHOCK_REQUESTS: Record<GroundRequestId, GroundRequest> = {
     shortLabel: 'REQ 2 | HOSPITAL VIADUCT',
     title: 'Inspect Clear-Sky Hospital Viaduct Span Alignment',
     question: 'Are the Sector C hospital access viaduct expansion joints aligned without visible span offset?',
-    targetDescription: 'Sector C (Quetta Medical Viaduct) - Clear sky slot; requires 0.75m OPTICAL for [OK] CONFIRMED.',
+    targetDescription: 'Sector C (Quetta Medical Viaduct) - clear sky over a concrete bridge. Needs CONFIRMED evidence.',
+    priorityPoints: 30,
+    stakeLabel: 'Only road to the regional hospital',
     minimumConfidence: 'CONFIRMED',
     requiredBadge: '[OK] CONFIRMED',
     targetSectorId: 'C',
@@ -583,7 +596,9 @@ export const AFTERSHOCK_REQUESTS: Record<GroundRequestId, GroundRequest> = {
     shortLabel: 'REQ 3 | FAULT SUBSTATION',
     title: 'Detect Substation Thermal Rupture & Fault Offset',
     question: 'Does the dust-shrouded Sector E fault corridor show active transformer overheating or liquefaction?',
-    targetDescription: 'Sector E (Chaman Fault Substation) - Dust haze; requires THERMAL IR or Cradle Change-Detection SAR.',
+    targetDescription: 'Sector E (Chaman Fault Substation) - dust haze over an overheating transformer yard. Needs CONFIRMED evidence.',
+    priorityPoints: 30,
+    stakeLabel: 'Power for the city water pumps',
     minimumConfidence: 'CONFIRMED',
     requiredBadge: '[OK] CONFIRMED',
     targetSectorId: 'E',
@@ -603,10 +618,14 @@ export const MISSION_SCENARIOS: Record<MissionScenarioId, MissionScenarioConfig>
     operationCode: 'OP 02: MONSOON SHIELD',
     name: 'Monsoon Shield',
     subtitle: 'Indus Basin Flood Triage — SAR Cloud Penetration vs. Optical Resolution [SIMULATED]',
-    briefing: '[SIMULATED SCENARIO TELEMETRY] Optimal pass window: 55 Wh Power, 9 STR Buffer, 10.0s Downlink (10.0 MB/s). Sectors B & E under monsoon storm clouds; Sector C in clear slot.',
+    briefing: '[SIMULATED SCENARIO] A monsoon levee breach is flooding the Indus basin. Two targets sit under storm clouds; the river bridge is in a clear gap. Three raw scans will not fit the downlink window.',
+    storyLine: 'Levees have failed across the Indus basin. Ground teams need three answers before the satellite drops below the horizon.',
     budget: MISSION_BUDGET,
     availableSensors: ['RADAR', 'OPTICAL'],
     requests: GROUND_REQUESTS,
+    passDurationSec: 150,
+    successScore: 75,
+    partialScore: 50,
   },
   MONSOON_SUPERCELL_PASS: {
     id: 'MONSOON_SUPERCELL_PASS',
@@ -688,6 +707,7 @@ export const MISSION_SCENARIOS: Record<MissionScenarioId, MissionScenarioConfig>
     subtitle: 'Guided 9-Step Hand Gesture & Satellite Triage Training Pass [SIMULATED]',
     briefing:
       '[SIMULATED TRAINING TELEMETRY] Complete the 9-step Orbital Academy qualification pass: target Sector B, arm Thermal IR (3.9 um), fire scan, grab and inspect the 3D Data Cube, compress in the Amber Processing Cradle (3 STR -> 1 STR), dock into Downlink Bay Slot #1, and commit transmission.',
+    storyLine: 'Training pass, no clock. Learn the five moves: aim, scan, inspect, compress, transmit. Smoke over Sector B hides a fire front.',
     budget: {
       ...MISSION_BUDGET,
       initialPower: 52,
@@ -702,7 +722,8 @@ export const MISSION_SCENARIOS: Record<MissionScenarioId, MissionScenarioConfig>
     operationCode: 'OP 01: FIRELINE',
     name: 'Fireline Pass',
     subtitle: 'Bolan Fireline Emergency Zone — Thermal IR Smoke Penetration & Optical Triage [SIMULATED]',
-    briefing: '[SIMULATED SCENARIO TELEMETRY] Campaign Op 01 (Bolan Fireline Emergency Zone): 52 Wh Power, 9 STR Buffer (18 MB/STR), 10.0s Downlink. Heavy biomass smoke obscures Sector B (Bolan Canyon Highway) & Sector E (Juniper Ridge Fuel Depot) where passive Optical fails; use Mid-Wave Thermal IR (11 Wh) to pinpoint 860 K active flame fronts, and use 0.75m GSD Optical (8 Wh) on clear-sky Sector C (Bolan Viaduct & Firebreak). Pre-scan clue: a thermal anomaly is reported in Sector D (Sibi Basalt & Kiln Flats), where industrial surface heating is a possible alternative explanation to active vegetation combustion.',
+    briefing: '[SIMULATED SCENARIO] A wildfire is racing through the Bolan canyon. Thick smoke covers the highway and the ridge depot; the viaduct sits in clear upwind air. A heat report from Sector D may be a false alarm.',
+    storyLine: 'A wildfire is racing through the Bolan canyon. Evacuees, a fuel depot and a water route all need answers. Save the most important ones first.',
     budget: {
       ...MISSION_BUDGET,
       initialPower: 52,
@@ -711,6 +732,9 @@ export const MISSION_SCENARIOS: Record<MissionScenarioId, MissionScenarioConfig>
     },
     availableSensors: ['RADAR', 'OPTICAL', 'THERMAL'],
     requests: FIRELINE_REQUESTS,
+    passDurationSec: 150,
+    successScore: 75,
+    partialScore: 40,
     sectorOverrides: {
       A: {
         name: 'Ziarat Upper Watershed',
@@ -1013,16 +1037,20 @@ export const MISSION_SCENARIOS: Record<MissionScenarioId, MissionScenarioConfig>
     operationCode: 'OP 03: AFTERSHOCK',
     name: 'Aftershock Pass',
     subtitle: 'Quetta Fault Seismic Crisis — Multi-Sensor Change Detection & 6-STR Buffer [SIMULATED]',
-    briefing: '[SIMULATED SCENARIO TELEMETRY] Campaign Op 03: 50 Wh Power, tight 6 STR Partition, 9.0s Downlink. Suspended seismic dust obscures Sectors B & E. Use SAR Radar on Sector B (landslide dam), Optical on clear-sky Sector C (hospital viaduct), and Thermal IR or Cradle Change-Detection on Sector E (fault substation) while compressing mid-pass to stay within 6 STR.',
+    briefing: '[SIMULATED SCENARIO] An earthquake struck the Quetta fault. A solar storm damaged the battery and memory: there is not enough power to confirm all three requests. Choose which two matter most.',
+    storyLine: 'An earthquake hit the Quetta fault and a solar storm crippled your battery. You cannot answer all three requests. Decide who gets the evidence.',
     budget: {
       ...MISSION_BUDGET,
-      initialPower: 50,
+      initialPower: 42,
       maxStorage: 6,
       downlinkDurationSec: 9.0,
     },
     availableSensors: ['RADAR', 'OPTICAL', 'THERMAL'],
     performsChangeDetection: true,
     requests: AFTERSHOCK_REQUESTS,
+    passDurationSec: 140,
+    successScore: 65,
+    partialScore: 30,
     sectorOverrides: {
       B: {
         name: 'Hanna Valley Gorge',
@@ -1177,15 +1205,99 @@ export const MISSION_SCENARIOS: Record<MissionScenarioId, MissionScenarioConfig>
 MISSION_SCENARIOS.ORBITAL_ACADEMY.sectorOverrides = MISSION_SCENARIOS.FIRELINE_PASS.sectorOverrides;
 MISSION_SCENARIOS.DEFENSE_SHIELD_PASS.sectorOverrides = MISSION_SCENARIOS.AFTERSHOCK_PASS.sectorOverrides;
 
+/** The single player-facing campaign order (landing, campaign menu, NEXT PASS). */
 export const CAMPAIGN_OPERATIONS: readonly MissionScenarioId[] = [
   'FIRELINE_PASS',
   'STANDARD_INDUS_PASS',
   'AFTERSHOCK_PASS',
-  'MONSOON_SUPERCELL_PASS',
-  'SOLAR_BROWNOUT_PASS',
 ] as const;
 
 export const MAX_EVIDENCE_CUBES = 3;
+
+/**
+ * Scoring rules: single source of truth for the engine, planner, debrief and every UI surface.
+ */
+export const SCORING = {
+  /** Points for a VERIFIED request when the scenario does not weight its requests. */
+  defaultRequestPoints: 30,
+  /** Share of a request's value earned by PARTIAL (probable-but-not-enough) evidence. */
+  partialShare: 0.6,
+  /** Unweighted scenarios only. */
+  allVerifiedBonus: 10,
+  twoVerifiedBonus: 5,
+  defaultSuccessScore: 75,
+  defaultPartialScore: 50,
+  /** Points deducted per ARIA-7 hint. */
+  hintPenalty: 5,
+  /** Grade S needs this much spare link time (seconds). */
+  linkSafetyMarginSec: 0.35,
+  gradeSFloorSec: 7.8,
+} as const;
+
+export function isWeightedScenario(requests: Record<GroundRequestId, GroundRequest>): boolean {
+  return Object.values(requests).every((r) => typeof r.priorityPoints === 'number');
+}
+
+/** Points a request is worth when VERIFIED. */
+export function requestValue(request: GroundRequest): number {
+  return request.priorityPoints ?? SCORING.defaultRequestPoints;
+}
+
+/** Points earned by a request for a given evaluation status. */
+export function requestPointsFor(request: GroundRequest, status: 'VERIFIED' | 'PARTIAL' | 'UNVERIFIED'): number {
+  const value = requestValue(request);
+  return status === 'VERIFIED' ? value : status === 'PARTIAL' ? Math.round(value * SCORING.partialShare) : 0;
+}
+
+/** Bonus for verifying several requests (unweighted scenarios only). */
+export function verificationBonus(
+  requests: Record<GroundRequestId, GroundRequest>,
+  verifiedCount: number,
+  droppedCount: number,
+): number {
+  if (droppedCount > 0 || isWeightedScenario(requests)) return 0;
+  return verifiedCount === 3 ? SCORING.allVerifiedBonus : verifiedCount >= 2 ? SCORING.twoVerifiedBonus : 0;
+}
+
+export function getScenarioThresholds(
+  scenarioId: MissionScenarioId,
+  customScenario?: MissionScenarioConfig | null,
+): { successScore: number; partialScore: number } {
+  const scenario = customScenario ?? MISSION_SCENARIOS[scenarioId];
+  return {
+    successScore: scenario?.successScore ?? SCORING.defaultSuccessScore,
+    partialScore: scenario?.partialScore ?? SCORING.defaultPartialScore,
+  };
+}
+
+export function getScanCost(budget: ResourceBudgetConfig, mode: SensorMode) {
+  return mode === 'OPTICAL'
+    ? budget.opticalScan
+    : mode === 'THERMAL'
+      ? (budget.thermalScan ?? MISSION_BUDGET.thermalScan!)
+      : budget.radarScan;
+}
+
+/** Plain-language description of what each sensor can and cannot see (shown on sensor chips). */
+export const SENSOR_PLAIN_GUIDE: Record<SensorMode, { label: string; sees: string; blind: string }> = {
+  OPTICAL: { label: 'OPTICAL CAMERA', sees: 'Sharpest detail in clear sky', blind: 'Blind in clouds, smoke and dust' },
+  THERMAL: { label: 'THERMAL IR', sees: 'Sees heat through smoke', blind: 'Blocked by thick cloud and dust; coarse detail' },
+  RADAR: { label: 'RADAR (SAR)', sees: 'Sees through cloud and dust', blind: 'Blurry on metal bridges and steep slopes; no heat' },
+};
+
+/** Plain-language weather label shown for each sector (the clue, never the answer). */
+export function describeWeather(cloudCover: SectorConfig['cloudCover']): string {
+  switch (cloudCover) {
+    case 'CLEAR': return 'Clear sky';
+    case 'DENSE_STORM': return 'Dense storm clouds';
+    case 'CONVECTIVE_CLOUD': return 'Thick cloud deck';
+    case 'THIN_SMOKE': return 'Thin smoke haze';
+    case 'MODERATE_SMOKE': return 'Wildfire smoke';
+    case 'DENSE_SMOKE': return 'Thick wildfire smoke';
+    case 'SEISMIC_DUST': return 'Earthquake dust veil';
+    default: return 'Unknown';
+  }
+}
 
 export function getScenarioSector(
   scenarioId: MissionScenarioId,

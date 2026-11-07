@@ -9,6 +9,7 @@ import {
   computeTransmissionSeconds,
   CONFIDENCE_BADGES,
   DOWNLINK_THROUGHPUT_MBPS,
+  getScanCost,
   getScenarioSector,
   MAX_EVIDENCE_CUBES,
   MISSION_SCENARIOS,
@@ -45,6 +46,8 @@ export class MissionEngine {
   private journal: MissionJournalEntry[] = [];
   private activeCustomScenario?: ReturnType<typeof generateProceduralCrisis>['config'];
   private activeThreat?: ThreatVector;
+  /** Accessibility "relaxed" mode: disables the orbital pass clock. */
+  private relaxedMode = false;
 
   constructor(initialScenarioId: MissionScenarioId = 'STANDARD_INDUS_PASS') {
     this.currentScenarioId = initialScenarioId;
@@ -81,7 +84,13 @@ export class MissionEngine {
     this.journal = [];
     const scenario = this.getActiveScenario();
     const budget = scenario.budget;
+    const passDurationSec = this.relaxedMode ? null : (scenario.passDurationSec ?? null);
     return {
+      passDurationSec,
+      passRemainingSec: passDurationSec,
+      passStarted: false,
+      hintsUsed: 0,
+      endReason: 'NONE',
       scenarioId: this.currentScenarioId,
       phase: 'OPERATIONS',
       paused: false,
@@ -99,8 +108,9 @@ export class MissionEngine {
       activeDownlinkPacketId: null,
       packets: [],
       queuePacketIds: [],
-      lastStatusMessage:
-        `PASS ACTIVE (${scenario.name}): 1) Select Sector | 2) Choose Sensor & Scan | 3) Process & Queue before ${budget.downlinkDurationSec.toFixed(1)}s Downlink.`,
+      lastStatusMessage: passDurationSec
+        ? `PASS READY (${scenario.name}): pick a target sector. The ${passDurationSec}s orbital pass clock starts at your first scan.`
+        : `PASS READY (${scenario.name}): pick a target sector, choose a sensor, scan, then load the Downlink Bay.`,
       lastActionOk: true,
       stepCounter: 0,
       debrief: null,
@@ -135,11 +145,7 @@ export class MissionEngine {
   }
 
   public cycleCampaignOperation(): MissionState {
-    const campaignKeys: MissionScenarioId[] = [
-      'FIRELINE_PASS',
-      'STANDARD_INDUS_PASS',
-      'AFTERSHOCK_PASS',
-    ];
+    const campaignKeys = CAMPAIGN_OPERATIONS;
     const curIdx = campaignKeys.indexOf(this.currentScenarioId);
     const nextScenario =
       curIdx === -1 ? campaignKeys[0] : campaignKeys[(curIdx + 1) % campaignKeys.length];
@@ -166,6 +172,21 @@ export class MissionEngine {
   public reset(): MissionState {
     this.state = this.createInitialState();
     return this.getState();
+  }
+
+  /** Relaxed mode removes the orbital pass clock (accessibility). Applies immediately. */
+  public setRelaxedMode(enabled: boolean): MissionState {
+    this.relaxedMode = enabled;
+    if (this.state.phase === 'OPERATIONS') {
+      const duration = enabled ? null : (this.getActiveScenario().passDurationSec ?? null);
+      this.state.passDurationSec = duration;
+      this.state.passRemainingSec = duration === null ? null : (this.state.passStarted ? Math.min(duration, this.state.passRemainingSec ?? duration) : duration);
+    }
+    return this.getState();
+  }
+
+  public isRelaxedMode(): boolean {
+    return this.relaxedMode;
   }
 
   public selectSector(sectorId: SectorId): MissionState {
@@ -209,19 +230,16 @@ export class MissionEngine {
     this.state.activeSensorMode = mode;
     this.state.stepCounter += 1;
     const budget = this.getActiveScenario().budget;
-    const cost =
-      mode === 'OPTICAL'
-        ? budget.opticalScan
-        : mode === 'THERMAL'
-          ? (budget.thermalScan ?? { powerCost: 11, storageCost: 3, payloadMb: 42.0, transmitSec: 4.2 })
-          : budget.radarScan;
-    const mb = cost.payloadMb ?? Number((cost.transmitSec * DOWNLINK_THROUGHPUT_MBPS).toFixed(1));
+    const cost = getScanCost(budget, mode);
+    const throughput = budget.downlinkThroughputMbps ?? DOWNLINK_THROUGHPUT_MBPS;
+    const mb = cost.payloadMb ?? Number((cost.transmitSec * throughput).toFixed(1));
+    const spec = `${cost.powerCost} Wh, ${cost.storageCost} STR, ${mb} MB / ${cost.transmitSec.toFixed(1)}s Tx @ ${throughput} MB/s`;
     this.state.lastStatusMessage =
       mode === 'OPTICAL'
-        ? `Sensor switched to OPTICAL (${cost.powerCost} Wh, ${cost.storageCost} STR, ${mb} MB / ${cost.transmitSec.toFixed(1)}s Tx @ 10 MB/s) - High detail in clear skies; blocked by dense clouds and smoke.`
+        ? `Sensor switched to OPTICAL (${spec}) - High detail in clear skies; blocked by dense clouds and smoke.`
         : mode === 'THERMAL'
-          ? `Sensor switched to THERMAL IR (${cost.powerCost} Wh, ${cost.storageCost} STR, ${mb} MB / ${cost.transmitSec.toFixed(1)}s Tx @ 10 MB/s) - Penetrates thin smoke to detect heat anomalies; blocked by thick clouds; coarse 20m resolution.`
-          : `Sensor switched to RADAR / SAR (${cost.powerCost} Wh, ${cost.storageCost} STR, ${mb} MB / ${cost.transmitSec.toFixed(1)}s Tx @ 10 MB/s) - Penetrates clouds; subject to specular dark water vs double-bounce vegetation/metal glare.`;
+          ? `Sensor switched to THERMAL IR (${spec}) - Penetrates thin smoke to detect heat anomalies; blocked by thick clouds; coarse 20m resolution.`
+          : `Sensor switched to RADAR / SAR (${spec}) - Penetrates clouds; subject to specular dark water vs double-bounce vegetation/metal glare.`;
     this.state.lastActionOk = true;
     return this.getState();
   }
@@ -237,8 +255,9 @@ export class MissionEngine {
   }
 
   public selectPacket(packetId: string | null): MissionState {
-    if (this.state.phase === 'DOWNLINK' || this.state.paused) {
-      this.fail('INVALID_PHASE', 'Evidence is locked during downlink or pause.');
+    // Selection stays available during the live downlink so late cubes can still be docked.
+    if (this.state.phase === 'DEBRIEF' || this.state.paused) {
+      this.fail('INVALID_PHASE', 'Evidence is locked after the pass or while paused.');
       return this.getState();
     }
     if (packetId === null) {
@@ -283,18 +302,20 @@ export class MissionEngine {
       );
     }
 
+    const scenario = this.getActiveScenario();
+    const available = scenario.availableSensors ?? ['RADAR', 'OPTICAL'];
+    if (!available.includes(sensorMode)) {
+      return this.fail(
+        'INVALID_SENSOR',
+        `${sensorMode} is not fitted on this satellite pass. Available: ${available.join(', ')}.`,
+      );
+    }
+
     this.state.selectedSectorId = sectorId;
     this.state.activeSensorMode = sensorMode;
 
-    const scenario = this.getActiveScenario();
     const budget = scenario.budget;
-
-    const scanCost =
-      sensorMode === 'OPTICAL'
-        ? budget.opticalScan
-        : sensorMode === 'THERMAL'
-          ? (budget.thermalScan ?? { powerCost: 11, storageCost: 3, payloadMb: 42.0, transmitSec: 4.2 })
-          : budget.radarScan;
+    const scanCost = getScanCost(budget, sensorMode);
 
     if (this.state.power < scanCost.powerCost) {
       return this.fail(
@@ -418,6 +439,8 @@ export class MissionEngine {
 
     this.state.packets.push(packet);
     this.state.selectedPacketId = packet.id;
+    // The orbital pass clock starts with the first scan: planning before it is free.
+    this.state.passStarted = true;
 
     const msg = `Scanned ${sector.code} (${sensorMode}): ${outcome.confidenceBadge} - ${outcome.headline} (-${scanCost.powerCost} Wh, +${scanCost.storageCost} STR, ${payloadMb} MB / ${computedTxSec.toFixed(1)}s Tx).`;
     this.state.lastStatusMessage = msg;
@@ -459,7 +482,7 @@ export class MissionEngine {
     if (pkt.confidence === 'UNVERIFIED') {
       return this.fail(
         'CANNOT_PROCESS_UNVERIFIED',
-        `Processing rejected for ${pkt.id}: Onboard feature extraction cannot fabricate missing ground data from an [X] UNVERIFIED cloud-blocked frame. Discard this cube to free 3 STR.`,
+        `Processing rejected for ${pkt.id}: Onboard feature extraction cannot fabricate missing ground data from an [X] UNVERIFIED blocked frame. Discard this cube to free ${pkt.storageCost} STR.`,
       );
     }
 
@@ -475,13 +498,15 @@ export class MissionEngine {
     const storageDelta = pkt.storageCost - procCost.compressedStorageCost;
     this.state.power -= procCost.powerCost;
     this.state.storageUsed = Math.max(0, this.state.storageUsed - storageDelta);
-    const compressedPayloadMb = procCost.compressedPayloadMb ?? 18.0;
     const throughputMbps = pkt.throughputMbps ?? scenario.budget.downlinkThroughputMbps ?? DOWNLINK_THROUGHPUT_MBPS;
     const protocolOverheadSec = pkt.protocolOverheadSec ?? scenario.budget.protocolOverheadSec ?? PROTOCOL_OVERHEAD_SEC;
+    const compressedPayloadMb = procCost.compressedPayloadMb ?? Number((procCost.compressedTransmitSec * throughputMbps).toFixed(1));
+    const rawStorage = pkt.storageCost;
+    const rawPayload = pkt.payloadMb ?? pkt.rawPayloadMb ?? Number((pkt.rawTransmitSec * throughputMbps).toFixed(1));
     pkt.storageCost = procCost.compressedStorageCost;
     pkt.payloadMb = compressedPayloadMb;
     pkt.transmitSec = computeTransmissionSeconds(compressedPayloadMb, throughputMbps, protocolOverheadSec);
-    pkt.compressionRatio = 3.0;
+    pkt.compressionRatio = Number((rawPayload / compressedPayloadMb).toFixed(2));
     pkt.processed = true;
     pkt.processingState = 'PROCESSED';
     const upgradedByChangeDetection = Boolean(
@@ -518,14 +543,14 @@ export class MissionEngine {
       timestampSec: this.state.downlinkElapsedSec,
       step: this.state.stepCounter,
       operation: pkt.compressionAlgorithm,
-      details: `Compressed 3 STR -> 1 STR (${(pkt.rawPayloadMb ?? 45).toFixed(0)} MB -> ${compressedPayloadMb.toFixed(0)} MB), ${pkt.rawTransmitSec.toFixed(1)}s -> ${pkt.transmitSec.toFixed(1)}s Tx @ ${throughputMbps.toFixed(1)} MB/s`,
+      details: `Compressed ${rawStorage} STR -> ${pkt.storageCost} STR (${rawPayload.toFixed(0)} MB -> ${compressedPayloadMb.toFixed(0)} MB), ${pkt.rawTransmitSec.toFixed(1)}s -> ${pkt.transmitSec.toFixed(1)}s Tx @ ${throughputMbps.toFixed(1)} MB/s`,
     });
     this.state.selectedPacketId = pkt.id;
     this.state.stepCounter += 1;
 
     this.recalculateQueueTiming();
 
-    const msg = `Processed ${pkt.id} (${pkt.sectorCode} ${pkt.sensorMode} [${pkt.compressionAlgorithm}]): compressed to 1 STR (${compressedPayloadMb.toFixed(0)} MB / 1.8s Tx @ 10 MB/s, -${procCost.powerCost} Wh, freed ${storageDelta} STR).`;
+    const msg = `Processed ${pkt.id} (${pkt.sectorCode} ${pkt.sensorMode} [${pkt.compressionAlgorithm}]): compressed to ${pkt.storageCost} STR (${compressedPayloadMb.toFixed(0)} MB / ${pkt.transmitSec.toFixed(1)}s Tx @ ${throughputMbps} MB/s, -${procCost.powerCost} Wh, freed ${storageDelta} STR).${upgradedByChangeDetection ? ' Change detection upgraded it to CONFIRMED.' : ''}`;
     this.state.lastStatusMessage = msg;
     this.state.lastActionOk = true;
 
@@ -576,8 +601,11 @@ export class MissionEngine {
     packetId: string | null = this.state.selectedPacketId,
     preferredSlotIndex?: number,
   ): ActionResult {
+    if (this.state.phase === 'DOWNLINK' && !this.state.paused) {
+      return this.dockLivePacket(packetId);
+    }
     if (this.state.phase !== 'OPERATIONS' || this.state.paused) {
-      return this.fail('INVALID_PHASE', 'Downlink queue is locked during transmission.');
+      return this.fail('INVALID_PHASE', 'Downlink queue is locked after the pass or while paused.');
     }
 
     const pkt = this.state.packets.find((p) => p.id === packetId);
@@ -656,11 +684,69 @@ export class MissionEngine {
     };
   }
 
+  /**
+   * Live docking: during the open ground-station window a cube can still be placed in the bay.
+   * It transmits after the packets already docked, starting no earlier than the moment it was docked,
+   * so every idle second is lost link time.
+   */
+  private dockLivePacket(packetId: string | null): ActionResult {
+    const pkt = this.state.packets.find((p) => p.id === packetId);
+    if (!pkt) {
+      return this.fail('PACKET_NOT_FOUND', 'Select a data cube to dock in the Downlink Bay.');
+    }
+    if (pkt.queued) {
+      this.state.selectedPacketId = pkt.id;
+      this.state.lastActionOk = true;
+      this.state.lastStatusMessage = `${pkt.id} is already docked in Slot #${(pkt.queueIndex ?? 0) + 1}.`;
+      return { ok: true, code: 'OK', message: this.state.lastStatusMessage, packet: { ...pkt } };
+    }
+    const maxSlots = Math.min(MAX_EVIDENCE_CUBES, this.getActiveScenario().budget.maxQueueSlots);
+    if (this.state.queuePacketIds.length >= maxSlots) {
+      return this.fail('QUEUE_FULL', `Downlink Bay full (${maxSlots} slots).`);
+    }
+    pkt.txDockSec = Number(this.state.downlinkElapsedSec.toFixed(3));
+    this.state.queuePacketIds.push(pkt.id);
+    this.state.selectedPacketId = pkt.id;
+    this.state.stepCounter += 1;
+    this.recalculateQueueTiming();
+    this.computeLiveSchedule();
+    pkt.transmissionState = 'QUEUED';
+    if (!pkt.provenanceChain) pkt.provenanceChain = [];
+    pkt.provenanceChain.push({
+      stage: 'QUEUE',
+      timestampSec: this.state.downlinkElapsedSec,
+      step: this.state.stepCounter,
+      operation: `LIVE_DOCK_SLOT_${(pkt.queueIndex ?? 0) + 1}`,
+      details: `Docked live at T+${pkt.txDockSec.toFixed(1)}s (${pkt.transmitSec.toFixed(1)}s duration)`,
+    });
+    const end = (pkt.txStartSec ?? 0) + pkt.transmitSec;
+    const fits = end <= this.state.downlinkWindowSec + 1e-6;
+    const msg = fits
+      ? `LIVE DOCK: ${pkt.id} (${pkt.sectorCode}) will finish at T+${end.toFixed(1)}s of ${this.state.downlinkWindowSec.toFixed(1)}s.`
+      : `LIVE DOCK: ${pkt.id} (${pkt.sectorCode}) cannot finish before loss of signal (needs T+${end.toFixed(1)}s, window ${this.state.downlinkWindowSec.toFixed(1)}s).`;
+    this.state.lastStatusMessage = msg;
+    this.state.lastActionOk = true;
+    return { ok: true, code: 'OK', message: msg, packet: { ...pkt } };
+  }
+
+  /** Assigns each docked packet a start time: after the previous packet and not before it was docked. */
+  private computeLiveSchedule(): void {
+    let prevEnd = 0;
+    for (const id of this.state.queuePacketIds) {
+      const pkt = this.state.packets.find((p) => p.id === id);
+      if (!pkt) continue;
+      const start = Math.max(pkt.txDockSec ?? 0, prevEnd);
+      pkt.txStartSec = Number(start.toFixed(3));
+      prevEnd = start + pkt.transmitSec;
+    }
+  }
+
   public unqueuePacket(
     packetId: string | null = this.state.selectedPacketId,
   ): ActionResult {
-    if (this.state.phase !== 'OPERATIONS' || this.state.paused) {
-      return this.fail('INVALID_PHASE', 'Cannot modify queue after downlink starts.');
+    const live = this.state.phase === 'DOWNLINK';
+    if ((this.state.phase !== 'OPERATIONS' && !live) || this.state.paused) {
+      return this.fail('INVALID_PHASE', 'Cannot modify queue after the pass or while paused.');
     }
 
     const pkt = this.state.packets.find((p) => p.id === packetId);
@@ -672,12 +758,19 @@ export class MissionEngine {
       return this.fail('NOT_QUEUED', `${pkt.id} is not currently in the Downlink Bay.`);
     }
 
+    if (live && (pkt.txStartSec ?? 0) <= this.state.downlinkElapsedSec + 1e-6) {
+      return this.fail('ALREADY_TRANSMITTING', `${pkt.id} is already streaming to the ground station and cannot be pulled back.`);
+    }
+
     this.state.queuePacketIds = this.state.queuePacketIds.filter((id) => id !== pkt.id);
     pkt.queued = false;
     pkt.queueIndex = null;
     pkt.transmissionState = 'UNQUEUED';
+    pkt.txDockSec = null;
+    pkt.txStartSec = null;
     this.state.stepCounter += 1;
     this.recalculateQueueTiming();
+    if (live) this.computeLiveSchedule();
 
     const msg = `Removed ${pkt.id} (${pkt.sectorCode}) from Downlink Bay. Queue now ${this.state.downlinkCommittedSec.toFixed(1)}s / ${this.state.downlinkWindowSec.toFixed(1)}s.`;
     this.state.lastStatusMessage = msg;
@@ -752,18 +845,8 @@ export class MissionEngine {
       );
     }
 
-    this.state.phase = 'DOWNLINK';
-    this.state.downlinkElapsedSec = 0;
-    this.state.downlinkRemainingSec = this.state.downlinkWindowSec;
-    this.state.activeDownlinkPacketId = this.state.queuePacketIds[0] ?? null;
-    this.state.stepCounter += 1;
-
-    for (const pkt of this.state.packets) {
-      pkt.transmitted = false;
-      pkt.droppedByWindow = false;
-    }
-
-    const msg = `DOWNLINK STARTED: Transmitting ${this.state.queuePacketIds.length} queued packet(s) across ${this.state.downlinkWindowSec.toFixed(1)}s horizon window...`;
+    this.openDownlinkWindow('COMMITTED');
+    const msg = `DOWNLINK STARTED: Transmitting ${this.state.queuePacketIds.length} docked packet(s) across the ${this.state.downlinkWindowSec.toFixed(1)}s window. Cubes still on the tray can be docked live.`;
     this.state.lastStatusMessage = msg;
     this.state.lastActionOk = true;
 
@@ -772,6 +855,97 @@ export class MissionEngine {
       code: 'OK',
       message: msg,
     };
+  }
+
+  private openDownlinkWindow(reason: MissionState['endReason']): void {
+    this.state.phase = 'DOWNLINK';
+    this.state.endReason = reason;
+    this.state.downlinkElapsedSec = 0;
+    this.state.downlinkRemainingSec = this.state.downlinkWindowSec;
+    this.state.activeDownlinkPacketId = this.state.queuePacketIds[0] ?? null;
+    this.state.stepCounter += 1;
+    for (const pkt of this.state.packets) {
+      pkt.transmitted = false;
+      pkt.droppedByWindow = false;
+      pkt.txDockSec = pkt.queued ? 0 : null;
+      pkt.txStartSec = null;
+    }
+    this.computeLiveSchedule();
+  }
+
+  /** True while an undocked, usable cube could still be placed in a free bay slot. */
+  private hasDockableCube(): boolean {
+    const maxSlots = Math.min(MAX_EVIDENCE_CUBES, this.getActiveScenario().budget.maxQueueSlots);
+    if (this.state.queuePacketIds.length >= maxSlots) return false;
+    return this.state.packets.some((p) => !p.queued && p.confidence !== 'UNVERIFIED');
+  }
+
+  /**
+   * Advances the orbital pass clock during OPERATIONS. When it reaches zero the ground-station
+   * window opens with whatever is docked; if there is nothing to send, the pass fails.
+   */
+  private tickPassClock(deltaSec: number): MissionState {
+    if (
+      this.state.phase !== 'OPERATIONS' || this.state.paused || !this.state.passStarted ||
+      this.state.passRemainingSec === null || !Number.isFinite(deltaSec) || deltaSec <= 0
+    ) {
+      return this.getState();
+    }
+    this.state.passRemainingSec = Number(Math.max(0, this.state.passRemainingSec - deltaSec).toFixed(3));
+    if (this.state.passRemainingSec > 0) return this.getState();
+
+    if (this.state.queuePacketIds.length === 0 && !this.hasDockableCube()) {
+      this.state.endReason = 'CLOCK_EXPIRED';
+      this.state.phase = 'DOWNLINK';
+      this.finalizeDownlink();
+      this.state.lastStatusMessage = 'PASS CLOCK EXPIRED: the satellite reached the ground station with no usable evidence on board.';
+      return this.getState();
+    }
+    this.openDownlinkWindow('CLOCK_EXPIRED');
+    this.state.lastStatusMessage = 'PASS CLOCK EXPIRED: ground-station window opened automatically. Dock your remaining cubes now!';
+    this.state.lastActionOk = true;
+    return this.getState();
+  }
+
+  /** Ends the live window early once every docked packet has finished (no more cubes will be docked). */
+  public closeLink(): ActionResult {
+    if (this.state.phase !== 'DOWNLINK' || this.state.paused) {
+      return this.fail('INVALID_PHASE', 'The downlink window is not open.');
+    }
+    let lastEnd = this.state.downlinkElapsedSec;
+    for (const id of this.state.queuePacketIds) {
+      const pkt = this.state.packets.find((p) => p.id === id);
+      if (!pkt) continue;
+      lastEnd = Math.max(lastEnd, (pkt.txStartSec ?? 0) + pkt.transmitSec);
+    }
+    this.state.downlinkElapsedSec = Math.min(this.state.downlinkWindowSec, lastEnd);
+    this.finalizeDownlink();
+    return { ok: true, code: 'OK', message: this.state.lastStatusMessage };
+  }
+
+  /** Abandons the pass without transmitting (escape from an unwinnable state). */
+  public abortPass(): ActionResult {
+    if (this.state.phase !== 'OPERATIONS') {
+      return this.fail('INVALID_PHASE', 'Only an active pass can be aborted.');
+    }
+    this.state.paused = false;
+    this.state.endReason = 'ABORTED';
+    this.state.queuePacketIds = [];
+    this.recalculateQueueTiming();
+    this.state.phase = 'DOWNLINK';
+    this.finalizeDownlink();
+    this.state.lastStatusMessage = 'PASS ABORTED: no evidence was transmitted.';
+    return { ok: true, code: 'OK', message: this.state.lastStatusMessage };
+  }
+
+  public useHint(): ActionResult {
+    if (this.state.phase === 'DEBRIEF' || this.state.paused) {
+      return this.fail('INVALID_PHASE', 'Hints are available during an active pass.');
+    }
+    this.state.hintsUsed += 1;
+    this.state.lastActionOk = true;
+    this.state.lastStatusMessage = `ARIA-7 hint #${this.state.hintsUsed} requested.`;
+    return { ok: true, code: 'OK', message: this.state.lastStatusMessage };
   }
 
   /**
@@ -785,58 +959,44 @@ export class MissionEngine {
     }
 
     this.state.downlinkElapsedSec = Math.min(this.state.downlinkWindowSec, this.state.downlinkElapsedSec + deltaSec);
+    const elapsed = this.state.downlinkElapsedSec;
+    const windowSec = this.state.downlinkWindowSec;
+    const windowExpired = elapsed + 1e-6 >= windowSec;
 
-    let cumulativeSec = 0;
-    let allQueuedFinished = true;
+    let pendingAny = false;
     let activeId: string | null = null;
 
     for (const pktId of this.state.queuePacketIds) {
       const pkt = this.state.packets.find((p) => p.id === pktId);
       if (!pkt) continue;
-
-      const finishTime = Number((cumulativeSec + pkt.transmitSec).toFixed(3));
-      if (finishTime <= this.state.downlinkWindowSec + 1e-6) {
-        if (this.state.downlinkElapsedSec + 1e-6 >= finishTime) {
-          pkt.transmitted = true;
-          pkt.droppedByWindow = false;
-          pkt.transmissionState = 'TRANSMITTED';
-        } else {
-          pkt.transmitted = false;
-          allQueuedFinished = false;
-          if (!activeId) {
-            activeId = pkt.id;
-          }
-        }
-        cumulativeSec = finishTime;
-      } else {
-        // This packet cannot fit within the 10.0s window
-        pkt.transmitted = false;
-        if (this.state.downlinkElapsedSec + 1e-6 >= this.state.downlinkWindowSec) {
-          pkt.droppedByWindow = true;
-          pkt.transmissionState = 'DROPPED_WINDOW';
-        } else {
-          allQueuedFinished = false;
-          if (!activeId) {
-            activeId = pkt.id;
-          }
-        }
+      const start = pkt.txStartSec ?? 0;
+      const finishTime = Number((start + pkt.transmitSec).toFixed(3));
+      if (finishTime <= windowSec + 1e-6 && elapsed + 1e-6 >= finishTime) {
+        pkt.transmitted = true;
+        pkt.droppedByWindow = false;
+        pkt.transmissionState = 'TRANSMITTED';
+        continue;
       }
-      cumulativeSec = finishTime;
+      pkt.transmitted = false;
+      if (windowExpired) {
+        pkt.droppedByWindow = true;
+        pkt.transmissionState = 'DROPPED_WINDOW';
+      } else {
+        pendingAny = true;
+        if (!activeId && elapsed + 1e-6 >= start) activeId = pkt.id;
+      }
     }
 
-    const usedSec = Math.min(this.state.downlinkElapsedSec, cumulativeSec, this.state.downlinkWindowSec);
-    this.state.downlinkRemainingSec = Number(
-      Math.max(0, this.state.downlinkWindowSec - this.state.downlinkElapsedSec).toFixed(1),
-    );
+    this.state.downlinkRemainingSec = Number(Math.max(0, windowSec - elapsed).toFixed(1));
     this.state.activeDownlinkPacketId = activeId;
 
-    const windowExpired = this.state.downlinkElapsedSec + 1e-6 >= this.state.downlinkWindowSec;
-
-    if (allQueuedFinished || windowExpired) {
+    if (windowExpired || (!pendingAny && !this.hasDockableCube())) {
       this.finalizeDownlink();
     } else if (activeId) {
       const activePkt = this.state.packets.find((p) => p.id === activeId);
-      this.state.lastStatusMessage = `TRANSMITTING ${activeId} (${activePkt?.sectorCode ?? ''} ${activePkt?.sensorMode ?? ''}) - ${this.state.downlinkRemainingSec.toFixed(1)}s window remaining (${usedSec.toFixed(1)}s elapsed)...`;
+      this.state.lastStatusMessage = `TRANSMITTING ${activeId} (${activePkt?.sectorCode ?? ''} ${activePkt?.sensorMode ?? ''}) - ${this.state.downlinkRemainingSec.toFixed(1)}s window remaining...`;
+    } else {
+      this.state.lastStatusMessage = `LINK IDLE - dock another cube or close the link. ${this.state.downlinkRemainingSec.toFixed(1)}s of window left.`;
     }
 
     return this.getState();
@@ -865,16 +1025,18 @@ export class MissionEngine {
   }
 
   private finalizeDownlink(): void {
-    let cumulativeSec = 0;
+    let airtimeSec = 0;
     const transmittedPackets: DataPacket[] = [];
     const droppedPackets: DataPacket[] = [];
 
     for (const pktId of this.state.queuePacketIds) {
       const pkt = this.state.packets.find((p) => p.id === pktId);
       if (!pkt) continue;
-      cumulativeSec = Number((cumulativeSec + pkt.transmitSec).toFixed(6));
-      pkt.transmitted = cumulativeSec <= this.state.downlinkWindowSec + 1e-6;
+      const end = (pkt.txStartSec ?? 0) + pkt.transmitSec;
+      pkt.transmitted = end <= this.state.downlinkWindowSec + 1e-6;
       pkt.droppedByWindow = !pkt.transmitted;
+      pkt.transmissionState = pkt.transmitted ? 'TRANSMITTED' : 'DROPPED_WINDOW';
+      if (pkt.transmitted) airtimeSec = Number((airtimeSec + pkt.transmitSec).toFixed(6));
       if (pkt.transmitted) {
         if (!pkt.provenanceLineage.includes('S-BAND-TX')) {
           pkt.provenanceLineage = `${pkt.provenanceLineage} -> S-BAND-TX[OK]`;
@@ -888,7 +1050,9 @@ export class MissionEngine {
       }
     }
 
-    const usedSec = Math.min(cumulativeSec, this.state.downlinkWindowSec);
+    const usedSec = droppedPackets.length
+      ? this.state.downlinkWindowSec
+      : Math.min(airtimeSec, this.state.downlinkWindowSec);
     this.state.downlinkRemainingSec = Number((this.state.downlinkWindowSec - usedSec).toFixed(6));
     this.state.downlinkElapsedSec = usedSec;
     this.state.activeDownlinkPacketId = null;
@@ -906,6 +1070,8 @@ export class MissionEngine {
       downlinkWindowSec: scenario.budget.downlinkDurationSec,
       scenarioId: this.currentScenarioId,
       customScenario: this.activeCustomScenario,
+      hintsUsed: this.state.hintsUsed,
+      endReason: this.state.endReason,
     });
 
     this.state.phase = 'DEBRIEF';
@@ -943,6 +1109,8 @@ export class MissionEngine {
       sensor: state.activeSensorMode, selectedPacket: state.selectedPacketId,
       elapsed: Number(state.downlinkElapsedSec.toFixed(3)), packets: state.packets,
       queue: state.queuePacketIds, score: state.debrief?.totalScore ?? null,
+      pass: state.passRemainingSec === null ? null : Number(state.passRemainingSec.toFixed(3)),
+      hints: state.hintsUsed, end: state.endReason,
     });
     let hash = 2166136261;
     for (let i = 0; i < serialized.length; i++) hash = Math.imul(hash ^ serialized.charCodeAt(i), 16777619);
@@ -963,6 +1131,9 @@ export class MissionEngine {
       case 'QUEUE': result = this.queuePacket(action.packetId, action.slotIndex); break;
       case 'REORDER': result = this.reorderQueue(action.packetIds); break;
       case 'COMMIT': result = this.startDownlink(); break;
+      case 'CLOSE_LINK': result = this.closeLink(); break;
+      case 'ABORT': result = this.abortPass(); break;
+      case 'USE_HINT': result = this.useHint(); break;
       case 'PAUSE':
       case 'RESUME':
         if (this.state.phase === 'DEBRIEF') result = this.fail('INVALID_PHASE', 'This pass is complete.');
@@ -973,9 +1144,12 @@ export class MissionEngine {
           result = this.getState();
         }
         break;
-      case 'TICK': result = this.tickDownlink(action.seconds); break;
+      case 'TICK':
+        result = phaseBeforeAction === 'DOWNLINK' ? this.tickDownlink(action.seconds) : this.tickPassClock(action.seconds);
+        break;
     }
-    if (action.type === 'TICK' && (phaseBeforeAction !== 'DOWNLINK' || !Number.isFinite(action.seconds) || action.seconds <= 0 || this.state.paused)) return result;
+    const passClockRunning = phaseBeforeAction === 'OPERATIONS' && this.state.passStarted && this.state.passDurationSec !== null;
+    if (action.type === 'TICK' && ((phaseBeforeAction !== 'DOWNLINK' && !passClockRunning) || !Number.isFinite(action.seconds) || action.seconds <= 0 || this.state.paused)) return result;
     const previous = this.journal[this.journal.length - 1];
     const entry: MissionJournalEntry = {
       sequence: this.journal.length, elapsedSec: elapsedSec ?? this.state.downlinkElapsedSec,

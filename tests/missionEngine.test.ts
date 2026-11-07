@@ -4,6 +4,7 @@ import {
   computeTransmissionSeconds,
   CONFIDENCE_BADGES,
   DOWNLINK_THROUGHPUT_MBPS,
+  getScenarioSector,
   GROUND_REQUEST_ORDER,
   GROUND_REQUESTS,
   MISSION_BUDGET,
@@ -357,8 +358,9 @@ describe('ORBIT ZERO - MissionEngine Deterministic Triage Simulation', () => {
       // Operations must be locked during DOWNLINK
       expect(engine.scanSector('E', 'RADAR').code).toBe('INVALID_PHASE');
       expect(engine.processPacket(pktC.id).code).toBe('INVALID_PHASE');
-      expect(engine.queuePacket(pktC.id).code).toBe('INVALID_PHASE');
-      expect(engine.unqueuePacket(pktC.id).code).toBe('INVALID_PHASE');
+      // Live docking: the bay stays open during the window, but a streaming packet cannot be pulled back.
+      expect(engine.queuePacket(pktC.id).ok).toBe(true);
+      expect(engine.unqueuePacket(pktB.id).code).toBe('ALREADY_TRANSMITTING');
       expect(engine.discardPacket(pktC.id).code).toBe('INVALID_PHASE');
 
       // Advance 1.0s: pktB still transmitting
@@ -816,7 +818,7 @@ describe('ORBIT ZERO - MissionEngine Deterministic Triage Simulation', () => {
       engine.processPacket(pktB.id);
       const procPkt = engine.getState().packets.find((p) => p.id === pktB.id)!;
       expect(procPkt.provenanceLineage).toContain('CRADLE[SAR_BACKSCATTER_EVIDENCE_COMPRESSION]');
-      expect(procPkt.compressionRatio).toBe(3.0);
+      expect(procPkt.compressionRatio).toBe(2.5); // 45 MB raw SAR -> 18 MB
 
       engine.queuePacket(pktB.id);
       const queuedPkt = engine.getState().packets.find((p) => p.id === pktB.id)!;
@@ -935,17 +937,17 @@ describe('ORBIT ZERO - MissionEngine Deterministic Triage Simulation', () => {
       expect(procB.ok).toBe(true);
       expect(procB.packet?.storageCost).toBe(1);
 
-      // Sector C OPTICAL is CONFIRMED under clear sky
-      const pktC = engine.scanSector('C', 'OPTICAL').packet!;
-      expect(pktC.confidence).toBe('CONFIRMED');
+      // Forced triage: the solar-storm battery (42 Wh) cannot also pay for the Sector C scan.
+      expect(engine.getState().power).toBe(2);
+      expect(engine.scanSector('C', 'OPTICAL').code).toBe('INSUFFICIENT_POWER');
 
-      engine.queuePacket(pktE.id);
       engine.queuePacket(pktB.id);
-      engine.queuePacket(pktC.id);
+      engine.queuePacket(pktE.id);
 
       const debrief = engine.commitDownlink()!;
-      expect(debrief.requestsVerifiedCount).toBe(3);
-      expect(debrief.totalScore).toBe(100);
+      expect(debrief.requestsVerifiedCount).toBe(2);
+      expect(debrief.totalScore).toBe(70); // B 40 + E 30: the best achievable this pass
+      expect(debrief.achievableScore).toBe(70);
       expect(debrief.outcome).toBe('SUCCESS');
       expect(debrief.certification).toBe('GOLD');
     });
@@ -1033,9 +1035,11 @@ describe('ORBIT ZERO - MissionEngine Deterministic Triage Simulation', () => {
       expect(pktThermalE.scientificCaveat).toContain('NOAA OSPO / NASA FIRMS Note');
 
       const floodEngine = new MissionEngine('STANDARD_INDUS_PASS');
-      const pktThermalCloud = floodEngine.scanSector('B', 'THERMAL').packet!;
-      expect(pktThermalCloud.confidence).toBe('UNVERIFIED');
-      expect(pktThermalCloud.scientificCaveat).toContain('optically thick water-droplet storm clouds');
+      // The Indus satellite carries no thermal sensor: the scan is rejected, but the physics table still documents why.
+      expect(floodEngine.scanSector('B', 'THERMAL').code).toBe('INVALID_SENSOR');
+      const thermalCloud = getScenarioSector('STANDARD_INDUS_PASS', 'B').outcomes.THERMAL;
+      expect(thermalCloud.confidence).toBe('UNVERIFIED');
+      expect(thermalCloud.scientificCaveat).toContain('optically thick water-droplet storm clouds');
 
       const pktSarFlood = floodEngine.scanSector('B', 'RADAR').packet!;
       expect(pktSarFlood.observationConfidencePct).toBe(91);
@@ -1100,7 +1104,7 @@ describe('ORBIT ZERO - MissionEngine Deterministic Triage Simulation', () => {
       expect(engA.getState().downlinkCommittedSec).toBe(12.4);
       const debA = engA.commitDownlink()!;
       expect(debA.droppedPacketIds).toHaveLength(1);
-      expect(debA.totalScore).toBe(60);
+      expect(debA.totalScore).toBe(65); // weighted: B 40 + C 25 delivered, E 35 cut off
       expect(debA.outcome).toBe('PARTIAL_SUCCESS');
       expect(debA.certification).toBe('BRONZE');
 
@@ -1116,7 +1120,7 @@ describe('ORBIT ZERO - MissionEngine Deterministic Triage Simulation', () => {
       expect(engB.getState().downlinkCommittedSec).toBe(10.2);
       const debB = engB.commitDownlink()!;
       expect(debB.droppedPacketIds).toHaveLength(1);
-      expect(debB.totalScore).toBe(60);
+      expect(debB.totalScore).toBe(65);
       expect(debB.outcome).toBe('PARTIAL_SUCCESS');
 
       // Strategy C: 1 compression on Thermal B (18 + 40 + 42 = 100 MB / 10.0s, 0.0s safety margin, 36 Wh used) -> 100/100 SILVER (Grade A)
@@ -1298,9 +1302,9 @@ describe('ORBIT ZERO - MissionEngine Deterministic Triage Simulation', () => {
         expectedGrade: string;
         expectedCert: string;
       }> = [
-        { label: 'None', compress: [], expectedMb: 124, expectedTxSec: 12.4, expectedPowerLeft: 22, expectedStorageUsed: 9, expectedScore: 60, expectedOutcome: 'PARTIAL_SUCCESS', expectedGrade: 'B', expectedCert: 'BRONZE' },
+        { label: 'None', compress: [], expectedMb: 124, expectedTxSec: 12.4, expectedPowerLeft: 22, expectedStorageUsed: 9, expectedScore: 65, expectedOutcome: 'PARTIAL_SUCCESS', expectedGrade: 'B', expectedCert: 'BRONZE' },
         { label: 'B', compress: ['B'], expectedMb: 100, expectedTxSec: 10.0, expectedPowerLeft: 16, expectedStorageUsed: 7, expectedScore: 100, expectedOutcome: 'SUCCESS', expectedGrade: 'A', expectedCert: 'SILVER' },
-        { label: 'C', compress: ['C'], expectedMb: 102, expectedTxSec: 10.2, expectedPowerLeft: 16, expectedStorageUsed: 7, expectedScore: 60, expectedOutcome: 'PARTIAL_SUCCESS', expectedGrade: 'B', expectedCert: 'BRONZE' },
+        { label: 'C', compress: ['C'], expectedMb: 102, expectedTxSec: 10.2, expectedPowerLeft: 16, expectedStorageUsed: 7, expectedScore: 65, expectedOutcome: 'PARTIAL_SUCCESS', expectedGrade: 'B', expectedCert: 'BRONZE' },
         { label: 'E', compress: ['E'], expectedMb: 100, expectedTxSec: 10.0, expectedPowerLeft: 16, expectedStorageUsed: 7, expectedScore: 100, expectedOutcome: 'SUCCESS', expectedGrade: 'A', expectedCert: 'SILVER' },
         { label: 'B+C', compress: ['B', 'C'], expectedMb: 78, expectedTxSec: 7.8, expectedPowerLeft: 10, expectedStorageUsed: 5, expectedScore: 100, expectedOutcome: 'SUCCESS', expectedGrade: 'S', expectedCert: 'GOLD' },
         { label: 'B+E', compress: ['B', 'E'], expectedMb: 76, expectedTxSec: 7.6, expectedPowerLeft: 10, expectedStorageUsed: 5, expectedScore: 100, expectedOutcome: 'SUCCESS', expectedGrade: 'S', expectedCert: 'GOLD' },
@@ -1339,7 +1343,7 @@ describe('ORBIT ZERO - MissionEngine Deterministic Triage Simulation', () => {
         } else if (s.label === 'B+C+E') {
           expect(deb.deterministicRecommendation).toContain('unused link capacity beyond the 2-cube optimum');
         } else if (s.expectedGrade === 'A') {
-          expect(deb.deterministicRecommendation).toContain('zero buffer against S-Band horizon cutoff (Grade A / SILVER)');
+          expect(deb.deterministicRecommendation).toContain('almost no buffer against loss of signal (Grade A / SILVER)');
         }
       }
 

@@ -3,8 +3,15 @@ import {
   getRecommendedSensor,
   getScenarioRequests,
   getScenarioSector,
+  getScenarioThresholds,
   GROUND_REQUEST_ORDER,
+  isWeightedScenario,
   MISSION_BUDGET,
+  MISSION_SCENARIOS,
+  requestPointsFor,
+  requestValue,
+  SCORING,
+  verificationBonus,
 } from './missionConfig';
 import { describeMissionPlan, getMissionBenchmark } from './missionPlanner';
 import type {
@@ -117,8 +124,8 @@ export function evaluateRequestWithPackets(
   return {
     requestId: request.id, shortLabel: request.shortLabel, title: request.title, status,
     statusBadge,
-    scorePoints: status === 'VERIFIED' ? 30 : status === 'PARTIAL' ? 18 : 0,
-    maxPoints: 30, matchedPacketId: packet?.id ?? null,
+    scorePoints: requestPointsFor(request, status),
+    maxPoints: requestValue(request), matchedPacketId: packet?.id ?? null,
     matchedSectorId: packet?.sectorId ?? null, matchedSensorMode: packet?.sensorMode ?? null,
     matchedConfidence: packet?.confidence ?? null,
     explanation,
@@ -140,6 +147,8 @@ export function buildDebriefReport(params: {
   downlinkWindowSec?: number;
   scenarioId?: MissionScenarioId;
   customScenario?: MissionScenarioConfig | null;
+  hintsUsed?: number;
+  endReason?: 'NONE' | 'COMMITTED' | 'CLOCK_EXPIRED' | 'ABORTED';
 }): DebriefReport {
   const {
     allPackets = [],
@@ -148,28 +157,36 @@ export function buildDebriefReport(params: {
     downlinkWindowSec = MISSION_BUDGET.downlinkDurationSec,
     scenarioId = 'STANDARD_INDUS_PASS',
     customScenario = null,
+    hintsUsed = 0,
+    endReason = 'COMMITTED',
   } = params;
   const benchmark = getMissionBenchmark(scenarioId, customScenario);
   const requests = getScenarioRequests(scenarioId, customScenario);
+  const weighted = isWeightedScenario(requests);
+  const { successScore, partialScore } = getScenarioThresholds(scenarioId, customScenario);
   const evaluations = GROUND_REQUEST_ORDER.map((id) => evaluateRequestWithPackets(requests[id], transmittedPackets, { allPackets, scenarioId, customScenario }));
   const requestsVerifiedCount = evaluations.filter((ev) => ev.status === 'VERIFIED').length;
   const requestsPartialCount = evaluations.filter((ev) => ev.status === 'PARTIAL').length;
   const requestsUnverifiedCount = evaluations.filter((ev) => ev.status === 'UNVERIFIED').length;
-  const bonus = droppedPackets.length ? 0 : requestsVerifiedCount === 3 ? 10 : requestsVerifiedCount >= 2 ? 5 : 0;
-  const totalScore = evaluations.reduce((sum, ev) => sum + ev.scorePoints, 0) + bonus;
-  const achievedBest = totalScore >= benchmark.score;
+  const bonus = verificationBonus(requests, requestsVerifiedCount, droppedPackets.length);
+  const hintPenalty = hintsUsed * SCORING.hintPenalty;
+  const rawScore = evaluations.reduce((sum, ev) => sum + ev.scorePoints, 0) + bonus;
+  const totalScore = Math.max(0, rawScore - hintPenalty);
+  const achievedBest = rawScore >= benchmark.score;
   const powerUsed = initialPower - powerRemaining;
   const missionRank: DebriefReport['missionRank'] = requestsVerifiedCount === 3 ? 'OPTIMAL TRIAGE'
     : achievedBest ? 'BEST POSSIBLE TRIAGE'
       : requestsVerifiedCount + requestsPartialCount >= 2 ? 'PARTIAL DOWNLINK' : 'CRITICAL GAP';
+  // Weighted (triage) scenarios judge the delivered value only: leaving a low-priority request
+  // unanswered can be the correct call. Unweighted scenarios also require every request answered.
   const outcome: MissionOutcome =
-    totalScore >= 75 && requestsUnverifiedCount === 0
+    totalScore >= successScore && (weighted || requestsUnverifiedCount === 0)
       ? 'SUCCESS'
-      : totalScore >= 50 && requestsVerifiedCount + requestsPartialCount >= 2
+      : totalScore >= partialScore && (weighted || requestsVerifiedCount + requestsPartialCount >= 2)
         ? 'PARTIAL_SUCCESS'
         : 'FAILED';
-  const maxEfficientSec = Math.min(Math.max(benchmark.transmitSec, 7.8), downlinkWindowSec - 0.35);
-  const efficient = achievedBest && droppedPackets.length === 0 &&
+  const maxEfficientSec = Math.min(Math.max(benchmark.transmitSec, SCORING.gradeSFloorSec), downlinkWindowSec - SCORING.linkSafetyMarginSec);
+  const efficient = achievedBest && droppedPackets.length === 0 && hintsUsed === 0 &&
     downlinkUsedSec <= maxEfficientSec + 1e-6;
   const ratio = benchmark.score > 0 ? totalScore / benchmark.score : 0;
   const efficiencyGrade = efficient ? 'S' : ratio >= 0.8 ? 'A' : ratio >= 0.6 ? 'B' : 'C';
@@ -182,7 +199,10 @@ export function buildDebriefReport(params: {
           ? 'SILVER'
           : 'BRONZE';
   const advice: string[] = [];
-  if (droppedPackets.length) advice.push(`${droppedPackets.length} packet(s) missed the ${downlinkWindowSec.toFixed(1)}s cutoff. Processing and ordering must happen before COMMIT.`);
+  if (endReason === 'ABORTED') advice.push('The pass was aborted before any evidence was sent. Plan scans so that the most valuable request is covered first.');
+  if (endReason === 'CLOCK_EXPIRED') advice.push('The orbital pass clock ran out before you opened the link. Load the Downlink Bay earlier and transmit before the satellite reaches the ground station.');
+  if (droppedPackets.length) advice.push(`${droppedPackets.length} packet(s) missed the ${downlinkWindowSec.toFixed(1)}s cutoff. Compress big cubes, put the most valuable cube in Slot 1, and dock fast during the live window.`);
+  if (hintsUsed > 0) advice.push(`${hintsUsed} ARIA-7 hint(s) cost ${hintPenalty} points. Try the pass without hints for a Grade S.`);
   for (const evaluation of evaluations) {
     if (evaluation.status === 'VERIFIED') continue;
     const request = requests[evaluation.requestId];
@@ -228,7 +248,7 @@ export function buildDebriefReport(params: {
       }
     } else {
       advice.push(
-        `All requested evidence arrived (+${powerRemaining} Wh battery reserve), but ${windowMargin.toFixed(1)}s link margin leaves zero buffer against S-Band horizon cutoff (Grade A / SILVER). Compress at least 2 cubes (76-78 MB / 7.6-7.8s) to earn GOLD (Grade S).`,
+        `All requested evidence arrived (+${powerRemaining} Wh battery reserve), but ${windowMargin.toFixed(1)}s link margin leaves almost no buffer against loss of signal (Grade A / SILVER). Finish within ${maxEfficientSec.toFixed(1)}s (the best plan uses ${benchmark.transmitSec.toFixed(1)}s) by compressing one more cube to earn GOLD (Grade S).`,
       );
     }
   }
@@ -255,7 +275,9 @@ export function buildDebriefReport(params: {
     const req1Eval = evaluations[0];
     const hasValidTrainingTx =
       droppedPackets.length === 0 &&
-      transmittedPackets.some((p) => p.processed && p.sensorMode === 'THERMAL' && p.confidence !== 'UNVERIFIED');
+      transmittedPackets.some((p) =>
+        p.processed && p.sensorMode === 'THERMAL' && p.confidence !== 'UNVERIFIED' &&
+        p.sectorId === requests.REQ_1.targetSectorId);
     if (hasValidTrainingTx) {
       const trainingEvaluations: RequestEvaluation[] = evaluations.map((ev, idx) =>
         idx === 0
@@ -321,11 +343,21 @@ export function buildDebriefReport(params: {
   let failureReasonCode: FailureReasonCode = 'NONE';
   let failureExplanation = 'All emergency ground requests met operational verification thresholds within the downlink window.';
 
+  const budget = (customScenario ?? MISSION_SCENARIOS[scenarioId])?.budget ?? MISSION_BUDGET;
+  const throughput = budget.downlinkThroughputMbps ?? DOWNLINK_THROUGHPUT_MBPS;
+  const proc = budget.onboardProcess;
+
   if (outcome !== 'SUCCESS') {
-    if (droppedPackets.length > 0) {
+    if (endReason === 'ABORTED') {
+      failureReasonCode = 'MISSION_ABORTED';
+      failureExplanation = 'PASS ABORTED: you ended the pass before any evidence reached the ground station.';
+    } else if (endReason === 'CLOCK_EXPIRED' && transmittedPackets.length === 0) {
+      failureReasonCode = 'PASS_CLOCK_EXPIRED';
+      failureExplanation = 'PASS CLOCK EXPIRED: the satellite reached the ground station before any usable evidence was loaded into the Downlink Bay.';
+    } else if (droppedPackets.length > 0) {
       failureReasonCode = 'WINDOW_CUTOFF_DROPPED_PACKETS';
       failureExplanation =
-        `WINDOW CUTOFF OVERFLOW: ${droppedPackets.length} queued packet(s) (${droppedPackets.map((p) => p.id).join(', ')}) exceeded the ${downlinkWindowSec.toFixed(1)}s S-Band pass window (@ 10.0 MB/s). Compress raw cubes (40-45 MB -> 18 MB / 1.8s) in the Processing Cradle before committing downlink.`;
+        `WINDOW CUTOFF OVERFLOW: ${droppedPackets.length} queued packet(s) (${droppedPackets.map((p) => p.id).join(', ')}) did not finish inside the ${downlinkWindowSec.toFixed(1)}s window (@ ${throughput} MB/s). Compress raw cubes in the Processing Cradle (${proc.powerCost} Wh each, ${proc.compressedTransmitSec.toFixed(1)}s Tx) and put the most valuable cube first.`;
     } else if (hasUnverifiedTransmitted || (hasUnverifiedScanned && requestsUnverifiedCount > 0)) {
       failureReasonCode = 'WRONG_SENSOR_FOR_WEATHER';
       const mismatches = evaluations
@@ -336,11 +368,13 @@ export function buildDebriefReport(params: {
     } else if (storageUsed >= 6 && allPackets.every((p) => !p.processed) && requestsUnverifiedCount > 0) {
       failureReasonCode = 'UNPROCESSED_STORAGE_BOTTLENECK';
       failureExplanation =
-        'ONBOARD BUFFER BOTTLENECK: Uncompressed 3-STR raw cubes saturated solid-state memory before all target sectors could be scanned. Use the Processing Cradle (3 STR -> 1 STR, -6 Wh) mid-pass.';
+        `ONBOARD BUFFER BOTTLENECK: Uncompressed raw cubes filled memory before every target could be scanned. Use the Processing Cradle mid-pass (-> ${proc.compressedStorageCost} STR, -${proc.powerCost} Wh).`;
     } else {
       failureReasonCode = 'INSUFFICIENT_VERIFIED_EVIDENCE';
       failureExplanation =
-        `INCOMPLETE TRIAGE COVERAGE: Only ${requestsVerifiedCount}/3 ground requests were verified (${requestsPartialCount} partial, ${requestsUnverifiedCount} unverified). Scan and queue evidence for every priority target sector (${GROUND_REQUEST_ORDER.map((id) => requests[id].targetSectorId).join(', ')}) before committing downlink.`;
+        weighted
+          ? `NOT ENOUGH VALUE DELIVERED: ${totalScore} pts reached the ground; this pass needs ${successScore} pts to succeed. Spend power on the highest-value requests first.`
+          : `INCOMPLETE TRIAGE COVERAGE: Only ${requestsVerifiedCount}/3 ground requests were verified (${requestsPartialCount} partial, ${requestsUnverifiedCount} unverified). Scan and queue evidence for every priority target sector (${GROUND_REQUEST_ORDER.map((id) => requests[id].targetSectorId).join(', ')}) before committing downlink.`;
     }
   }
 
@@ -349,7 +383,8 @@ export function buildDebriefReport(params: {
     requestsVerifiedCount, requestsPartialCount, requestsUnverifiedCount,
     powerRemaining, powerUsed, storageUsed, downlinkUsedSec, downlinkWindowSec,
     transmittedPayloadMb,
-    downlinkThroughputMbps: DOWNLINK_THROUGHPUT_MBPS,
+    successScore, partialScore, hintsUsed, hintPenalty: SCORING.hintPenalty,
+    downlinkThroughputMbps: throughput,
     failureReasonCode,
     failureExplanation,
     transmittedPacketIds: transmittedPackets.map((p) => p.id),
@@ -358,10 +393,12 @@ export function buildDebriefReport(params: {
     summaryHeadline: achievedBest
       ? benchmark.score === 100
         ? 'ALL THREE REQUESTS VERIFIED BEFORE LOSS OF SIGNAL (GRADE S).'
-        : `SCENARIO MASTERY: ${totalScore}/${benchmark.score} POSSIBLE POINTS EARNED (GRADE S). THE CONVECTIVE STORM LIMITS CERTAINTY, NOT YOUR TRIAGE SKILL.`
+        : weighted
+          ? `BEST POSSIBLE TRIAGE: ${totalScore}/${benchmark.score} ACHIEVABLE POINTS. NOT EVERY REQUEST COULD BE ANSWERED THIS PASS, AND YOU SAVED THE MOST VALUABLE ONES.`
+          : `SCENARIO MASTERY: ${totalScore}/${benchmark.score} POSSIBLE POINTS EARNED (GRADE S). THE CONVECTIVE STORM LIMITS CERTAINTY, NOT YOUR TRIAGE SKILL.`
       : `${requestsVerifiedCount}/3 VERIFIED - REVIEW THE EVIDENCE THAT DID NOT REACH EARTH.`,
     deterministicRecommendation: advice.join(' '),
-    counterfactualComparison: `SCENARIO CEILING (${benchmark.score}/100 RAW): ${describeMissionPlan(benchmark)}. ${benchmark.powerUsed} Wh power units, ${benchmark.transmitSec.toFixed(1)}s transmission @ ${DOWNLINK_THROUGHPUT_MBPS.toFixed(1)} MB/s.`,
+    counterfactualComparison: `SCENARIO CEILING (${benchmark.score}/100 RAW): ${describeMissionPlan(benchmark)}. ${benchmark.powerUsed} Wh power units, ${benchmark.transmitSec.toFixed(1)}s transmission @ ${throughput.toFixed(1)} MB/s.`,
     achievableScore: benchmark.score,
     windowMarginSec: Math.max(0, Number((downlinkWindowSec - downlinkUsedSec).toFixed(6))),
     benchmarkPowerUsed: benchmark.powerUsed, benchmarkDownlinkSec: benchmark.transmitSec,
