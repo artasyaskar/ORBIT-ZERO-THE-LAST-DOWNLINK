@@ -1,0 +1,137 @@
+<!--
+  ORBIT ZERO: THE LAST DOWNLINK — Forward Mission HUD (headset-first)
+  One centred panel above the globe that switches between three modes:
+    CardSection   - Mission Card before the pass (story, requests, sensors, win line, START)
+    PlaySection   - Next Step instruction + big pass clock + request tracker during the pass
+    ResultSection - Outcome, score vs best possible, one lesson, RETRY / NEXT after the pass
+  All text is written at runtime from mission state and scenario config (MissionControlSystem.syncMissionHud).
+  Fonts are sized for >= 0.9 degrees at the seated eye (see src/ui/spatialLayout.ts).
+-->
+<style>
+  .panel-root {
+    flex-direction: column;
+    width: 640px;
+    padding-top: 16px;
+    padding-bottom: 16px;
+    padding-left: 22px;
+    padding-right: 22px;
+    background-color: #050c19f2;
+    border-radius: 18px;
+    border-width: 2px;
+    border-color: #22d3ee;
+  }
+  .section { flex-direction: column; width: 100%; }
+  .kicker { font-size: 15px; font-weight: 800; color: #22d3ee; letter-spacing: 1px; }
+  .hud-title { font-size: 26px; font-weight: 800; color: #f8fafc; margin-top: 4px; }
+  .hud-body { font-size: 18px; font-weight: 600; color: #cbd5e1; margin-top: 6px; line-height: 1.35; }
+  .hud-hands { font-size: 17px; font-weight: 700; color: #67e8f9; margin-top: 6px; }
+  .req-row {
+    flex-direction: column;
+    width: 100%;
+    margin-top: 6px;
+    padding-top: 7px;
+    padding-bottom: 7px;
+    padding-left: 12px;
+    padding-right: 12px;
+    background-color: #0b1a2eee;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: #1e3a5f;
+  }
+  .req-title { font-size: 19px; font-weight: 800; color: #f8fafc; }
+  .req-meta { font-size: 16px; font-weight: 600; color: #94a3b8; margin-top: 2px; }
+  .sensor-line { font-size: 16px; font-weight: 600; color: #e2e8f0; margin-top: 3px; }
+  .rules { font-size: 17px; font-weight: 800; color: #fde68a; margin-top: 8px; }
+  .row { flex-direction: row; width: 100%; gap: 10px; margin-top: 10px; }
+  .big-btn {
+    flex-grow: 1;
+    justify-content: center;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    border-radius: 12px;
+    border-width: 2px;
+    background-color: #0b1f3bee;
+    border-color: #38bdf8;
+  }
+  .clock-row { flex-direction: row; width: 100%; justify-content: space-between; align-items: center; }
+  .clock { font-size: 34px; font-weight: 800; color: #fbbf24; }
+  .clock-label { font-size: 15px; font-weight: 800; color: #94a3b8; }
+  .resource { font-size: 16px; font-weight: 700; color: #e2e8f0; margin-top: 6px; }
+  .tracker { font-size: 16px; font-weight: 700; color: #a3e635; margin-top: 6px; }
+  .result-title { font-size: 30px; font-weight: 800; color: #34d399; }
+  .result-score { font-size: 19px; font-weight: 700; color: #f8fafc; margin-top: 4px; }
+  .result-line { font-size: 17px; font-weight: 600; color: #e2e8f0; margin-top: 4px; }
+  .result-tip { font-size: 17px; font-weight: 700; color: #fbbf24; margin-top: 8px; }
+</style>
+<Panel id="MissionHudRoot" class="panel-root">
+  <div id="CardSection" class="section">
+    <div id="CardKicker" class="kicker">OP 01 // MISSION CARD [SIMULATED]</div>
+    <div id="CardTitle" class="hud-title">Fireline Pass</div>
+    <div id="CardStory" class="hud-body">A wildfire is racing through the canyon. Save the most important requests first.</div>
+    <div id="CardReq1" class="req-row">
+      <div id="CardReq1Title" class="req-title">SECTOR B | CANYON FIRELINE | 40 pts</div>
+      <div id="CardReq1Meta" class="req-meta">Weather: thick wildfire smoke | needs CONFIRMED</div>
+    </div>
+    <div id="CardReq2" class="req-row">
+      <div id="CardReq2Title" class="req-title">SECTOR C | VIADUCT FIREBREAK | 25 pts</div>
+      <div id="CardReq2Meta" class="req-meta">Weather: clear sky | needs CONFIRMED</div>
+    </div>
+    <div id="CardReq3" class="req-row">
+      <div id="CardReq3Title" class="req-title">SECTOR E | RIDGE DEPOT | 35 pts</div>
+      <div id="CardReq3Meta" class="req-meta">Weather: wildfire smoke | needs CONFIRMED</div>
+    </div>
+    <div id="CardSensor1" class="sensor-line">OPTICAL: sharpest in clear sky; blind in cloud, smoke and dust.</div>
+    <div id="CardSensor2" class="sensor-line">THERMAL IR: sees heat through smoke; blocked by thick cloud.</div>
+    <div id="CardSensor3" class="sensor-line">RADAR: sees through cloud and dust; blurry on metal.</div>
+    <div id="CardRules" class="rules">WIN: 75+ pts. Clock starts at your first scan.</div>
+    <div class="row">
+      <Button id="Btn_StartTraining" class="big-btn" style="border-color: #a78bfa;">
+        <ButtonLabel id="Lbl_StartTraining" style="color: #c4b5fd; font-size: 19px; font-weight: 800;">TRAINING FIRST</ButtonLabel>
+      </Button>
+      <Button id="Btn_StartPass" class="big-btn" style="border-color: #34d399; background-color: #064e3bee;">
+        <ButtonLabel id="Lbl_StartPass" style="color: #6ee7b7; font-size: 19px; font-weight: 800;">START PASS</ButtonLabel>
+      </Button>
+    </div>
+  </div>
+
+  <div id="PlaySection" class="section" style="display: none;">
+    <div class="clock-row">
+      <div id="StepKicker" class="kicker">NEXT STEP</div>
+      <div class="clock-row" style="width: auto; gap: 10px;">
+        <div id="ClockLabel" class="clock-label">PASS CLOCK</div>
+        <div id="ClockText" class="clock">2:30</div>
+      </div>
+    </div>
+    <div id="StepTitle" class="hud-title">PICK A TARGET SECTOR</div>
+    <div id="StepBody" class="hud-body">Point at a glowing sector and pinch.</div>
+    <div id="StepHands" class="hud-hands">HANDS: point at a sector beacon and pinch</div>
+    <div id="ResourceLine" class="resource">BATTERY 52/52 Wh | MEMORY 0/9 | SEND 0.0/10.0s</div>
+    <div id="TrackerLine" class="tracker">B NEEDED | C NEEDED | E NEEDED</div>
+    <div class="row">
+      <Button id="Btn_HudHint" class="big-btn" style="border-color: #a78bfa;">
+        <ButtonLabel id="Lbl_HudHint" style="color: #c4b5fd; font-size: 17px; font-weight: 800;">ASK ARIA (-5 pts)</ButtonLabel>
+      </Button>
+      <Button id="Btn_HudTransmit" class="big-btn" style="border-color: #34d399;">
+        <ButtonLabel id="Lbl_HudTransmit" style="color: #6ee7b7; font-size: 17px; font-weight: 800;">TRANSMIT</ButtonLabel>
+      </Button>
+    </div>
+  </div>
+
+  <div id="ResultSection" class="section" style="display: none;">
+    <div id="ResultKicker" class="kicker">AFTER-ACTION REVIEW [SIMULATED]</div>
+    <div id="ResultTitle" class="result-title">MISSION SUCCESS</div>
+    <div id="ResultScore" class="result-score">100 pts (best possible 100) | win line 75</div>
+    <div id="ResultReq1" class="result-line">B: VERIFIED 40/40</div>
+    <div id="ResultReq2" class="result-line">C: VERIFIED 25/25</div>
+    <div id="ResultReq3" class="result-line">E: VERIFIED 35/35</div>
+    <div id="ResultTip" class="result-tip">Try: compress one more cube for Grade S.</div>
+    <div class="row">
+      <Button id="Btn_HudRetry" class="big-btn">
+        <ButtonLabel id="Lbl_HudRetry" style="color: #e2e8f0; font-size: 19px; font-weight: 800;">RETRY PASS</ButtonLabel>
+      </Button>
+      <Button id="Btn_HudNext" class="big-btn" style="border-color: #34d399; background-color: #064e3bee;">
+        <ButtonLabel id="Lbl_HudNext" style="color: #6ee7b7; font-size: 19px; font-weight: 800;">NEXT OPERATION</ButtonLabel>
+      </Button>
+    </div>
+  </div>
+</Panel>

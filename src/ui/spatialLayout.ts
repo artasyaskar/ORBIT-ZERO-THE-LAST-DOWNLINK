@@ -37,6 +37,20 @@ export const IMMERSIVE_PANEL_POSES = {
   debrief: { position: [0.86, 1.3, -0.86], yawDeg: -40, scale: 0.125 },
 } as const satisfies Record<string, PanelPose>;
 
+/**
+ * Forward Mission HUD (headset-first). Two poses:
+ * - `card`: eye-level modal for the Mission Card and the result. The globe shrinks to
+ *   GLOBE_CARD_SCALE while it is open so it cannot occlude the lower rows.
+ * - `strip`: compact Next Step / clock strip above the globe during play. Its bottom edge stays
+ *   above the globe-plus-rings silhouette (about 6 degrees above the eye line).
+ * Pitch is rotation about world X in degrees (positive tips the face down toward the seat).
+ */
+export const MISSION_HUD_POSES = {
+  card: { position: [0, 1.3, -0.82], pitchDeg: 0, scale: 0.085 },
+  strip: { position: [0, 1.56, -1.0], pitchDeg: 14, scale: 0.115 },
+} as const;
+export const GLOBE_CARD_SCALE = 0.45;
+
 export function eyeDistance(pose: PanelPose): number {
   const [x, y, z] = pose.position;
   return Math.hypot(x - SEATED_EYE[0], y - SEATED_EYE[1], z - SEATED_EYE[2]);

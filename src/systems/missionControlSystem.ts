@@ -71,7 +71,11 @@ import { coveredRequestIds, formatClock, getNextStep, isPassStalled } from '../m
 import { SceneObjectCache } from './sceneObjectCache';
 import { clipText, retryGuidanceFor } from '../ui/debriefText';
 import { isStrayScannerGrab, pressOwner } from './scannerArbitration';
-import { IMMERSIVE_PANEL_POSES, type PanelPose } from '../ui/spatialLayout';
+import { GLOBE_CARD_SCALE, IMMERSIVE_PANEL_POSES, MISSION_HUD_POSES, type PanelPose } from '../ui/spatialLayout';
+import { animateWeather, applyWeather, createWeatherFx } from './sectorWeatherFx';
+import { paintSensorView } from '../ui/sensorViewPainter';
+import { missionCardModel, resultModel, trackerText } from '../ui/hudText';
+import { SCORING } from '../mission/missionConfig';
 import type { DataPacket, MissionScenarioId, MissionState, SectorId, SensorMode } from '../mission/types';
 import {
   GLOBE_RADIUS,
@@ -103,6 +107,8 @@ const SCANNER_HOME_POSITION = new Vector3(-0.44, 0.80, -0.30);
 const DEBRIEF_PANEL_OPERATIONS_ONLY = ['Slot1Card', 'Slot2Card', 'Slot3Card', 'Btn_ReorderQueue', 'Btn_CommitDownlink'] as const;
 
 const GLOBE_CENTER_WORLD = new Vector3(0, 0.98, -0.48);
+/** Seated-XR spot for the ARIA hologram: left of the globe, below the forward HUD strip. */
+const ARIA_XR_POSITION = new Vector3(-0.38, 1.06, -0.7);
 const DOWNLINK_BAY_CENTER_WORLD = new Vector3(0.32, 0.79, -0.43);
 
 // Target seated eye position in world space (0.44m back from origin, 1.20m seated eye height)
@@ -249,6 +255,11 @@ export class MissionControlSystem extends createSystem({
   private briefingPanel?: UIKitMLAsset;
   private telemetryPanel?: UIKitMLAsset;
   private debriefPanel?: UIKitMLAsset;
+  /** Forward headset HUD: Mission Card -> Next Step + clock -> Result. */
+  private missionHud?: UIKitMLAsset;
+  /** Headset Mission Card is open until START PASS, the first scan, or training starts. */
+  private xrCardOpen = true;
+  private globeHudScale = 1;
   /** World-space panels on a flat screen duplicate the DOM HUD at unreadable size; XR / IWER always show them. */
   public spatialHudVisible = false;
 
@@ -487,6 +498,7 @@ export class MissionControlSystem extends createSystem({
         this.syncDeskPadsForXR(!is2D);
         this.applyTabletopMode();
         if (is2D) {
+          this.applyXRPerformanceProfile(false);
           this.forceReleaseAllGrabs();
           this.player.position.set(0, 0, 0);
           this.player.rotation.set(0, 0, 0);
@@ -495,6 +507,7 @@ export class MissionControlSystem extends createSystem({
           // On physical Quest hardware in local-floor space, restore persisted seated calibration
           const [ox, oy, oz] = this.profile.preferences.seatOffset;
           this.player.position.set(ox, oy, oz);
+          this.applyXRPerformanceProfile(true);
           this.configureIwerSeatedPoseIfPresent();
           this.bindXRSessionHandEvents();
         }
@@ -1079,6 +1092,7 @@ export class MissionControlSystem extends createSystem({
   update(delta: number): void {
     this.syncDeskPadsForXR(this.world.renderer.xr.isPresenting);
     this.updateXRHandInteractions(delta);
+    this.updateMissionHudPose(Math.min(Math.max(0, delta), 0.1));
     this.frameSnapshot = this.engine.getState();
     if (this.frameSnapshot.paused) return;
     const simulationDelta = Math.max(0, delta);
@@ -1094,6 +1108,7 @@ export class MissionControlSystem extends createSystem({
     }
 
     this.animateCubeTransitions(delta);
+    for (const fx of this.weatherFx.values()) animateWeather(fx, this.elapsedTime, reducedMotion);
 
     // Deep Agentic Co-Pilot Telemetry & Spatial Delegation Loop
     const intervention = this.coPilot.update(delta);
@@ -1791,6 +1806,15 @@ export class MissionControlSystem extends createSystem({
       }
     }
 
+    // Live-window mood: the cockpit dims during the downlink so the beam and the countdown own the scene.
+    const mood = this.frameSnapshot.phase === 'DOWNLINK' ? 0.45 : 1;
+    const holoLight = this.sceneObject('orbital-console')?.getObjectByName('HoloTableProjectorLight') as (Object3D & { intensity?: number }) | undefined;
+    if (holoLight && typeof holoLight.intensity === 'number') {
+      holoLight.userData.baseIntensity ??= holoLight.intensity;
+      const targetI = (holoLight.userData.baseIntensity as number) * mood;
+      holoLight.intensity += (targetI - holoLight.intensity) * Math.min(1, delta * 4);
+    }
+
     // Orbital pass clock: runs during OPERATIONS after the first scan; at zero the window opens itself.
     if (
       this.frameSnapshot.phase === 'OPERATIONS' && this.frameSnapshot.passStarted &&
@@ -1852,6 +1876,7 @@ export class MissionControlSystem extends createSystem({
       ) {
         if (txCount > this.lastTransmittedCount) {
           this.playCue('PACKET_RECEIVED');
+          this.announceGroundReceipts(nextState);
         }
         if (nextState.phase === 'DEBRIEF') {
           if (this.tutorial.getState().active) {
@@ -1868,7 +1893,7 @@ export class MissionControlSystem extends createSystem({
 
             // ZERO PACKET LOSS achievement if all 3 packets transmitted
             if (nextState.debrief.transmittedPacketIds.length === 3) {
-              this.desktopControls?.triggerAchievement('ðŸ›°ï¸ ZERO PACKET LOSS', 'All 3 Verified Packets Delivered', 'âœ¨');
+              this.desktopControls?.triggerAchievement('ZERO PACKET LOSS', 'Every docked cube reached the ground', '+');
             }
 
             this.voiceCommander?.trigger('DEBRIEF_VICTORY');
@@ -2532,6 +2557,8 @@ export class MissionControlSystem extends createSystem({
     if (!panel || !panel.visible) return null;
     const element = panel.getElementById<UIKit.Container>(buttonId);
     if (!element) return null;
+    // Buttons inside a hidden section (display: none) must never be hand-targeted.
+    if ((element as any).isVisible?.value === false) return null;
 
     panel.updateMatrixWorld(true);
     const matrix = (element as any)?.globalMatrix?.value;
@@ -2570,6 +2597,12 @@ export class MissionControlSystem extends createSystem({
       Btn_NextMission: [0.10, -0.22, 0.02],
       Btn_DailyPass: [-0.10, -0.26, 0.02],
       Btn_ReplayDecision: [0.10, -0.26, 0.02],
+      Btn_StartTraining: [-0.12, -0.14, 0.02],
+      Btn_StartPass: [0.12, -0.14, 0.02],
+      Btn_HudHint: [-0.12, -0.09, 0.02],
+      Btn_HudTransmit: [0.12, -0.09, 0.02],
+      Btn_HudRetry: [-0.12, -0.12, 0.02],
+      Btn_HudNext: [0.12, -0.12, 0.02],
     };
     const panelCenter = panel.getWorldPosition(new Vector3());
     const off = fallbackOffsets[buttonId] ?? [0, 0, 0.02];
@@ -2763,6 +2796,13 @@ export class MissionControlSystem extends createSystem({
       { panelId: 'debrief-panel', buttonId: 'Btn_ReorderQueue' },
       { panelId: 'debrief-panel', buttonId: 'Btn_DailyPass' },
       { panelId: 'debrief-panel', buttonId: 'Btn_ReplayDecision' },
+      { panelId: 'mission-hud', buttonId: 'Btn_StartPass' },
+      { panelId: 'mission-hud', buttonId: 'Btn_StartTraining' },
+      { panelId: 'mission-hud', buttonId: 'Btn_HudHint' },
+      { panelId: 'mission-hud', buttonId: 'Btn_HudTransmit' },
+      { panelId: 'mission-hud', buttonId: 'Btn_HudRetry' },
+      { panelId: 'mission-hud', buttonId: 'Btn_HudNext' },
+      { panelId: 'telemetry-hud', buttonId: 'Btn_RelaxedClock' },
     ];
     for (const pb of panelButtons) {
       const btnPos = this.getSpatialButtonWorldPosition(pb.panelId, pb.buttonId);
@@ -3327,6 +3367,7 @@ export class MissionControlSystem extends createSystem({
     this.briefingPanel = this.sceneObject<UIKitMLAsset>('briefing-panel');
     this.telemetryPanel = this.sceneObject<UIKitMLAsset>('telemetry-hud');
     this.debriefPanel = this.sceneObject<UIKitMLAsset>('debrief-panel');
+    this.missionHud = this.sceneObject<UIKitMLAsset>('mission-hud');
 
     const bindClick = (
       panel: UIKitMLAsset | undefined,
@@ -3442,6 +3483,22 @@ export class MissionControlSystem extends createSystem({
       this.handleRestartMission(),
     );
     bindClick(this.debriefPanel, 'Btn_NextMission', () => this.nextMission());
+
+    // Forward Mission HUD (headset-first)
+    bindClick(this.missionHud, 'Btn_StartPass', () => {
+      this.xrCardOpen = false;
+      this.playCue('SELECT_SECTOR');
+      this.voiceCommander?.speakDirect('Pass armed. Choose your first target.', '[ARIA-7] Pass armed. Point at a sector and pinch to select it.', 'HIGH');
+      this.syncAll();
+    });
+    bindClick(this.missionHud, 'Btn_StartTraining', () => {
+      this.xrCardOpen = false;
+      this.launchScenario('ORBITAL_ACADEMY');
+    });
+    bindClick(this.missionHud, 'Btn_HudHint', () => this.requestAriaHint());
+    bindClick(this.missionHud, 'Btn_HudTransmit', () => this.handleCommitDownlinkButton());
+    bindClick(this.missionHud, 'Btn_HudRetry', () => this.handleRestartMission());
+    bindClick(this.missionHud, 'Btn_HudNext', () => this.nextMission());
     bindClick(this.debriefPanel, 'Btn_DailyPass', () => this.startDailyPass());
     bindClick(this.debriefPanel, 'Btn_ReplayDecision', () => this.cycleReplay());
 
@@ -3467,6 +3524,152 @@ export class MissionControlSystem extends createSystem({
     }
     if (this.debriefPanel) {
       this.debriefPanel.visible = isDebrief;
+    }
+    // The forward Mission HUD exists only in a live immersive session; on flat screens the DOM HUD
+    // shows the same content (shared models in src/ui/hudText.ts).
+    if (this.missionHud) {
+      this.missionHud.visible = Boolean(this.world.renderer.xr.isPresenting);
+    }
+  }
+
+  /** Which mode the forward headset HUD is in for the current state. */
+  private missionHudMode(): 'card' | 'play' | 'result' {
+    const state = this.engine.getState();
+    if (state.phase === 'DEBRIEF') return 'result';
+    if (state.phase === 'OPERATIONS' && this.xrCardOpen && !state.passStarted && state.packets.length === 0 && !this.tutorial.isActive()) return 'card';
+    return 'play';
+  }
+
+  private setTextColor(panel: UIKitMLAsset, id: string, color: string): void {
+    let values = this.panelValues.get(panel);
+    if (!values) { values = new Map(); this.panelValues.set(panel, values); }
+    if (values.get(`${id}:color`) === color) return;
+    const el = panel.getElementById(id);
+    if (!el) return;
+    values.set(`${id}:color`, color);
+    el.setProperties({ color });
+  }
+
+  /** Writes the forward Mission HUD from the shared text models (same content as the desktop HUD). */
+  private syncMissionHud(): void {
+    const hud = this.missionHud;
+    if (!hud) return;
+    const state = this.engine.getState();
+    const custom = this.engine.getActiveCustomScenario();
+    const mode = this.missionHudMode();
+    this.setDisplay(hud, 'CardSection', mode === 'card' ? 'flex' : 'none');
+    this.setDisplay(hud, 'PlaySection', mode === 'play' ? 'flex' : 'none');
+    this.setDisplay(hud, 'ResultSection', mode === 'result' ? 'flex' : 'none');
+
+    if (mode === 'card') {
+      const card = missionCardModel(state, custom);
+      this.setText(hud, 'CardKicker', card.kicker);
+      this.setText(hud, 'CardTitle', card.title);
+      this.setText(hud, 'CardStory', card.story);
+      card.requests.forEach((r, i) => {
+        this.setText(hud, `CardReq${i + 1}Title`, r.title);
+        this.setText(hud, `CardReq${i + 1}Meta`, r.meta);
+      });
+      for (let i = 0; i < 3; i++) {
+        this.setDisplay(hud, `CardSensor${i + 1}`, card.sensors[i] ? 'flex' : 'none');
+        if (card.sensors[i]) this.setText(hud, `CardSensor${i + 1}`, card.sensors[i]);
+      }
+      this.setText(hud, 'CardRules', card.rules);
+      return;
+    }
+
+    if (mode === 'result') {
+      const result = resultModel(state, custom);
+      if (!result) return;
+      const color = result.tone === 'success' ? '#34d399' : result.tone === 'warn' ? '#f59e0b' : '#f87171';
+      this.setText(hud, 'ResultTitle', result.title);
+      this.setTextColor(hud, 'ResultTitle', color);
+      this.setText(hud, 'ResultScore', result.score);
+      for (let i = 0; i < 3; i++) {
+        this.setDisplay(hud, `ResultReq${i + 1}`, result.requests[i] ? 'flex' : 'none');
+        if (result.requests[i]) this.setText(hud, `ResultReq${i + 1}`, result.requests[i]);
+      }
+      this.setText(hud, 'ResultTip', clipText(result.tip, 220));
+      this.setText(hud, 'Lbl_HudNext', state.scenarioId === 'ORBITAL_ACADEMY' ? 'START OP 01' : 'NEXT OPERATION');
+      return;
+    }
+
+    // PLAY: Next Step + clock + resources + tracker
+    const tutStep = this.tutorial.getCurrentStepSpec();
+    const step = getNextStep(state, custom);
+    const hint = this.coPilot?.getLastHintText();
+    if (tutStep) {
+      this.setText(hud, 'StepKicker', `TRAINING ${tutStep.index}/9 | NO CLOCK`);
+      this.setText(hud, 'StepTitle', tutStep.title.replace(/^STEP \d+\/9:\s*/, ''));
+      this.setText(hud, 'StepBody', clipText(tutStep.vrInstruction, 170));
+      this.setText(hud, 'StepHands', '');
+    } else {
+      this.setText(hud, 'StepKicker', state.lastActionOk ? 'NEXT STEP' : 'ACTION REJECTED');
+      this.setText(hud, 'StepTitle', step.title);
+      this.setText(hud, 'StepBody', clipText(state.lastActionOk ? step.body : state.lastStatusMessage, 170));
+      this.setText(hud, 'StepHands', hint && state.hintsUsed > 0 ? hint : `HANDS: ${step.hands}`);
+    }
+    const toneColor = step.tone === 'critical' ? '#f87171' : step.tone === 'warn' ? '#fbbf24' : step.tone === 'success' ? '#34d399' : '#f8fafc';
+    this.setTextColor(hud, 'StepTitle', state.lastActionOk ? toneColor : '#f87171');
+
+    let clockLabel = 'PASS CLOCK';
+    let clockText = 'NO CLOCK';
+    let clockColor = '#34d399';
+    if (state.phase === 'DOWNLINK') {
+      clockLabel = 'LIVE LINK';
+      const left = Math.max(0, state.downlinkWindowSec - state.downlinkElapsedSec);
+      clockText = `${left.toFixed(1)}s`;
+      clockColor = '#f87171';
+    } else if (state.passRemainingSec !== null) {
+      clockLabel = state.passStarted ? 'LINK OPENS IN' : 'CLOCK (WAITS)';
+      clockText = formatClock(state.passRemainingSec);
+      clockColor = state.passStarted && state.passRemainingSec <= 10 ? '#f87171' : state.passStarted && state.passRemainingSec <= 25 ? '#fbbf24' : '#e2e8f0';
+    }
+    this.setText(hud, 'ClockLabel', clockLabel);
+    this.setText(hud, 'ClockText', clockText);
+    this.setTextColor(hud, 'ClockText', clockColor);
+    this.setText(hud, 'ResourceLine', `BATTERY ${state.power}/${state.maxPower} Wh  |  MEMORY ${state.storageUsed}/${state.maxStorage}  |  SEND ${state.downlinkCommittedSec.toFixed(1)}/${state.downlinkWindowSec.toFixed(1)}s`);
+    this.setText(hud, 'TrackerLine', trackerText(state, custom));
+    const stalled = isPassStalled(state, custom);
+    this.setText(hud, 'Lbl_HudTransmit', state.phase === 'DOWNLINK' ? 'CLOSE LINK' : stalled ? 'ABORT PASS' : `TRANSMIT (${state.queuePacketIds.length}/3 LOADED)`);
+    this.setText(hud, 'Lbl_HudHint', `ASK ARIA (-${SCORING.hintPenalty} pts)`);
+  }
+
+  /** Moves the forward HUD between the eye-level card pose and the strip above the globe, and
+   * shrinks the globe while the card is open so it never hides the card's lower rows. */
+  private updateMissionHudPose(delta: number): void {
+    const hud = this.missionHud;
+    const globe = this.sceneObject('earth-globe');
+    const immersive = Boolean(this.world.renderer.xr.isPresenting);
+    const mode = this.missionHudMode();
+    // Visibility is enforced every frame: on XR entry `isPresenting` flips after the visibility event.
+    if (hud && hud.visible !== immersive) {
+      hud.visible = immersive;
+      if (immersive) this.syncMissionHud();
+    }
+    // The ARIA hologram floats above the globe on desktop; in the headset it moves beside the globe
+    // so it never covers the forward Mission HUD.
+    const avatar = this.sceneObject('avatar-aria');
+    if (avatar) {
+      avatar.userData.desktopPos ??= avatar.position.clone();
+      const want = immersive ? ARIA_XR_POSITION : (avatar.userData.desktopPos as Vector3);
+      if (!avatar.position.equals(want)) {
+        avatar.position.copy(want);
+        avatar.scale.setScalar(immersive ? 0.7 : 1);
+      }
+    }
+    if (hud && immersive) {
+      const pose = mode === 'play' ? MISSION_HUD_POSES.strip : MISSION_HUD_POSES.card;
+      hud.position.set(pose.position[0], pose.position[1], pose.position[2]);
+      hud.rotation.set((pose.pitchDeg * Math.PI) / 180, 0, 0);
+      hud.scale.setScalar(pose.scale);
+    }
+    const target = immersive && mode !== 'play' ? GLOBE_CARD_SCALE : 1;
+    if (globe && Math.abs(this.globeHudScale - target) > 0.001) {
+      const k = this.profile.preferences.reducedMotion ? 1 : 1 - Math.exp(-6 * delta);
+      this.globeHudScale += (target - this.globeHudScale) * k;
+      if (Math.abs(this.globeHudScale - target) < 0.002) this.globeHudScale = target;
+      globe.scale.setScalar(this.globeHudScale);
     }
   }
 
@@ -3518,10 +3721,7 @@ export class MissionControlSystem extends createSystem({
     this.applyAction({ type: 'SELECT_SECTOR', sectorId });
     this.playCue('SELECT_SECTOR');
     this.slerpGlobeToSector(sectorId);
-    const state = this.engine.getState();
-    if (state.scenarioId === 'STANDARD_INDUS_PASS') {
-      this.voiceCommander?.handleSectorSelection(sectorId, state.activeSensorMode);
-    }
+    this.announceSectorWeather(sectorId);
 
     this.syncAll();
   }
@@ -3572,11 +3772,52 @@ export class MissionControlSystem extends createSystem({
 
     // Animate physical 3D aerospace switch stem & micro-LED on flight deck
     this.syncSensorSwitchHardware(state.activeSensorMode);
-
-    if (state.scenarioId === 'STANDARD_INDUS_PASS') {
-      this.voiceCommander?.handleSectorSelection(state.selectedSectorId, state.activeSensorMode);
-    }
+    // Spoken sensor capability (a fact about the sensor, never "this is the right one here").
+    const guide = SENSOR_PLAIN_GUIDE[state.activeSensorMode];
+    this.voiceCommander?.speakDirect(`${guide.label}. ${guide.sees}.`, `[ARIA-7] ${guide.label}: ${guide.sees}. ${guide.blind}.`, 'LOW');
     this.syncAll();
+  }
+
+  private announcedReceipts = new Set<string>();
+
+  /** Finale: each delivered cube gets a "ground radio" reply built from its request's own data. */
+  private announceGroundReceipts(state: MissionState): void {
+    const requests = getScenarioRequests(state.scenarioId, this.engine.getActiveCustomScenario());
+    for (const pkt of state.packets) {
+      if (!pkt.transmitted || this.announcedReceipts.has(pkt.id)) continue;
+      this.announcedReceipts.add(pkt.id);
+      const req = pkt.satisfiesRequestId ? requests[pkt.satisfiesRequestId] : undefined;
+      if (!req) {
+        this.voiceCommander?.speakDirect('Ground received a frame with no request attached.', '[GROUND] Received: no request matched this cube.', 'MEDIUM');
+        continue;
+      }
+      const label = req.shortLabel.split('|')[1]?.trim().toLowerCase() ?? 'request';
+      const meets = req.minimumConfidence === 'PROBABLE' || pkt.confidence === 'CONFIRMED';
+      const spoken = meets
+        ? `Ground here. ${label} evidence received. Teams are moving.`
+        : `Ground here. ${label} evidence is only probable. We will send scouts.`;
+      const caption = `[GROUND] ${meets ? clipText(req.consequenceOnSuccess, 140) : clipText(req.consequenceOnPartial, 140)}`;
+      this.voiceCommander?.speakDirect(spoken, caption, 'HIGH');
+      this.caption = caption;
+    }
+  }
+
+  private lastWeatherCallout = { sectorId: '', at: 0 };
+
+  /** Headset players cannot read small text quickly, so the selected sector's weather is spoken. */
+  private announceSectorWeather(sectorId: SectorId): void {
+    const now = performance.now();
+    if (this.lastWeatherCallout.sectorId === sectorId && now - this.lastWeatherCallout.at < 6000) return;
+    this.lastWeatherCallout = { sectorId, at: now };
+    const custom = this.engine.getActiveCustomScenario();
+    const state = this.engine.getState();
+    const sector = getScenarioSector(state.scenarioId, sectorId, custom);
+    const req = Object.values(getScenarioRequests(state.scenarioId, custom)).find((r) => r.targetSectorId === sectorId);
+    const weather = describeWeather(sector.cloudCover);
+    const spoken = req
+      ? `Sector ${sectorId}. ${weather}. ${req.shortLabel.split('|')[1]?.trim().toLowerCase() ?? 'request target'}, worth ${requestValue(req)} points.`
+      : `Sector ${sectorId}. ${weather}. No ground request here.`;
+    this.voiceCommander?.speakDirect(spoken, `[ARIA-7] ${spoken}`, 'MEDIUM');
   }
 
   private handleScan(): void {
@@ -3591,13 +3832,14 @@ export class MissionControlSystem extends createSystem({
       this.playCue(mode === 'OPTICAL' ? 'SCAN_OPTICAL' : 'SCAN_RADAR');
       this.audio.playSubBassPulse();
 
-      // Achievement triggers
-      if (state.selectedSectorId === 'B' && mode === 'RADAR') {
-        this.desktopControls?.triggerAchievement('âš¡ CLOUD PIERCER', '5.4 GHz Microwave Backscatter Verified', 'ðŸ”´');
-      } else if (state.selectedSectorId === 'C' && mode === 'OPTICAL') {
-        this.desktopControls?.triggerAchievement('ðŸ”­ SUB-METER LOCK', '0.75m GSD Zero Multipath Glare', 'ðŸŸ¢');
-      } else if (mode === 'THERMAL') {
-        this.desktopControls?.triggerAchievement('ðŸ”¥ PYROCLASTIC LOCK', 'MWIR/LWIR Thermal Radiometry Verified', 'ðŸŸ ');
+      // Achievement: the chosen sensor saw through this sector's weather well enough for its request.
+      const scanned = this.engine.getState().packets.find((p) => p.id === res.packet?.id);
+      const scannedReq = scanned?.satisfiesRequestId
+        ? getScenarioRequests(state.scenarioId, this.engine.getActiveCustomScenario())[scanned.satisfiesRequestId]
+        : undefined;
+      if (scanned && scannedReq && (scannedReq.minimumConfidence === 'PROBABLE' || scanned.confidence === 'CONFIRMED') && scanned.confidence !== 'UNVERIFIED') {
+        const weather = describeWeather(getScenarioSector(state.scenarioId, scanned.sectorId, this.engine.getActiveCustomScenario()).cloudCover);
+        this.desktopControls?.triggerAchievement('SENSOR MATCH', `${SENSOR_PLAIN_GUIDE[mode].label} read Sector ${scanned.sectorId} through: ${weather.toLowerCase()}`, '*');
       }
 
       this.voiceCommander?.trigger('SCAN_ACQUIRED');
@@ -3631,7 +3873,7 @@ export class MissionControlSystem extends createSystem({
       const queuedPackets = nextState.packets.filter((p) => nextState.queuePacketIds.includes(p.id));
       const totalTx = queuedPackets.reduce((acc, p) => acc + p.transmitSec, 0);
       if (totalTx <= nextState.downlinkWindowSec && queuedPackets.length === 3) {
-        this.desktopControls?.triggerAchievement('ðŸ§  KNAPSACK OPTIMIZER', `13.0s â†’ ${totalTx.toFixed(1)}s AI Feature Extraction`, 'âš™ï¸');
+        this.desktopControls?.triggerAchievement('FITS THE WINDOW', `${queuedPackets.reduce((acc, p) => acc + p.rawTransmitSec, 0).toFixed(1)}s raw -> ${totalTx.toFixed(1)}s after compression`, '+');
       }
 
       this.voiceCommander?.trigger('PROCESS_SUCCESS');
@@ -3752,9 +3994,28 @@ export class MissionControlSystem extends createSystem({
     }
   }
 
+  /**
+   * Quest performance profile. Fragment shading dominates on mobile XR GPUs, so in a headset:
+   * - fixed foveated rendering is enabled (periphery rendered at lower resolution);
+   * - two decorative point lights (cradle amber, bay blue) are switched off. Their emissive
+   *   materials still glow, and every MeshStandardMaterial drops two per-pixel light evaluations.
+   * Applied only on session start/end, so shader programs recompile once, not per frame.
+   */
+  private applyXRPerformanceProfile(immersive: boolean): void {
+    try {
+      (this.world.renderer.xr as unknown as { setFoveation?: (v: number) => void }).setFoveation?.(immersive ? 1 : 0);
+    } catch { /* foveation is optional */ }
+    const consoleObj = this.sceneObject('orbital-console');
+    for (const name of ['CradleAmberLight', 'DownlinkBayBlueLight']) {
+      const light = consoleObj?.getObjectByName(name);
+      if (light) light.visible = !immersive;
+    }
+  }
+
   /** Single entry point for loading an operation from any menu (desktop campaign, landing, panels). */
   public launchScenario(id: MissionScenarioId): void {
     if (!MISSION_SCENARIOS[id] || this.engine.getState().phase === 'DOWNLINK') return;
+    this.xrCardOpen = id !== 'ORBITAL_ACADEMY';
     if (this.tutorial.isActive()) this.tutorial.skip();
     this.forceReleaseAllGrabs();
     this.dailyDate = null;
@@ -3787,6 +4048,7 @@ export class MissionControlSystem extends createSystem({
 
   private handleRestartMission(): void {
     this.forceReleaseAllGrabs();
+    this.xrCardOpen = this.engine.getState().scenarioId !== 'ORBITAL_ACADEMY';
     this.lastTransmittedCount = 0;
     this.lastDownlinkTickSecond = -1;
     this.downlinkUiSyncAccumulator = 0;
@@ -3810,6 +4072,7 @@ export class MissionControlSystem extends createSystem({
     const uplinkBeam = consoleObj?.getObjectByName('DownlinkUplinkBeam');
     if (uplinkBeam) uplinkBeam.visible = false;
     this.reviewState = undefined;
+    this.announcedReceipts.clear();
     this.recordedDebrief = false;
     this.replayIndex = -1;
     if (this.debriefPanel) this.setText(this.debriefPanel, 'ReplayTimeline', 'DECISION REPLAY AVAILABLE AFTER DOWNLINK');
@@ -4427,9 +4690,35 @@ export class MissionControlSystem extends createSystem({
     }
   }
 
+  private weatherFx = new Map<SectorId, Points>();
+
+  /** One weather volume per sector, parented to the globe so it rotates and scales with the planet. */
+  private syncSectorWeather(): void {
+    const globe = this.sceneObject('earth-globe');
+    if (!globe) return;
+    const state = this.engine.getState();
+    const custom = this.engine.getActiveCustomScenario();
+    SECTOR_ORDER.forEach((sectorId, index) => {
+      let fx = this.weatherFx.get(sectorId);
+      if (!fx) {
+        const def = SECTOR_GEO_DEFINITIONS[sectorId];
+        if (!def) return;
+        fx = createWeatherFx(index + 1);
+        const local = latLonToGlobePoint(def.centerLatLon[0], def.centerLatLon[1], GLOBE_RADIUS * 1.004);
+        fx.position.copy(local);
+        fx.quaternion.setFromUnitVectors(this.worldUp, local.clone().normalize());
+        globe.add(fx);
+        this.weatherFx.set(sectorId, fx);
+        this.cleanupFuncs.push(() => { fx!.removeFromParent(); fx!.geometry.dispose(); });
+      }
+      applyWeather(fx, getScenarioSector(state.scenarioId, sectorId, custom).cloudCover);
+    });
+  }
+
   private syncAll(): void {
     const state = this.engine.getState();
     const globe = this.sceneObject('earth-globe');
+    this.syncSectorWeather();
 
     // Single source of truth: engine's committed downlink time vs. the active window.
     // Withdraw the one-shot QUEUE_OVERFLOW advisory as soon as it is no longer true.
@@ -4457,6 +4746,20 @@ export class MissionControlSystem extends createSystem({
       obj.scale.set(scale, scale, scale);
 
       let hex = 0x38bdf8;
+      const deliveredHere = state.packets.find((p) => p.sectorId === sectorId && p.transmitted && p.satisfiesRequestId);
+      const cutHere = state.packets.find((p) => p.sectorId === sectorId && p.droppedByWindow);
+      if (deliveredHere || cutHere) {
+        // Finale pins: delivered evidence glows green; cut-off evidence burns red.
+        hex = deliveredHere ? 0x22c55e : 0xef4444;
+        obj.scale.setScalar(1.4);
+        this.setObjectTint(obj, hex, deliveredHere ? 2.2 : 1.6);
+        const poly = globe?.getObjectByName(`SectorPoly_${sectorId}`);
+        if (poly instanceof Mesh && poly.material instanceof MeshStandardMaterial) {
+          poly.material.color.setHex(hex);
+          poly.material.emissive?.setHex(hex);
+        }
+        continue;
+      }
       if (isScanned) {
         if (scannedPkt.confidence === 'CONFIRMED') {
           hex = scannedPkt.headline.toLowerCase().includes('inundation') ||
@@ -4653,6 +4956,7 @@ export class MissionControlSystem extends createSystem({
       this.delegationBaseline = this.coPilot?.getTotalDelegations() ?? 0;
     }
     this.syncBriefingPanel();
+    this.syncMissionHud();
     this.syncTelemetryPanel();
     this.syncDebriefPanel();
     this.syncSpatialPanelsVisibility();
@@ -4827,7 +5131,10 @@ export class MissionControlSystem extends createSystem({
           : pkt.confidence === 'PROBABLE'
             ? 0xf59e0b
             : 0xef4444;
-      this.setObjectTint(obj, confidenceHex, isSelected ? 1.35 : 0.95);
+      // Live window: tray cubes that can still be docked pulse so "dock now!" is obvious.
+      const dockableLive = this.engine.getState().phase === 'DOWNLINK' && !pkt.queued && pkt.confidence !== 'UNVERIFIED';
+      const liveIntensity = dockableLive ? 1.1 + 0.9 * Math.abs(Math.sin(this.elapsedTime * 6)) : isSelected ? 1.35 : 0.95;
+      this.setObjectTint(obj, confidenceHex, liveIntensity);
       this.updateCubeTelemetryCanvas(obj, slotIndex, pkt);
     }
   }
@@ -4981,69 +5288,8 @@ export class MissionControlSystem extends createSystem({
       ctx.lineWidth = 3;
       ctx.strokeRect(26, 106, 224, 218);
 
-      if (pkt.confidence === 'UNVERIFIED') {
-        // Red hazard cloud stripes
-        ctx.strokeStyle = '#ef4444';
-        ctx.lineWidth = 4;
-        for (let x = 36; x < 240; x += 32) {
-          ctx.beginPath();
-          ctx.moveTo(x, 116);
-          ctx.lineTo(x + 24, 314);
-          ctx.stroke();
-        }
-        ctx.fillStyle = '#ef4444';
-        ctx.font = 'bold 22px monospace';
-        ctx.fillText('CLOUD BLOCKED', 44, 205);
-        ctx.fillStyle = '#fca5a5';
-        ctx.font = 'bold 17px monospace';
-        ctx.fillText('OPTICAL SCATTER', 48, 235);
-      } else {
-        // Technical 2D scan profile
-        ctx.strokeStyle = 'rgba(56, 189, 248, 0.25)';
-        ctx.lineWidth = 1.5;
-        for (let y = 126; y < 314; y += 30) {
-          ctx.beginPath();
-          ctx.moveTo(34, y);
-          ctx.lineTo(242, y);
-          ctx.stroke();
-        }
-        // River channel in swath box
-        ctx.fillStyle = 'rgba(14, 165, 233, 0.35)';
-        ctx.beginPath();
-        ctx.moveTo(34, 160);
-        ctx.bezierCurveTo(90, 180, 160, 240, 242, 280);
-        ctx.lineTo(242, 314);
-        ctx.lineTo(34, 314);
-        ctx.closePath();
-        ctx.fill();
-
-        // Waveform profile line
-        ctx.strokeStyle = accentColor;
-        ctx.lineWidth = 3.5;
-        ctx.beginPath();
-        for (let i = 0; i <= 10; i++) {
-          const px = 36 + i * 20;
-          const py =
-            215 +
-            Math.sin(i * 1.05 + pkt.sectorId.charCodeAt(0)) * 34 +
-            (pkt.sensorMode === 'RADAR' ? (i % 2 === 0 ? -12 : 12) : 0);
-          if (i === 0) ctx.moveTo(px, py);
-          else ctx.lineTo(px, py);
-        }
-        ctx.stroke();
-
-        ctx.fillStyle = '#38bdf8';
-        ctx.font = 'bold 16px monospace';
-        ctx.fillText(
-          pkt.sensorMode === 'RADAR'
-            ? 'SAR BACKSCATTER'
-            : pkt.sensorMode === 'THERMAL'
-              ? 'THERMAL IR SWATH'
-              : 'OPTICAL SWATH',
-          36,
-          130,
-        );
-      }
+      // What this sensor actually saw (blocked wash, heat front, radar speckle, sharp optical).
+      paintSensorView(ctx, 29, 109, 218, 212, pkt);
 
       // 3. Right Telemetry Data Column
       ctx.fillStyle = '#0b1626';
@@ -5221,7 +5467,7 @@ export class MissionControlSystem extends createSystem({
             this.setText(
               this.briefingPanel,
               titleId,
-              `REQ ${i + 1}: ${req.shortLabel} [QUEUED SLOT #${(matchingPkt.queueIndex ?? 0) + 1}]`,
+              `${req.shortLabel} [QUEUED SLOT #${(matchingPkt.queueIndex ?? 0) + 1}]`,
             );
             this.setText(
               this.briefingPanel,
@@ -5233,7 +5479,7 @@ export class MissionControlSystem extends createSystem({
             this.setText(
               this.briefingPanel,
               titleId,
-              `REQ ${i + 1}: ${req.shortLabel} [CUTOFF OVERFLOW WARNING]`,
+              `${req.shortLabel} [CUTOFF OVERFLOW WARNING]`,
             );
             this.setText(
               this.briefingPanel,
@@ -5247,7 +5493,7 @@ export class MissionControlSystem extends createSystem({
           this.setText(
             this.briefingPanel,
             titleId,
-            `REQ ${i + 1}: ${req.shortLabel} [ON TRAY - QUEUE ME]`,
+            `${req.shortLabel} [ON TRAY - QUEUE ME]`,
           );
           this.setText(
             this.briefingPanel,
@@ -5471,7 +5717,8 @@ export class MissionControlSystem extends createSystem({
       this.setText(
         this.telemetryPanel,
         'InspectorScience',
-        `${selectedPkt.scientificReason} ${selectedPkt.scientificCaveat ?? ''}`.trim(),
+        // One readable sentence in the headset; the full caveat stays in the desktop inspector.
+        clipText(selectedPkt.scientificReason, 150),
       );
 
       const cardColor =

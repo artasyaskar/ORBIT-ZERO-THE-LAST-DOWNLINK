@@ -800,6 +800,31 @@
         "RayInteractable": {},
         "PokeInteractable": {}
       }
+    },
+    {
+      "id": "mission-hud",
+      "name": "Forward Mission HUD",
+      "content": {
+        "type": "asset",
+        "asset": "mission-hud"
+      },
+      "transform": {
+        "position": [
+          0,
+          1.56,
+          -0.98
+        ],
+        "rotationDeg": [
+          14,
+          0,
+          0
+        ],
+        "scale": 0.105
+      },
+      "components": {
+        "RayInteractable": {},
+        "PokeInteractable": {}
+      }
     }
   ]
 }

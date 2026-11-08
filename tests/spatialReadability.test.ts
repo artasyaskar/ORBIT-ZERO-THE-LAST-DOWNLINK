@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  GLOBE_CARD_SCALE,
   IMMERSIVE_PANEL_POSES,
+  MISSION_HUD_POSES,
   MIN_PANEL_TEXT_DEG,
   PRIMARY_PANEL_TEXT_DEG,
   SEATED_EYE,
@@ -66,6 +68,36 @@ describe('Spatial panel legibility (geometry)', () => {
       expect(innerAzimuth - globeRadiusDeg).toBeGreaterThanOrEqual(0.5);
     });
   }
+
+  describe('forward Mission HUD (headset-first)', () => {
+    const xml = read('mission-hud');
+    const smallest = Math.min(...fontSizes(xml));
+    for (const [mode, pose] of Object.entries(MISSION_HUD_POSES)) {
+      const asPanel: PanelPose = { position: pose.position, yawDeg: 0, scale: pose.scale };
+      it(`${mode}: every font is at least ${MIN_PANEL_TEXT_DEG} degrees`, () => {
+        expect(textAngleDeg(smallest, asPanel)).toBeGreaterThanOrEqual(MIN_PANEL_TEXT_DEG);
+      });
+      it(`${mode}: titles are at least ${PRIMARY_PANEL_TEXT_DEG} degrees`, () => {
+        expect(textAngleDeg(classFont(xml, 'hud-title')!, asPanel)).toBeGreaterThanOrEqual(PRIMARY_PANEL_TEXT_DEG);
+      });
+      it(`${mode}: centred within 20 degrees of seated forward`, () => {
+        const [x, y, z] = pose.position;
+        const off = (Math.acos(-(z - SEATED_EYE[2]) / Math.hypot(x - SEATED_EYE[0], y - SEATED_EYE[1], z - SEATED_EYE[2])) * 180) / Math.PI;
+        expect(off).toBeLessThan(20);
+      });
+    }
+    it('strip bottom edge stays above the globe-and-rings silhouette', () => {
+      const pose = MISSION_HUD_POSES.strip;
+      // Play section is about 300 px tall; panels are centred on their pose.
+      const bottomY = pose.position[1] - (300 * pose.scale * 0.01) / 2;
+      const bottomDeg = (Math.atan2(bottomY - SEATED_EYE[1], -(pose.position[2] - SEATED_EYE[2])) * 180) / Math.PI;
+      const globeTopDeg = (Math.atan2(1.07 + 0.23 - SEATED_EYE[1], 0.48) * 180) / Math.PI;
+      expect(bottomDeg).toBeGreaterThan(globeTopDeg);
+    });
+    it('card leaves room for the shrunken globe', () => {
+      expect(GLOBE_CARD_SCALE).toBeLessThanOrEqual(0.5);
+    });
+  });
 
   it('side panels are within a comfortable viewing distance', () => {
     for (const { pose } of PANELS) {

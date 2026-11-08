@@ -392,10 +392,10 @@ export function buildDebriefReport(params: {
     evidenceProvenance,
     summaryHeadline: achievedBest
       ? benchmark.score === 100
-        ? 'ALL THREE REQUESTS VERIFIED BEFORE LOSS OF SIGNAL (GRADE S).'
+        ? `ALL THREE REQUESTS VERIFIED BEFORE LOSS OF SIGNAL (GRADE ${efficiencyGrade}).`
         : weighted
           ? `BEST POSSIBLE TRIAGE: ${totalScore}/${benchmark.score} ACHIEVABLE POINTS. NOT EVERY REQUEST COULD BE ANSWERED THIS PASS, AND YOU SAVED THE MOST VALUABLE ONES.`
-          : `SCENARIO MASTERY: ${totalScore}/${benchmark.score} POSSIBLE POINTS EARNED (GRADE S). THE CONVECTIVE STORM LIMITS CERTAINTY, NOT YOUR TRIAGE SKILL.`
+          : `SCENARIO MASTERY: ${totalScore}/${benchmark.score} POSSIBLE POINTS EARNED (GRADE ${efficiencyGrade}). THE CONVECTIVE STORM LIMITS CERTAINTY, NOT YOUR TRIAGE SKILL.`
       : `${requestsVerifiedCount}/3 VERIFIED - REVIEW THE EVIDENCE THAT DID NOT REACH EARTH.`,
     deterministicRecommendation: advice.join(' '),
     counterfactualComparison: `SCENARIO CEILING (${benchmark.score}/100 RAW): ${describeMissionPlan(benchmark)}. ${benchmark.powerUsed} Wh power units, ${benchmark.transmitSec.toFixed(1)}s transmission @ ${throughput.toFixed(1)} MB/s.`,

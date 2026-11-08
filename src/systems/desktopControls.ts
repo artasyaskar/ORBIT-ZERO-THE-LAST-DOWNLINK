@@ -1937,7 +1937,9 @@ export class DesktopControlsManager {
     const intervention = (window as any).__ORBIT_ZERO__?.getCoPilotIntervention?.() as { headline: string; detailedAdvice: string; urgency: string } | null | undefined;
     const sector = getScenarioSector(state.scenarioId, state.selectedSectorId, this.host.engine.getActiveCustomScenario());
     let badge = 'ARIA-7';
-    let line = `Sector ${state.selectedSectorId} (${sector.name}): ${describeWeather(sector.cloudCover)}. ${sector.terrainSummary}`;
+    let line = state.phase === 'OPERATIONS' && !this.hasUserSelectedSector
+      ? 'Pick a sector on the globe. I will tell you its weather. Click me for a hint if you get stuck.'
+      : `Sector ${state.selectedSectorId} (${sector.name}): ${describeWeather(sector.cloudCover)}.`;
     let isCritical = false;
     if (state.phase === 'DEBRIEF') {
       line = `Pass complete: ${state.debrief?.totalScore ?? 0} pts. Retry to beat it, or move to the next operation.`;

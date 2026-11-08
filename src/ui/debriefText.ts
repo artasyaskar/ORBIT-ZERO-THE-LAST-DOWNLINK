@@ -34,6 +34,8 @@ const RETRY_TITLES: Record<string, string> = {
   WINDOW_CUTOFF_DROPPED_PACKETS: 'Not everything fit in the downlink window',
   UNPROCESSED_STORAGE_BOTTLENECK: 'Onboard storage filled up',
   INSUFFICIENT_VERIFIED_EVIDENCE: 'Not enough verified evidence',
+  PASS_CLOCK_EXPIRED: 'The pass clock ran out',
+  MISSION_ABORTED: 'The pass was aborted',
 };
 
 export interface RetryGuidance {

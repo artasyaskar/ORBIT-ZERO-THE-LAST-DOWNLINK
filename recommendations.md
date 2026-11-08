@@ -1,181 +1,245 @@
-# ORBIT ZERO: THE LAST DOWNLINK — Engineering Recommendations
+# ORBIT ZERO: THE LAST DOWNLINK — Winning-Build Recommendations (Review 2)
 
-## 1. Executive Summary
+Review date: Nov 7, 2026. Deadline: Nov 18, 12:00 PM PST (Nov 19, 1:00 AM PKT). About 10 working days remain.
+Build reviewed: `2f12097` (local, 4 commits ahead of `origin/main`, not deployed).
 
-**Audit completed, 6 November 2026, against workspace revision `50a8c5b`.** Labels below distinguish **verified implementation**, **evidence gaps**, and **recommendations**; implemented does not mean release-ready.
+This review looks at the redesigned build through five lenses: a first-time player, a competition judge, a UI/UX and art director, a platform executive at Meta, and the engineer who has to ship it. Every finding cites what was observed or measured. Anything not tested on a Quest headset is marked as such.
 
-Preserve the humanitarian intelligence-triage premise, tactile evidence cubes, seated cockpit, deterministic mission engine, and explicit uncertainty. The memorable proposition is deciding **which evidence deserves the last downlink**, not operating an elaborate dashboard. The current project implements a substantial playable loop, but premium credibility is undermined by divergent interaction paths, unreliable training qualification, generated-scenario inconsistencies, and unsupported hardware-readiness claims.
+---
 
-**First fix input/state correctness and establish physical Quest evidence.** Then unify feedback and improve meaningful campaign decisions. Do not rewrite the engine, add more decorative effects, introduce multiplayer, or build backend infrastructure to compensate for unfinished gameplay.
+## 1. Honest verdict
 
-The finding register contains **2 P0, 9 P1, 8 P2, and 2 P3 items**. P0 denotes a release blocker, including an unclosed hardware-verification gate—not a claim that a headset failure was observed.
+The redesign fixed the game's core problem: it now has a real decision (read the weather, pick the sensor, choose what to sacrifice), real pressure (pass clock and live window) and a clear win/lose rule. On desktop the full loop works with the mouse only and finishes in about 2–3 minutes.
 
-## 2. Verified Current Project State
+It is **not yet a winning entry**, for three reasons:
 
-| Area | Verified state |
-|---|---|
-| Stack | Lockfile: IWSDK **1.0.1**, UIKitML **0.1.8**, Three.js alias **super-three 0.181.0**, TypeScript **5.9.3**, Vite **7.3.7**, Vitest **3.2.7**, Playwright **1.64.1**, IWER **2.7.0**. Historical documentation describes different versions. |
-| XR/physics | `iwsdk.config.json` requests VR, `local-floor`, and hand tracking. Physics and locomotion are disabled. Rapier/Havok are dependency-tree entries, not evidence of active game physics. |
-| Product | Academy, Fireline, Monsoon, and Aftershock configurations exist; additional legacy scenario IDs, daily rotation, procedural passes, preferences, mastery, replay, and ARIA assistance also exist. |
-| Screens | DOM landing/selection/advisory; spatial briefing, telemetry/inspection, and debrief panels; desktop campaign/settings/tutorial/HUD overlays. Mission results include success, partial success, and failure diagnostics. |
-| Data/services | Local-storage profile; no observed accounts, server API, database, multiplayer, cloud saves, or analytics transport. ARIA's `AgenticCoPilot` is rule/planner-driven, **not an LLM**. |
-| Fresh verification | `npm run typecheck` passed. Five selected unit-test files passed **97 tests**: engine, planner, procedural crisis, profile, and co-pilot. This was not the complete suite. |
+1. **Judges will play it in a Quest headset, and almost all of the new onboarding is desktop-only.** The Mission Card, the Next Step banner, the action bar and the new debrief are DOM overlays. They are hidden in XR. The headset player gets the old world-space panels with small text plus a rewritten status line.
+2. **Performance is far over budget and unmeasured on device.** The emulator run measured **310 draw calls and 214,760 triangles**. `docs/ART_DIRECTION.md` sets the budget at **< 50 draw calls and < 35,000 triangles**. The main JS chunk is **7.08 MB (1.83 MB gzip)**. If Quest drops below 60 fps, the Technical score collapses, whatever else is good.
+3. **The "wow" moments are told, not shown.** The puzzle relies on weather, but the globe only shows "cloudy vs clear" beacons. Smoke, storm and dust look the same. A scan produces a generic cube. The live window looks almost identical to the planning phase. Success is a text panel.
 
-Existing `artifacts/release-audit/` screenshots/report and profiling JSON provide historical desktop/IWER evidence, not current-build or physical-headset certification. Full build/E2E execution was deliberately avoided because existing scripts write build/release artifacts; no dependencies were installed.
+My honest estimate of the current standing, per equally weighted criterion. This is my judgement, not a measured score.
 
-## 3. Existing Architecture Map
-
-- `src/index.ts:initOrbitZeroGame` creates the IWSDK world and registers `MissionControlSystem`; `LandingController` owns a separate Three.js landing renderer/UI/audio lifecycle.
-- `src/mission/missionEngine.ts:MissionEngine` owns simulation state, resource accounting, acquisition, processing, queueing, timed transmission, and action journals. Configuration, planning, scoring, and tutorial logic are separate modules.
-- `src/systems/missionControlSystem.ts` is approximately **5,837 lines**: ECS bindings, input interpretation, cube manipulation, simulation orchestration, panel updates, effects, settings, persistence, and testing globals.
-- `src/systems/desktopControls.ts:DesktopControlsManager` adds approximately **3,160 lines**, including a second drag/drop interpretation and substantial DOM UI generation.
-- `src/scene-assets/` builds procedural objects; `src/assets.ts` and `public/scenes/main.iwsdk.scene.json` connect assets/entities; `public/ui/*.uikitml` defines spatial panels.
-- Audio/voice/profile systems are separate, but coordinated through the large runtime system and browser globals.
-
-The valuable boundary is **pure simulation versus platform presentation**. No direct relative-TypeScript-import cycle was found by a lightweight dependency scan; behavioral coupling is the larger problem. `getState()` copies packet records shallowly, leaving nested provenance collections shared.
-
-## 4. Gameplay and Campaign Review
-
-**Verified loop:** select sector/sensor → scan → inspect cube → process or discard → stage/reorder evidence → commit downlink → evaluate transmitted evidence. Three physical cube slots coexist with a nine-unit storage budget; compression frees storage, not cube slots. Power costs and transmission durations make some planning consequential.
-
-| Operation | Distinct implementation | Design assessment/recommendation |
-|---|---|---|
-| **OP 00 Academy** | Tutorial state machine and single-target scoring override. | Preserve short rehearsal; a grab can satisfy inspection, and scoring qualifies any non-unverified transmission without proving compression or all gestures. |
-| **OP 01 Fireline** | Thermal hotspots through smoke; optical structural inspection; cloud/thermal limitations and non-fire heat decoys. | Strongest modality contrast. Require players to justify an actionable hotspot versus an irrelevant thermal anomaly; avoid exposing the complete solution before discovery. |
-| **OP 02 Monsoon Shield** | Landing maps this operation to `STANDARD_INDUS_PASS`: SAR for clouded sectors, optical for the clear bridge. Separate `MONSOON_SUPERCELL_PASS` clouds that bridge and limits certainty. | Preserve the distinction; test best-achievable partial outcomes in Supercell rather than incorrectly labeling the main operation unwinnable. Compression must not resolve metallic ambiguity. |
-| **OP 03 Aftershock** | Optical damage assessment, thermal substation evidence, and a scripted processing upgrade for probable SAR observations. | Different disaster theme, but the same acquisition/staging sequence. Separate surface-change evidence from temperature evidence; add a justified comparison decision rather than magical processing. |
-
-Preparation is not governed by an advancing orbital-contact deadline: `commitDownlink()` starts the transmission clock. Procedural threat descriptions/severity do not themselves simulate evolving emergencies. Campaign outcomes primarily become debrief text, not continuing world consequences.
-
-**Recommendation:** retain deliberate seated planning, but introduce one mission-specific uncertainty or priority conflict at a time. Authored route/shelter consequences, alternative valid solutions, and constrained rescans offer more replay value than cosmetic seed variation. Guidance should explain the next decision; Expert mode should not silently become an optimal-plan executor.
-
-## 5. Frontend, UI/UX and Art Direction Review
-
-**Verified inconsistency:** landing CSS, desktop inline styles, UIKitML, and cube canvases independently encode hierarchy/status. Some metadata is 10px. Landing buttons have focus-visible styles; desktop campaign containers need a keyboard audit. Responsive landing rules do not establish cockpit-overlay usability.
-
-`src/systems/missionControlSystem.ts:updateCubeTelemetryCanvas()` draws generic water/bridge imagery across evidence, labeling unverified packets “CLOUD BLOCKED / OPTICAL SCATTER” regardless of modality. Repeated banners, scientific metadata, ARIA overlays, and cube labels compete for attention.
-
-**Recommended visual system:** “Tactile Orbital Instrumentation.” Use restrained dark hardware, neutral readable text, one interaction accent, and separately labeled uncertainty/warning states. Prioritize **objective → actionable evidence → resource constraint → next action**. Keep detailed caveats in inspection, not every persistent surface. Success/failure screens should show evidence delivered, unmet requests, consequence, and one retry lesson—not another telemetry wall.
-
-Earth should establish place and scale; the cube should communicate provenance; ARIA should focus attention. Align landing promise with cockpit fidelity rather than adding bloom, particles, panels, or militarized ornament. Validate typography in angular size and actual seated optics, not CSS pixels alone.
-
-## 6. 3D, WebXR and Interaction Review
-
-**Verified:** procedural cockpit/cupola, textured Earth, satellite assets, holographic cube contents, emissive instrumentation, transparent overlays, and animated ARIA exist. Static mesh merging already exists; preserve dynamic named objects when optimizing. Lighting uses ambient/directional and local instrument lights; no measured shadow/rendering-quality guarantee follows from their presence.
-
-Genuine IWSDK interaction components coexist with a custom hand sampler and drag system. `sampleLiveXRHandState()` favors IWER's remote hand-state API; the physical branch assumes left/right controller indices, returns `connected: true` without validating current joint visibility, and `updateXRHandInteractions()` skips null samples without necessarily releasing held objects. Three.js assigns input slots by connection order. This is a **verified contract defect; its physical symptom remains untested**. Late-created Three.js hand groups can populate on later frames—permanent empty joints are not established.
-
-Custom grabs can suppress/force-release SDK grabs, and two hands lack a clear exclusive cube owner. Desktop and XR also disagree on drop arbitration and some station coordinates. Broad magnetic envelopes overlap. Seated/tabletop/recenter settings cannot be certified while interaction anchors remain independent world-space constants.
-
-**Recommendation:** one canonical input-source adapter, one exclusive grab lifecycle, and station-local snap anchors with preview, hysteresis, and explicit release. Test absent hands, right-first connection, partial joints, occlusion, reacquisition, rejected drops, and exit/re-entry. IWER gestures are useful integration evidence; they do not reproduce real tracking noise, comfort, depth readability, or fatigue.
-
-## 7. Backend and Data Architecture Decision
-
-**Choose a local-first, self-contained single-player game.** Static HTTPS hosting plus versioned local saves is sufficient for the verified product.
-
-Keep preferences and mastery in local storage with schema validation, migration, recoverable write errors, and export/import. Introduce an active-mission checkpoint only after reset/replay semantics are stable; include scenario version/seed and journal or validated state. Use IndexedDB only if save/replay volume justifies it.
-
-Do not build authentication, databases, matchmaking, multiplayer, remote configuration, or cloud saves now. Optional opt-in analytics should answer a defined onboarding/balance question. Cloud saves become valuable only with demonstrated cross-device demand. Local scores/debug commands are untrusted if competitive leaderboards are ever introduced; obfuscating the client would not solve that trust boundary.
-
-## 8. Scientific Authenticity Review
-
-**Implemented principles:** optical cloud obstruction, thermal cloud/smoke distinctions, SAR surface backscatter and geometric ambiguity, and explicit scripted uncertainty. These are authored observations—not image acquisition or remote-sensing inference.
-
-`missionConfig.ts` supplies confidence percentages, SNR, resolution, temperature narratives, and sensor outcomes. Those values are **illustrative**, not calibrated probabilities or measurements. Aftershock processing explicitly performs a heuristic confidence upgrade; no measured pre/post image comparison exists. Compression is a fixed resource/payload transformation, not an implemented scientific codec.
-
-A concrete overclaim occurs when processed SAR satisfies Aftershock REQ 3 and the success consequence nevertheless asserts a **740 K transformer anomaly**. Evidence must support the conclusion's modality and scope.
-
-Transmission arithmetic is payload / throughput with **zero default overhead**. Source comments/UI use **MB and MB/s**, despite ambiguous `Mb`/`Mbps` identifiers: do not silently reinterpret these as bits or a real radio link budget. Procedural briefing calls an abstract buffer “9 MB”; other UI uses `STR` with an illustrative 18 MB/STR mapping. Power is labeled Wh without time-integrated consumption, charging, or modeled orbit/contact geometry. Standardize these abstractions before adding realism.
-
-## 9. Performance and Reliability Review
-
-Historical `artifacts/profile/xr-state-profile.json` reports **176 median calls, 182,940 triangles, one render invocation/frame, and 52 transparent renderables** in emulated XR. Other historical artifacts report different scenes/counts. None establishes current physical Quest CPU/GPU frame time. `tests/e2e-runtime.mjs` still gates unrelated post-XR counts at 145 calls/100,000 triangles; arbitrary budgets are not device performance evidence.
-
-Measure sustained headset frame intervals, missed frames, CPU/GPU timing where available, load time, and memory across operations/restarts. At 72 Hz, the frame interval is approximately **13.9 ms**; renderer counters diagnose workload, not compliance. Profile transparency/overdraw, canvas texture uploads, synchronous planning, snapshot allocation, material/light cost, and full `syncAll()` updates before optimizing.
-
-Local `public/assets/models/incoming/` contains **47.8 MiB** of ignored source material. Vite's public-directory copying does not obey `.gitignore`; verify the release manifest. Root-relative landing texture URLs conflict with relative-base deployment. Existing licensing audits do not establish the provenance of every newer/generated asset. Launch errors, global listeners, and shared material state also require targeted reliability work; generalized “no leaks” claims are unsupported.
-
-## 10. Testing and QA Gaps
-
-The fresh **97 passing unit tests** establish selected deterministic behavior, not complete gameplay validity. The full balance harness writes release artifacts and was not run. Existing E2E scripts exercise desktop controls, IWER pointing/pinching, placement, transmission, and outcomes; some helpers fall back to `clickPanel()` or use debug commands for setup/progression.
-
-The current release audit does include gesture traversal for its hands stage; do not dismiss it as entirely direct-action testing. However, its IWER remote branch and mono emulation do not validate the physical sampler, stereo presentation, or hands-only journey from browser landing through results. Reports generally lack build/content hashes, weakening reproducibility.
-
-Add invariant/property tests, input-contract integration tests, no-fallback golden-path E2E, generated-seed replay tests, profile reload tests, loading-failure tests, and repeated-session soak tests. Physical Quest 3/3S acceptance remains a separate required tier. Deployment, dependency vulnerability status, real sensor validity, headset audio, and long-session comfort were not independently certified.
-
-## 11. Prioritized Weak Points
-
-Effort: **S** localized, **M** subsystem, **L** coordinated work. Risk: **low/medium/high** migration risk. Acceptance is observable, not “looks polished.” Paths are repository-relative.
-
-| ID | Priority | Weakness / evidence | Recommendation → acceptance; effort/risk |
+| Criterion (25% each) | Now | Reachable by Nov 17 | What moves it |
 |---|---|---|---|
-| F01 | P0 | Physical hand identity/visibility/loss contract is unsafe (`src/systems/missionControlSystem.ts:2584,3237`). | Use handed active sources/frame poses; recover on loss → no stale grab or wrong-hand action in contract tests and Quest; M/high. |
-| F02 | P0 | No physical headset performance/ergonomic release evidence. | Require recorded Quest sessions and sustained frame-time/comfort checks → all four operations hands-only on declared devices; L/low. |
-| F03 | P1 | Competing SDK/custom grabs; no exclusive cube ownership (`src/systems/missionControlSystem.ts:resolve3DTargetForHand`, `syncCubeTransforms`). | One owner/authority; exclude hidden/ineligible targets → simultaneous grabs cannot duplicate/teleport cubes; M/high. |
-| F04 | P1 | Duplicate world anchors/drop policies (`desktopControls.ts:79–87,632`; runtime station constants/`handleCubeReleased`). | Shared station-local nearest-target resolution and calibration → equivalent drops behave identically after recenter/tabletop changes; M/high. |
-| F05 | P1 | Grab satisfies inspection; Academy's scoring override asserts full qualification without observing gestures/compression (`src/mission/scoring.ts:182–239`). | Require distinct gesture evidence and valid training packet → grab/raw unrelated transmission cannot certify training; M/medium. |
-| F06 | P1 | Generated config is absent from planner/benchmark/cache and `replayMission()` inputs. | Carry immutable scenario definition/version/seed everywhere → accepted plan, score, and replay agree across a seed corpus; M/high. |
-| F07 | P1 | SAR-only substation evidence yields thermal consequence (`missionConfig.ts:AFTERSHOCK_REQUESTS.REQ_3`). | Derive consequences from evidence capability → SAR never asserts measured temperature; S/low. |
-| F08 | P1 | XR launch rejection is swallowed; landing assets use root URLs (`index.ts:56–61`; `landingScene.ts`). | Recoverable launch/loader and consistent asset base → denied XR and subpath hosting preserve a usable menu/game; M/medium. |
-| F09 | P1 | E2E fallbacks mask interface failures; budgets/reports are not reproducible release gates (`e2e-runtime.mjs:84–96,196–199`). | Separate setup hooks from no-fallback journeys; stamp build/device/settings → unreachable controls fail the test; M/low. |
-| F10 | P1 | Spatial `AudioCaption` is a cue summary; actual ARIA speech subtitles live in DOM (`voiceCommander.ts:ensureSubtitleBar`; `syncSettings`). | One caption feed to DOM and spatial panel → all spoken instructions available in silent immersive play; M/medium. |
-| F11 | P1 | Profile reload omits Academy; any Fireline/Standard debrief marks tutorial complete (`missionProfile.ts:loadMissionProfile`, `recordMissionMastery`). | Persist actual training qualification with versioned migration → reload retains Academy and failed campaign cannot skip training; S/medium. |
-| F12 | P2 | All bay waveguides share one material, then receive per-slot mutations (`orbitalConsole.scene-asset.ts:817–834`; `syncAll`). | Separate independently styled slot materials → mixed empty/queued/overflow slots remain visually distinct; S/low. |
-| F13 | P2 | Static preparation/threat metadata and repeatable recipe limit mission depth. | Add authored information conflicts and response consequences → players make different justified plans, not just execute prompts; L/medium. |
-| F14 | P2 | `9 MB` briefing disagrees with abstract storage; confidence/physics labels imply excess precision. | Explicit units and illustrative-quality labels → UI, calculations, caveats, and debrief agree; S/low. |
-| F15 | P2 | Independent styling, tiny metadata, generic cube diagrams, weak focus treatment. | Shared presentation tokens and evidence-specific inspection → readable, keyboard-operable screens and consistent labeled states; M/medium. |
-| F16 | P2 | Hot-path planning/snapshots/UI uploads and overdraw lack causal profiling. | Measure then optimize dirty updates/resources, preserving existing merging → sustained device traces improve without interaction regression; M/medium. |
-| F17 | P2 | Public source assets can ship; attribution audits are stale. | Curated runtime asset manifest plus exact provenance → deployment excludes incoming sources and every shipped asset is traceable; S/low. |
-| F18 | P2 | Landing key listener and speech voice callback outlive visible UI (`landingUI.ts:442,499`; `voiceCommander.ts:529`). | Explicit session ownership/unsubscribe/dispose → repeated transitions plateau in listeners, memory, and renderer resources; M/medium. |
-| F19 | P2 | Planner delegation can displace player judgment (`agenticCoPilot.ts`). | Preview one bounded action, revalidate it, disclose assistance → Expert mastery cannot be earned by undisclosed autopilot; S/medium. |
-| F20 | P3 | Browser speech voices and synthetic cues vary in delivery quality. | Optional authored radio lines/mix after correctness → intelligible, non-overlapping speech with tested captions; M/low. |
-| F21 | P3 | Crisis storytelling mostly resides in text/effects rather than persistent outcomes. | Optional restrained response-status/environment changes → consequences memorable without extra interaction clutter or frame-time loss; M/low. |
+| Innovation & Creativity | 6/10 | 8/10 | Visible weather, sensor-specific scan reveal, physical live docking |
+| Experience Design | 5/10 in XR (7/10 desktop) | 8/10 | XR Mission Card and Next Step, a shorter Academy, ground consequences |
+| Technical Implementation | 4/10 (unverified fps) | 7/10 | Device-measured ≥ 72 fps, deployed link, zero console errors |
+| Polish & Presentation | 5/10 | 8/10 | Weather FX, finale, sound, encoding bugs fixed, strong 2:30 video |
 
-## 12. Recommended Target Architecture
+With 4,850 registrants, no one can promise first place. A realistic target is to **compete for the Gaming track and two special awards: Best First Five Minutes and Best Accessibility Forward Experience**. The accessibility features already exist (relaxed clock, one-hand assist, large text, captions, high contrast, reduced motion, head-point dwell); they need to be presented and verified.
 
-```mermaid
-flowchart TD
-  Input[XR and desktop adapters] --> Interaction[Grab, target and snap controller]
-  Interaction --> Session[Mission session and command gateway]
-  Config[Versioned scenario and seed] --> Session
-  Session --> Engine[Existing deterministic MissionEngine]
-  Engine --> View[Read-only snapshot and domain events]
-  View --> Render[Scene and spatial or DOM presenters]
-  View --> Audio[ARIA, audio and caption presenter]
-  Engine --> Save[Local profile, checkpoint and journal]
-  Engine --> QA[Planner, scoring and replay validation]
-```
+---
 
-| Existing → target | Why / migration risk / status |
+## 2. What a first-time player experiences now (desktop, observed)
+
+Sources: `artifacts/redesign/01…06.png` from `node tests/e2e-redesign-desktop.mjs`, all 13 checks passing.
+
+What works:
+- The Mission Card says what you are saving, what each request is worth, the weather at each target, what each sensor sees, and the win line. This is the single biggest improvement.
+- The action bar makes every action visible, and the cube chips show sector, sensor, confidence, time and location.
+- The debrief shows ✓ per request, "your decision", the score versus the best possible score, and a "try this" tip.
+
+What still hurts, in order of damage:
+1. **Contradictory debrief headline.** It shows "MISSION SUCCESS · GRADE A" next to "ALL THREE REQUESTS VERIFIED … (GRADE S)" (screenshot 05). Cause: `summaryHeadline` in `src/mission/scoring.ts` (~line 393) hardcodes "GRADE S" whenever `achievedBest` is true, but the grade also depends on link margin and hints.
+2. **Corrupted achievement text.** The toasts render garbage such as `ðŸ›°ï¸ ZERO PACKET LOSS` and `âš¡ CLOUD PIERCER`. The source strings in `src/systems/missionControlSystem.ts` (lines ~1871, 3596–3600, 3634) are double-encoded UTF-8 (mojibake). The same achievements are also Indus-specific ("CLOUD PIERCER" requires B + RADAR) and hardcode `13.0s`.
+3. **The live window feels like the planning screen.** Screenshot 04 is nearly identical to 03, apart from the timer turning red. Nothing tells you this is the climax.
+4. **The ARIA box restates terrain description** ("Highland emergency fuel & medical depot beneath moderate laminar downwind smoke plume"). This reads as noise. ARIA should only speak when it has something useful to say.
+5. **The action bar covers the lower console** (cradle and bay area) at 1440×960, and the cube chips wrap onto two rows. The physical stations are what make the game feel spatial, and the HUD hides them.
+6. **The toast overlapped the Next Step title** in screenshots 03 and 04. It was moved to `top: 168px` after those captures; this is not re-verified by screenshot.
+7. **Fireline is generous.** It ended with 16 Wh unused and 100 pts on the first try. That is fine for OP 01, but the 2:30 clock was never felt. Clock lengths need tuning with real players.
+
+---
+
+## 3. What a judge in a Quest headset will experience (gap analysis)
+
+Hands-first is a hard requirement. "First five minutes" is a special award. Both are judged in the headset.
+
+| Desktop now has | XR equivalent today | Gap |
+|---|---|---|
+| Mission Card (story, requests, value, weather, sensors, win line, START) | `briefing-panel.uikitml`, partially rewritten: weather, worth, win line in subtitle | No single "read this first" moment and no START. The clock starts at the first scan, so this is safe, but the player is never told the rules in XR. |
+| Next Step banner | `telemetry-hud` `StatusMessageText` (now uses `getNextStep`) | Box is `height: 70px; overflow: hidden`. Three lines get clipped. |
+| Request tracker chips (NEEDED / ON BOARD / LOADED / SENT) | Briefing panel REQ cards | Exists, but in small text off to the side at about 45°. |
+| Pass clock | `ResourceReadout` line text | No big, glanceable clock in the forward field of view. |
+| Action bar | Physical pads, lever, scanner and cradle | Good in principle; needs on-device verification. |
+| ASK ARIA (paid hint) | Poke the ARIA avatar or pad | Not discoverable: nothing tells a VR player ARIA can be touched for help. |
+| Debrief | `debrief-panel.uikitml` | No "score vs best possible" and no "try this" line. Mastery text still says "PROVEN OBJECTIVE …/100". |
+
+**Conclusion: the highest-value work in the remaining 10 days is XR parity of the new onboarding.** A desktop-perfect game that is confusing in the headset will score like the original build.
+
+---
+
+## 4. Recommendations, prioritized
+
+Each item lists the problem, the change, where it goes, the effort, and how to verify it.
+
+### P0 — Must ship (blockers; target Nov 8–12)
+
+**P0-1. Deploy and establish the device test loop (Day 1).**
+- Push the 4 local commits. Add a GitHub Pages workflow (`vite.config.ts` already uses `base: './'`), or deploy to Vercel. Record the live URL in `docs/SUBMISSION_PACKAGE.md`.
+- Open the URL in Quest Browser on the borrowed headset. Run `docs/QUEST_PHYSICAL_TEST_CHECKLIST.md` and fill in the PENDING fields: headset model, Horizon OS and browser versions.
+- Note: `recommendations.md` showed as deleted (` D`) in `git status` before this file was rewritten. Check that this was intentional before committing.
+- Verify: the live link loads from a fresh browser profile, Enter VR works, and the full Academy plus OP 01 is completed with hands only.
+
+**P0-2. Performance budget pass to ≥ 72 fps on Quest (Days 1–3).**
+- Measure first on device: OVR Metrics Tool, or the in-app F2 overlay. Then cut, starting with the biggest offenders:
+  - Merge static cockpit meshes (`src/scene-assets/lib/hardsurface.ts` and `orbitalConsole.scene-asset.ts`) into a few batched meshes per material.
+  - Hide or remove decorative enclosure detail that sits outside the forward field of view.
+  - Reduce globe and atmosphere geometry segments, and use one cloud layer.
+  - Throttle per-frame canvas and texture updates (cube canvases should redraw only on signature change, as they already do; confirm the same for the holo panels).
+  - Remove unused `Points`/`Line` effects in XR.
+  - Set XR framebuffer scale ≤ 1.0 and enable fixed foveation if IWSDK exposes it.
+- Code-split the landing scene from the game world to cut the 7 MB main chunk.
+- Target: ≤ 100 draw calls and ≤ 100k triangles in XR. The `ART_DIRECTION.md` budget (50 / 35k) is ideal but probably unrealistic in 10 days. Update the doc to the real budget instead of claiming a number the build does not meet.
+- Verify: sustained ≥ 72 fps for a full pass on device, with the number recorded. If you cannot measure it, do not claim it.
+
+**P0-3. XR onboarding parity (Days 2–4).**
+- **Spatial Mission Card:** a UIKitML panel centered at about 0.9 m, in front, slightly below eye height. It shows the story line, 3 request rows (sector, value, weather, needed confidence), the win line, and two large poke buttons: START PASS and TRAINING. It closes on START and reopens at every fresh pass. Generate all text from config, the same way `missionCardHtml()` in `src/ui/desktopHudViews.ts` does. Move the shared text builders into a pure module so both DOM and UIKit use one source.
+- **Next Step strip:** a dedicated, wide, short panel just above the globe. Title at ≥ 0.75° glyph height, one body line, one hands hint. Remove the 70 px clipped box.
+- **Glanceable pass clock:** big digits on a diegetic display above the globe, turning amber at 25 s and red at 10 s. It doubles as the live-window countdown.
+- **ARIA affordance:** a floating "ASK ARIA (−5)" label and a pulse on the avatar when the hesitation intervention fires.
+- **XR debrief:** headline, score versus best possible, 3 request rows and one "try this" line. Same builders as desktop.
+- Verify: an IWER run with `tests/e2e-hands-only.mjs`, a readability check with `tests/spatialReadability.test.ts` extended to the new panels, and a headset readability check.
+
+**P0-4. Correctness bugs found in this review (half a day).**
+- Grade headline contradiction: build `summaryHeadline` from the final `efficiencyGrade`, not from `achievedBest`.
+- Mojibake: replace the double-encoded strings with plain ASCII or real emoji, and save the file as UTF-8. Grep for `Ã`, `ðŸ` and `â` across `src/`.
+- Make achievements config-driven: trigger "sensor beat the weather" when a scan's confidence meets its request's minimum, for any scenario. Compute "Knapsack" from the actual raw versus compressed totals, not the hardcoded `13.0s`.
+- Voice lines: `voiceCommander.handleSectorSelection()` only runs for `STANDARD_INDUS_PASS` and has Sector B baked in. Either make it scenario-aware, or remove it so it never contradicts the new "don't give the answer" rule.
+- Remaining dead or duplicated paths: the legacy `tutorialStep` state machine in `desktopControls.ts`, `getNextTacticalHint()` in MCS (now unused for status), and the `DEFENSE_SHIELD_PASS` alias.
+- Verify: unit tests for the headline and achievements; no garbage characters in a full desktop run.
+
+**P0-5. Make the weather visible on the globe (Days 3–5).**
+- The puzzle is "match the sensor to the weather", so the weather must be seen, not read.
+- Per sector, show a cheap billboard volume over the beacon driven by `cloudCover`:
+  - grey-white puffs for `DENSE_STORM` / `CONVECTIVE_CLOUD`
+  - brown-orange drifting smoke for smoke types
+  - tan haze for `SEISMIC_DUST`
+  - nothing for `CLEAR`
+- Use 2–4 instanced sprites per sector with one shared material, so it adds about 1–3 draw calls.
+- The data already exists in `getScenarioSector()`. Today `createSectorMarkerAsset()` only receives `isCloudCovered: boolean`; pass the full weather type instead.
+- Verify: screenshot each operation; a player can say which sectors are smoky without reading text.
+
+### P1 — Make it memorable (target Nov 11–15)
+
+**P1-1. Sensor-specific scan reveal ("the aha").**
+- When a scan lands, the cube's front display (`updateCubeTelemetryCanvas()` in MCS) should show what that sensor actually saw:
+  - Optical through cloud: a flat white field with "BLOCKED".
+  - Thermal through smoke: dark terrain with glowing heat blobs.
+  - Radar: grainy grey speckle with a bright metal glint on bridges ("blurry on metal").
+  - Optical in clear sky: crisp road and bridge lines.
+- Draw these procedurally on the existing 512² canvas, keyed by sensor plus confidence plus phenomenology tag.
+- A previous audit noted the cube currently shows generic water/bridge art for every packet. This change turns science into something the player sees.
+- Add a 0.4 s "develop" animation, and an audio sting that differs per sensor.
+
+**P1-2. Ground-consequence finale.**
+- As each packet completes in the live window:
+  - its request's sector on the globe flips to a green pin;
+  - a one-line "ground radio" caption and voice plays, e.g. "Convoy Alpha rerouting. Thank you, orbit." The text already exists in `consequenceOnSuccess`;
+  - a chime plays.
+- Packets cut off at loss of signal flip red with a short static burst.
+- This gives the emotional payoff the core concept promised ("make this the visual and emotional peak") at the cost of a few nodes plus captions.
+
+**P1-3. Live-window drama.**
+- When the window opens:
+  - dim the cockpit lights to about 60%;
+  - show a progress bar per docked slot, which partly exists as `DownlinkSlotProgress_*`;
+  - draw a horizon line moving across the globe toward the ground station;
+  - start a rising tone that speeds up in the last 5 s (`playTensionHeartbeat` exists).
+- Make "dock now!" obvious by pulsing the tray cubes that can still be docked.
+- Verify by recording 10 s of footage; it should look different from planning at a glance.
+
+**P1-4. Shorter, hands-first Academy (≤ 2 minutes).**
+- Cut 9 steps to 5: aim, scan, inspect, compress, dock and transmit.
+- Each step shows one ghost-hand animation at the target (the VR hand simulator code already renders hands) and one short sentence.
+- Finish with a 10 s "you're ready" moment that launches OP 01 automatically.
+- The current steps include long technical notes ("Slot 1 → 2 → 3 order at 10.0 MB/s"); move these to the debrief.
+
+**P1-5. A reason to come back.**
+- **Campaign progression:** OP 02 unlocks after any OP 01 pass, and OP 03 after OP 02. Show 1–3 stars per op (pass / Grade A / Grade S). `missionProfile` already stores `bestScore` and `bestGrade`.
+- **Daily Orbit:** re-enable the daily pass, but generate it with `generateProceduralCrisis(date)`. Accept a seed only if `getMissionBenchmark()` reaches the scenario's `successScore`; reject and re-roll otherwise. This fixes the unchecked "always solvable" claim. Give procedural passes their own scenario id instead of reusing `STANDARD_INDUS_PASS`.
+- Verify with a unit test over 365 dates: every daily pass is winnable.
+
+**P1-6. Three real playtests, then tune (Nov 12–13).**
+- Three people who have never seen the game. One in the headset if possible. Do not help them.
+- Record time to first scan, whether they can state the goal at 60 s, the first confusion point, final score, and whether they pressed retry.
+- Tune `passDurationSec`, Fireline power and Aftershock power from what you see. Today they are design guesses (150 / 150 / 140 s; 52 / 55 / 42 Wh).
+
+### P2 — Only if P0 and P1 are done
+
+- **Accessibility showcase** (for the special award): add a colour-blind-safe confidence palette (shape plus text are already present), and one "Accessibility" button on the Mission Card that opens the existing settings. List every option in the Devpost text and the video.
+- **ARIA explains its hint:** after a hint, ARIA says why in one line ("Smoke blocks optical; thermal sees heat through it"). This strengthens the "agentic" angle without letting ARIA play for you.
+- **Passthrough tabletop:** do **not** ship it unless it is purposeful and tested. The judging text says passthrough must meaningfully use the real room and hold up in untested rooms. Today the MR Tabletop toggle only hides the cabin. Hide the toggle for the submission.
+- **Code health (post-deadline):** split `missionControlSystem.ts` (about 5,300 lines) into input, presentation and orchestration modules. Do not do this before the deadline; it is high risk and invisible to judges.
+
+---
+
+## 5. "Is everything connected?" — current status
+
+Already single-source (done in the redesign):
+- Costs, scoring values, thresholds, hint penalty, sensor guide and weather labels come from `src/mission/missionConfig.ts` (`SCORING`, `getScanCost`, `getScenarioThresholds`, `SENSOR_PLAIN_GUIDE`, `describeWeather`).
+- These feed the engine, planner, debrief, desktop HUD (`src/ui/desktopHudViews.ts`), the XR briefing and telemetry panels, and the landing cards (`deriveCard()` in `src/landing/landingUI.ts`).
+- Guidance is one pure function, `getNextStep()` in `src/mission/guidance.ts`, used by desktop and XR.
+
+Still disconnected or hardcoded (to fix):
+
+| Item | Location | Fix |
+|---|---|---|
+| "GRADE S" in summary headline | `scoring.ts` `summaryHeadline` | Derive from `efficiencyGrade` |
+| Achievement names, conditions and `13.0s` | MCS ~1871, 3596–3634 | Config- and state-driven conditions |
+| Indus-only voice coaching | MCS `handleSectorSelection` calls, `voiceCommander.ts` ~258 | Scenario-aware or removed |
+| Advice strings with fixed MB/s (Fireline "B+E" text) | `scoring.ts` advice block | Template from budget |
+| Procedural id reuse and unchecked solvability | `proceduralCrisis.ts` | Own id plus planner validation |
+| Desktop-only onboarding builders | `desktopHudViews.ts` | Shared pure text builders for DOM and UIKit |
+| Mastery text "PROVEN OBJECTIVE …/100" | MCS `syncSettings` | Use `achievableScore` and the win line |
+| Old e2e scripts (`e2e-release-audit`, `e2e-spatial-rc9`, `virtual-quest/*`) | `tests/` | Re-run and update, or mark as legacy |
+
+---
+
+## 6. Ten-day schedule (PKT)
+
+| Day | Work | Exit check |
+|---|---|---|
+| Nov 8 | P0-1 deploy, P0-4 bugs, first headset session plus fps measurement | Live URL; fps number written down |
+| Nov 9–10 | P0-2 performance cuts; P0-3 XR Mission Card, Next Step strip, clock | ≥ 72 fps on device; START PASS in headset |
+| Nov 11 | P0-5 globe weather; P1-1 scan reveal | Weather readable without text |
+| Nov 12 | P1-2 finale, P1-3 live-window drama; playtests ×3 | Testers state the goal within 60 s |
+| Nov 13 | Tuning from playtests; P1-4 Academy; XR debrief | Academy ≤ 2 min |
+| Nov 14 | P1-5 stars plus validated Daily Orbit; full regression (unit, desktop e2e, hands-only e2e, headset) | All green; zero console errors |
+| Nov 15 | **Feature freeze.** Record the video (headset capture or IWER) | Video uploaded publicly |
+| Nov 16 | Devpost text, screenshots, honest testing statement | All fields filled |
+| Nov 17 | Submit; re-open the live link from a fresh browser and from Quest | Submitted |
+| Nov 18 | Buffer only. No changes | — |
+
+---
+
+## 7. The 2:30 video (structure)
+
+| Time | Shot |
 |---|---|
-| Bootstrap/globals → application session owner | Own landing/world launch, failure recovery, XR enter/exit, and disposal. Medium risk; **essential**. |
-| Multiple input/drop paths → adapters plus one interaction controller | Normalize poses/intents; own `idle → hover → held → preview → released/recovered`. High risk; **essential**, migrate one flow at a time. |
-| Runtime orchestrator → thin ECS bridge and command gateway | Route actions to existing engine; keep transient hand ownership outside simulation. High risk; **essential incremental extraction**, not a rewrite. |
-| Static-ID lookups → versioned scenario context | Keep planner/scoring/replay deterministic and consistent. Medium risk; **essential**. |
-| `syncAll()`/inline UI → read-only view models and presenters | Separate rendering, caption/audio events, and dirty updates; protect nested state. Medium risk; **essential for touched flows**. |
-| Ad hoc profile writes → local persistence adapter | Validate/migrate profile; add checkpoint only when lifecycle stable. Low–medium risk; profile repair **essential**, checkpoint **optional**. |
-| Independent resource creation → owned asset lifetime | Separate shared immutable assets from per-object dynamic materials; dispose on session teardown. Medium risk; **essential**. |
+| 0:00–0:10 | Hook: hands reach for the globe; a smoke plume over the canyon; caption "1,200 evacuees. One satellite pass." |
+| 0:10–0:35 | Read the weather; a wrong sensor gives a white BLOCKED cube; the right sensor reveals heat blobs (P1-1) |
+| 0:35–1:05 | Compress in the cradle; the bay is too big for the window; choose what to drop (Aftershock triage) |
+| 1:05–1:40 | Live window: dim cockpit, countdown, late cube docked by hand, one cube cut off at LOS |
+| 1:40–2:05 | Finale: pins turn green, ground radio voices, debrief versus best possible |
+| 2:05–2:20 | Retry, stars, Daily Orbit, accessibility options |
+| 2:20–2:30 | Title card and honest note: "Simulated scenarios. Hands-only. Built with Meta IWSDK." |
 
-Mission flow remains **briefing → operations → downlink → debrief → retry/next**; pause and XR visibility are explicit session conditions. Rendering never changes evidence validity. Accepted commands update the engine; presenters consume snapshots/events; persistence records stable outcomes. Keep configuration authored and testable. No event bus, ECS replacement, or generic service framework is needed.
+Use real captured gameplay only. Say plainly where it was recorded (headset or emulator).
 
-## 13. Implementation Roadmap
+---
 
-1. **Release correctness foundation:** F01, F03–F07, F11–F12; establish invariant and input-contract tests first. Depends on agreeing canonical source/ownership/scenario contracts. Highest migration risk; compare desktop and emulated journeys after each slice.
-2. **Reliable player journey:** F04, F08–F10, F15, F18–F19. Complete launch, settings, calibration, captions, training, failure recovery, and debrief without debug shortcuts. Depends on stage 1.
-3. **Device qualification and performance:** start F02 measurement immediately; close it after stages 1–2. Address F16–F17 using measured contributors and a curated deployment. Never postpone hardware discovery until final polish.
-4. **Campaign/product polish:** F13–F14, then optional F20–F21. Playtest alternatives, uncertainty, retry motivation, radio mix, and consequence readability. Depends on a stable, measured loop; do not add another campaign first.
+## 8. What not to do before the deadline
 
-## 14. Definition of Done
+- No multiplayer, no LLM integration, no backend, no new operations.
+- No large refactor of `missionControlSystem.ts`.
+- No passthrough unless it is purposeful and tested in at least two rooms.
+- Do not claim fps, hand-tracking quality or "tested on Quest" until it has been measured on a Quest.
 
-- Typecheck, unit/invariant tests, generated-seed plan/replay tests, and no-fallback desktop/IWER journeys pass on an identified build.
-- Physical Quest records prove four-operation completion, loss recovery, seated reach, stereo text, silent/captioned play, and XR exit/re-entry; device/browser/refresh settings are recorded.
-- Sustained frame-time and restart-soak traces meet the selected refresh rate without unacceptable missed frames or resource growth.
-- Reload retains legitimate mastery; denied XR, unavailable storage, and failed assets produce recoverable states.
-- Debrief statements trace to transmitted evidence; illustrative science and abstract units are consistently labeled.
-- Production HTTPS/subpath hosting loads the curated assets; attribution/dependency review is complete. No unsupported “Quest-ready,” “scientifically calibrated,” or “hands-only” claim remains.
+---
 
-## 15. Final Technical Recommendations
+## 9. Verification status of this review
 
-Protect the game's identity: **humanitarian decisions made through tactile evidence under constrained contact**. Repair the thin contracts around the working engine before expanding it. Build trustworthy hands, coherent uncertainty, meaningful consequences, and measurable performance next; avoid infrastructure and spectacle that do not improve those qualities.
-
-**Audit scope verification:** only `recommendations.md` is intended to change. Existing application source, tests, configurations, lockfiles, and pre-existing release artifacts are checked against audit-start fingerprints; physical hardware and fresh production deployment remain unverified.
+- Measured: unit suite 300/300 passing; desktop browser e2e 13/13; hands-only IWER e2e passes; emulator renderer stats of 310 draw calls and 214,760 triangles; main chunk 7.08 MB (1.83 MB gzip).
+- Observed in screenshots: the headline contradiction, the toast overlap (since moved), the action bar covering the console, and the live window looking the same as planning.
+- Found in source: the mojibake achievement strings and the Indus-only voice coaching.
+- Not verified: anything on a physical Quest (fps, hand tracking, readability, comfort), human playtests, or the deployed link (none exists yet).

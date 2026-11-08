@@ -99,4 +99,9 @@ export default defineAssets({
     type: AssetType.UIKitML,
     name: 'Debrief Panel',
   },
+  'mission-hud': {
+    url: publicAssetUrl('ui/mission-hud.uikitml'),
+    type: AssetType.UIKitML,
+    name: 'Forward Mission HUD',
+  },
 });
