@@ -94,7 +94,7 @@ await page.addInitScript(() => {
      * Put the fingertip on a near control, turn the hand so its laser points at a far target while the
      * fingertip stays on the control, then pinch once. Returns what the laser was on at the pinch.
      */
-    async touchWhileAiming(hand, touchId, aimId) {
+    async touchWhileAiming(hand, touchId, aimIds) {
       const r = window.__ORBIT_IWER__.remote;
       const api = window.__ORBIT_ZERO__;
       const touchAt = api.get3DTargetWorldPosition(touchId);
@@ -102,13 +102,18 @@ await page.addInitScript(() => {
       await window.__HANDS__.pinch(hand, 0);
       await window.__HANDS__.travel(hand, touchAt, 'index-tip');
       // Turning the hand swings the fingertip off the control; alternate turn and re-place until both hold.
-      for (let i = 0; i < 4; i++) {
-        await r.dispatch('look_at', { device: hand, target: api.get3DTargetWorldPosition(aimId) });
-        await r.dispatch('set_transform', { device: hand, anchor: 'index-tip', position: touchAt });
+      // Beacons are small, so try them in turn until the laser rests on one.
+      let pointer = null;
+      for (const aimId of aimIds) {
+        for (let i = 0; i < 4; i++) {
+          await r.dispatch('look_at', { device: hand, target: api.get3DTargetWorldPosition(aimId) });
+          await r.dispatch('set_transform', { device: hand, anchor: 'index-tip', position: touchAt });
+        }
+        await window.__HANDS__.settle();
+        await window.__HANDS__.settle();
+        pointer = api.getHandPointerState(hand === 'hand-left' ? 'left' : 'right');
+        if (/^sector-/.test(pointer?.rayTarget ?? '')) break;
       }
-      await window.__HANDS__.settle();
-      await window.__HANDS__.settle();
-      const pointer = api.getHandPointerState(hand === 'hand-left' ? 'left' : 'right');
       await window.__HANDS__.pinch(hand, 1);
       await window.__HANDS__.pinch(hand, 0);
       await new Promise((res) => setTimeout(res, 120));
@@ -295,9 +300,27 @@ try {
   await H('rayPinch', 'hand-right', await pos('pad-toggle-sensor'));
   check((await state()).activeSensorMode !== sensorBefore, 'laser + pinch on the SENSOR pad switches the sensor', `${sensorBefore} -> ${(await state()).activeSensorMode}`);
 
+  // ---- A pinch released with the laser on nothing must not swallow the next pinch (IWSDK 1.0.1 drops that release) ----
+  await page.evaluate(async () => {
+    const r = window.__ORBIT_IWER__.remote;
+    await window.__HANDS__.rayAim('hand-right', window.__ORBIT_ZERO__.get3DTargetWorldPosition('sector-b'));
+    await window.__HANDS__.pinch('hand-right', 1);
+    await r.dispatch('look_at', { device: 'hand-right', target: { x: 0.6, y: 2.6, z: 0.4 } }); // up and away: nothing under the laser
+    await window.__HANDS__.settle();
+    await window.__HANDS__.pinch('hand-right', 0);
+    await window.__HANDS__.settle();
+  });
+  const sensorBeforeNext = (await state()).activeSensorMode;
+  const afterStuck = await page.evaluate(() => window.__ORBIT_ZERO__.getHandPointerState('right'));
+  t0 = await now();
+  await H('rayPinch', 'hand-right', await pos('pad-toggle-sensor'));
+  check((await state()).activeSensorMode !== sensorBeforeNext,
+    'after a pinch released over empty space, the next laser pinch still works',
+    `${sensorBeforeNext} -> ${(await state()).activeSensorMode} | ray after release: ${afterStuck?.states?.ray} | cues ${await cuesSince(t0)} | ${JSON.stringify(await page.evaluate(() => window.__ORBIT_ZERO__.getHandPointerState('right')))}`);
+
   // ---- A pinch acts on what the hand touches, not on what its laser happens to point at ----
   const beforeTouch = await state();
-  const touch = await H('touchWhileAiming', 'hand-right', 'pad-toggle-sensor', 'sector-e');
+  const touch = await H('touchWhileAiming', 'hand-right', 'pad-toggle-sensor', ['sector-e', 'sector-c', 'sector-a', 'sector-d', 'sector-f']);
   const afterTouch = await state();
   check(/^sector-/.test(touch.pointer?.rayTarget ?? '') && afterTouch.activeSensorMode !== beforeTouch.activeSensorMode && afterTouch.selectedSectorId === beforeTouch.selectedSectorId,
     'fingertip on the SENSOR pad with the laser on a beacon: the pinch presses the pad and does not select the beacon',

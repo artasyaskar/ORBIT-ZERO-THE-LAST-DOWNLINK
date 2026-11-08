@@ -312,6 +312,8 @@ export class MissionControlSystem extends createSystem({
   private readonly laserHover = new Map<string, Set<number>>();
   private lastLaserHoverCueAt = -Infinity;
   private lastPadPress: { id: string; at: number } = { id: '', at: -Infinity };
+  /** Frames each hand's IWSDK ray has sat in SELECT with the pinch open and nothing under it. */
+  private readonly stuckRayFrames = { left: 0, right: 0 };
   /** The last 40 sound cues (newest last), read by the e2e connection checks. */
   private readonly cueLog: Array<{ cue: OrbitalSoundCue; at: number }> = [];
   /** The player is away: XR session not visible, page hidden, or flat-page window blurred. */
@@ -1272,6 +1274,7 @@ export class MissionControlSystem extends createSystem({
       this.syncAll(); // headset and flat page show different panels and panel content
     }
     this.updateXRHandInteractions(delta);
+    if (presenting) this.recoverStuckHandRays();
     this.updateMissionHudPose(Math.min(Math.max(0, delta), 0.1));
     this.frameSnapshot = this.engine.getState();
     this.syncMediaHold(this.frameSnapshot.paused);
@@ -1434,9 +1437,11 @@ export class MissionControlSystem extends createSystem({
       const newTimer = Math.max(0, timer - delta);
       const padObj = this.sceneObject(padId);
       const cap = padObj?.getObjectByName('PadIlluminatedCap');
-      const restY = padId === 'pad-fire-swath' ? 0.018 : 0.016;
       const stroke = padId === 'pad-fire-swath' ? 0.012 : 0.009; // -12mm stroke for plunger, -9mm for pads
       if (cap) {
+        // Spring back to the cap's authored height. A fixed 0.016 left pad caps 1 cm above their socket
+        // after the first press, where a laser aimed at the pad missed them.
+        const restY = (cap.userData.pressRestY ??= cap.position.y) as number;
         if (newTimer > 0) {
           this.padPressTimers.set(padId, newTimer);
           const progress = 1.0 - newTimer / 0.18;
@@ -3877,6 +3882,35 @@ export class MissionControlSystem extends createSystem({
     });
   }
 
+  /**
+   * IWSDK 1.0.1's MultiPointer ignores a pinch release that happens while the hand ray points at nothing (its
+   * button lifecycle returns before handling selectEnd). The ray then stays in SELECT and swallows the next
+   * pinch: in IWER a beacon that moved out from under the laser mid-pinch made the following pinch do nothing.
+   * Once a tracked hand's pinch has been open for two frames with its ray still in SELECT on nothing, release it.
+   */
+  private recoverStuckHandRays(): void {
+    const pointers = this.input.xr.multiPointers as unknown as Record<'left' | 'right', {
+      pointerStates?: Map<string, string>;
+      getPointer(kind: 'ray'): {
+        getIntersection(): { object?: { isVoidObject?: boolean } } | undefined;
+        up(event: { button: number; timeStamp: number }): void;
+      };
+    } | undefined>;
+    for (const side of ['left', 'right'] as const) {
+      const multi = pointers[side];
+      const ray = multi?.getPointer('ray');
+      const hit = ray?.getIntersection();
+      const onNothing = !hit || Boolean(hit.object?.isVoidObject); // pmndrs reports "nothing" as a void-object hit
+      const stuck = Boolean(multi?.pointerStates && ray) && this.lastHandConnected[side] && !this.lastHandPressed[side]
+        && multi!.pointerStates!.get('ray') === 'select' && onNothing;
+      this.stuckRayFrames[side] = stuck ? this.stuckRayFrames[side] + 1 : 0;
+      if (this.stuckRayFrames[side] < 2) continue;
+      ray!.up({ button: 0, timeStamp: performance.now() });
+      multi!.pointerStates!.set('ray', 'normal');
+      this.stuckRayFrames[side] = 0;
+    }
+  }
+
   /** True when the hand that owns this IWSDK ray pointer has the scanner, a cube, pad, beacon or button within reach. */
   private isRayHandTouchingTarget(pointerId: number | undefined): boolean {
     const pointers = this.input.xr.multiPointers;
@@ -3914,7 +3948,9 @@ export class MissionControlSystem extends createSystem({
     this.desktopControls?.onSectorSelected(sectorId);
     this.applyAction({ type: 'SELECT_SECTOR', sectorId });
     this.playCue('SELECT_SECTOR');
-    this.slerpGlobeToSector(sectorId);
+    // In a headset the globe stays put: turning it would pull the beacon out from under the player's laser
+    // (and scanner beam) mid-pinch. All six beacons already face the seated player.
+    if (!this.world.renderer.xr.isPresenting) this.slerpGlobeToSector(sectorId);
     this.announceSectorWeather(sectorId);
 
     this.syncAll();
