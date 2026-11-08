@@ -420,7 +420,6 @@
       },
       "components": {
         "RayInteractable": {},
-        "PokeInteractable": {},
         "OneHandGrabbable": {},
         "ConsoleControlNode": {
           "action": "SCAN"

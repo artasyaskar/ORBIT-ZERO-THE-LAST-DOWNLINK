@@ -17,6 +17,7 @@
     "test:rc9": "node tests/e2e-spatial-rc9.mjs",
     "test:virtual-quest": "node tests/virtual-quest/virtualQuestLab.mjs",
     "test:headset": "node tests/virtual-headset-player.mjs",
+    "test:hands-first": "node tests/e2e-hands-first-proof.mjs",
     "test:desktop": "node tests/e2e-redesign-desktop.mjs",
     "test:deploy": "node tests/deploy-static-check.mjs",
     "build": "vite build",

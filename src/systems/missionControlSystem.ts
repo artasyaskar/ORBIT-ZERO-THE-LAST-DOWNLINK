@@ -121,11 +121,21 @@ interface PointerEventTarget {
 }
 /** Scanner sensor aperture in the tool's local frame (see createScannerToolAsset). */
 const SCANNER_APERTURE_LOCAL = new Vector3(0, 0.092, -0.075);
-/** A released scanner retargets only when its aperture is this close to a beacon. */
-const SCANNER_SECTOR_SNAP_M = 0.06;
-/** Debrief panel elements that only matter before downlink; hidden once results are shown. */
+/** Scanner beam axis in the tool's local frame: forward (-Z) from the aperture. */
+const SCANNER_BEAM_DIR_LOCAL = new Vector3(0, 0, -1);
+/** Length of the visible ScannerAimLaser cylinder (createScannerToolAsset), measured from the aperture. */
+const SCANNER_BEAM_LENGTH_M = 0.28;
+/** The beam locks on a beacon whose centre is within this distance of the beam axis (beacons are >= 6.4 cm apart). */
+const SCANNER_BEAM_LOCK_RADIUS_M = 0.03;
+/** A lock moves to another beacon only when that beacon is this much nearer the beam (no flicker between neighbours). */
+const SCANNER_BEAM_SWITCH_MARGIN_M = 0.01;
+/** A release this soon after the beam lost its lock still scans the last locked sector (pinch-release jitter). */
+const SCANNER_RELEASE_GRACE_MS = 300;
 /** Second-pinch window for in-world paid hints (see handleAriaDelegate). */
 const HINT_CONFIRM_WINDOW_MS = 3000;
+/** Second-pinch window for discarding from the pad or panel button in a headset (see handleDiscardSelected). */
+const DISCARD_CONFIRM_WINDOW_MS = 3000;
+/** Debrief panel elements that only matter before downlink; hidden once results are shown. */
 const DEBRIEF_PANEL_OPERATIONS_ONLY = ['Slot1Card', 'Slot2Card', 'Slot3Card', 'Btn_ReorderQueue', 'Btn_CommitDownlink'] as const;
 
 const GLOBE_CENTER_WORLD = new Vector3(0, 0.98, -0.48);
@@ -234,6 +244,21 @@ export class MissionControlSystem extends createSystem({
   private caption = '';
   /** performance.now() deadline for the second pinch that confirms a paid in-world hint (0 = not armed). */
   private hintArmedUntilMs = 0;
+  /** performance.now() deadline for the second pinch that confirms a pad/button discard (0 = not armed). */
+  private discardArmedUntilMs = 0;
+  private discardArmedPacketId: string | null = null;
+  /** Sector the held scanner's beam is locked on right now (null = beam on no beacon). */
+  private scannerBeamLock: SectorId | null = null;
+  /** Last beam lock and when it was last held, so release jitter does not lose an aimed scan. */
+  private scannerBeamLastLockId: SectorId | null = null;
+  private scannerBeamLastLockAt = -Infinity;
+  /** Distance along the beam from the aperture to the locked beacon (sizes the visible beam). */
+  private scannerBeamAlong = SCANNER_BEAM_LENGTH_M;
+  private readonly beamOrigin = new Vector3();
+  private readonly beamDir = new Vector3();
+  private readonly beamPoint = new Vector3();
+  private readonly beamBeacon = new Vector3();
+  private readonly beamGlobeCenter = new Vector3();
   /** UIKit element the custom hand path clicked on the current pinch (IWSDK's duplicate click is dropped). */
   private customUiClick: { id: string; until: number } | null = null;
   /** Last sector selection, so one pinch seen by two input paths selects (and announces) once. */
@@ -1141,6 +1166,11 @@ export class MissionControlSystem extends createSystem({
       this.hintArmedUntilMs = 0; // armed hint expired unspent: restore the HUD label
       this.syncMissionHud();
     }
+    if (this.discardArmedUntilMs > 0 && performance.now() > this.discardArmedUntilMs) {
+      this.discardArmedUntilMs = 0; // armed discard expired: nothing was thrown away
+      this.discardArmedPacketId = null;
+      this.syncTelemetryPanel();
+    }
     const presenting = this.world.renderer.xr.isPresenting;
     if (presenting !== this.deskPadsPresenting) {
       this.deskPadsPresenting = presenting;
@@ -1744,46 +1774,33 @@ export class MissionControlSystem extends createSystem({
         aimLaser.material instanceof MeshBasicMaterial
       ) {
         if (isGrabbed) {
-          const hex =
-            this.engine.getState().activeSensorMode === 'OPTICAL'
-              ? 0x38bdf8
-              : this.engine.getState().activeSensorMode === 'THERMAL'
-                ? 0xff6b2b
-                : 0xf59e0b;
-          aimLaser.material.color.setHex(hex);
-          aimLaser.material.opacity = 0.68;
+          const mode = this.frameSnapshot.activeSensorMode;
+          aimLaser.material.color.setHex(mode === 'OPTICAL' ? 0x38bdf8 : mode === 'THERMAL' ? 0xff6b2b : 0xf59e0b);
           aimLaser.visible = true;
 
-          // Proximity Aiming Sweep against sector entities:
-          scannerObj.updateWorldMatrix(true, false);
-          const laserTipWorld = scannerObj.localToWorld(
-            new Vector3(0, 0.092, -0.35),
-          );
-          let closestSectorId: SectorId | null = null;
-          let bestDist = 0.3;
-          for (const sectorEntity of this.queries.sectors.entities) {
-            const sObj = sectorEntity.object3D;
-            if (!sObj || !isVisible(sObj)) continue;
-            sObj.updateWorldMatrix(true, false);
-            const sPos = new Vector3().setFromMatrixPosition(sObj.matrixWorld);
-            const dist = laserTipWorld.distanceTo(sPos);
-            if (dist < bestDist) {
-              bestDist = dist;
-              closestSectorId = (sectorEntity.getValue(OrbitSectorNode, 'sectorId') ||
-                'B') as SectorId;
-            }
+          // One aim rule for the live highlight and for the scan on release (see scannerBeamTarget).
+          const previousLock = this.scannerBeamLock;
+          const lock = this.scannerBeamTarget(scannerObj, previousLock);
+          this.scannerBeamLock = lock;
+          if (lock) {
+            this.scannerBeamLastLockId = lock;
+            this.scannerBeamLastLockAt = performance.now();
           }
-          if (
-            closestSectorId &&
-            closestSectorId !== this.engine.getState().selectedSectorId
-          ) {
-            this.applyAction({ type: 'SELECT_SECTOR', sectorId: closestSectorId });
+          // A locked beam stops at its beacon and brightens, so the player sees exactly what a release scans.
+          const beamLen = lock ? Math.min(SCANNER_BEAM_LENGTH_M, Math.max(0.02, this.scannerBeamAlong)) : SCANNER_BEAM_LENGTH_M;
+          aimLaser.scale.set(1, beamLen / SCANNER_BEAM_LENGTH_M, 1);
+          aimLaser.position.z = -0.07 - beamLen / 2; // the beam starts at the lens face (local z = -0.07)
+          aimLaser.material.opacity = lock ? 0.9 : 0.4;
+          if (lock && lock !== previousLock) {
+            // The locked beacon becomes the selected sector: it grows and glows, and the HUD reads "SCAN SECTOR X".
+            if (lock !== this.engine.getState().selectedSectorId) this.applyAction({ type: 'SELECT_SECTOR', sectorId: lock });
             this.playCue('WAND_LOCK');
             this.syncAll();
           }
         } else {
           aimLaser.material.opacity = 0.0;
           aimLaser.visible = false;
+          this.scannerBeamLock = null;
         }
       }
     }
@@ -3997,14 +4014,43 @@ export class MissionControlSystem extends createSystem({
     this.syncAll();
   }
 
-  private handleDiscardSelected(): void {
+  /**
+   * Discarding destroys evidence, so in a headset it needs a deliberate gesture: carry the cube into the
+   * chute (`dropIntoChute`), or pinch the DISCARD pad / panel button twice within DISCARD_CONFIRM_WINDOW_MS
+   * for the same cube. A single stray pinch only arms it. Desktop keyboard and toolbar discards stay one step.
+   */
+  private handleDiscardSelected(dropIntoChute = false): void {
     if (this.isAnyObjectGrabbed()) {
       this.playCue('ERROR_REJECT');
       return;
     }
-    const res = this.applyAction({ type: 'DISCARD', packetId: this.engine.getState().selectedPacketId });
+    const selectedId = this.engine.getState().selectedPacketId;
+    if (!dropIntoChute && this.world.renderer.xr.isPresenting) {
+      const now = performance.now();
+      const confirmed = selectedId !== null && this.discardArmedPacketId === selectedId && now <= this.discardArmedUntilMs;
+      if (!confirmed) {
+        if (!selectedId) {
+          this.playCue('ERROR_REJECT');
+          return;
+        }
+        const pkt = this.engine.getState().packets.find((p) => p.id === selectedId);
+        this.discardArmedPacketId = selectedId;
+        this.discardArmedUntilMs = now + DISCARD_CONFIRM_WINDOW_MS;
+        this.caption = `Pinch DISCARD again within ${DISCARD_CONFIRM_WINDOW_MS / 1000} s to throw away ${selectedId}${pkt ? ` (Sector ${pkt.sectorId} ${pkt.sensorMode})` : ''}, or drop the cube into the red chute.`;
+        this.audio.playMechanicalSwitchClick(false);
+        this.syncAll();
+        return;
+      }
+    }
+    this.discardArmedUntilMs = 0;
+    this.discardArmedPacketId = null;
+    const res = this.applyAction({ type: 'DISCARD', packetId: selectedId });
     this.playCue(res.ok ? 'DISCARD_CUBE' : 'ERROR_REJECT');
     this.syncAll();
+  }
+
+  private isDiscardArmed(): boolean {
+    return this.discardArmedUntilMs > 0 && performance.now() <= this.discardArmedUntilMs;
   }
 
   private handleStartDownlink(): boolean {
@@ -4609,33 +4655,75 @@ export class MissionControlSystem extends createSystem({
       return;
     }
 
-    // Aim from the sensor aperture (local 0, 0.092, -0.075), not the pommel origin about 10 cm back.
-    obj.updateWorldMatrix(true, false);
-    this.tempVec.copy(SCANNER_APERTURE_LOCAL).applyMatrix4(obj.matrixWorld);
+    // A scan costs power, so it fires only at the beacon the visible beam is locked on (the same rule as the
+    // live highlight), or was locked on a moment ago (the hand shifts as the pinch opens).
+    const lock = this.scannerBeamTarget(obj, this.scannerBeamLock)
+      ?? (performance.now() - this.scannerBeamLastLockAt <= SCANNER_RELEASE_GRACE_MS ? this.scannerBeamLastLockId : null);
+    this.scannerBeamLock = null;
+    this.scannerBeamLastLockId = null;
+    this.scannerBeamLastLockAt = -Infinity;
+    if (lock) {
+      if (lock !== this.engine.getState().selectedSectorId) this.applyAction({ type: 'SELECT_SECTOR', sectorId: lock });
+      this.handleScan();
+    } else if (this.beamOrigin.distanceTo(GLOBE_CENTER_WORLD) < 0.34) {
+      // Let go at the globe with the beam on no beacon: nothing is spent, and the player is told why.
+      this.playCue('ERROR_REJECT');
+      this.caption = 'No scan: point the scanner beam at a sector until the beacon glows, then let go.';
+      this.syncAll();
+    }
+    returnHome();
+  }
 
-    // The six beacons sit a few centimetres apart over South Asia, so only an aperture held right on a
-    // beacon retargets. Otherwise a release over the globe fires at the target the HUD already shows.
-    let closestSector: SectorId | null = null;
-    let bestDist = SCANNER_SECTOR_SNAP_M;
+  /**
+   * The sector beacon the scanner's visible beam is on, or null. The beam (ScannerAimLaser) runs
+   * SCANNER_BEAM_LENGTH_M forward from the aperture; a beacon locks when its centre lies within
+   * SCANNER_BEAM_LOCK_RADIUS_M of that segment and it faces the scanner. The current lock is kept
+   * unless another beacon is clearly nearer the beam, so a hand hovering between neighbours does not
+   * flicker. The live highlight and the scan on release both use this rule. Allocation-free (runs per frame).
+   */
+  private scannerBeamTarget(scannerObj: Object3D, current: SectorId | null): SectorId | null {
+    scannerObj.updateWorldMatrix(true, false);
+    this.beamOrigin.copy(SCANNER_APERTURE_LOCAL).applyMatrix4(scannerObj.matrixWorld);
+    this.beamDir.copy(SCANNER_BEAM_DIR_LOCAL).transformDirection(scannerObj.matrixWorld);
+    const globe = this.sceneObject('earth-globe');
+    if (globe) globe.getWorldPosition(this.beamGlobeCenter);
+    let bestId: SectorId | null = null;
+    let bestPerp = Infinity;
+    let bestAlong = 0;
+    let currentPerp = Infinity;
+    let currentAlong = 0;
     for (const sectorEntity of this.queries.sectors.entities) {
       const sObj = sectorEntity.object3D;
       if (!sObj || !isVisible(sObj)) continue;
       sObj.updateWorldMatrix(true, false);
-      const dist = this.tempVec.distanceTo(this.tempTarget.setFromMatrixPosition(sObj.matrixWorld));
-      if (dist < bestDist) {
-        bestDist = dist;
-        closestSector = (sectorEntity.getValue(OrbitSectorNode, 'sectorId') ||
-          'B') as SectorId;
+      this.beamBeacon.setFromMatrixPosition(sObj.matrixWorld);
+      if (globe) {
+        // A beacon turned to the far side of the globe faces away from the scanner: it cannot be scanned through Earth.
+        this.beamPoint.copy(this.beamBeacon).sub(this.beamGlobeCenter).normalize();
+        if (this.beamPoint.dot(this.beamOrigin) - this.beamPoint.dot(this.beamBeacon) < -0.02) continue;
+      }
+      const along = Math.min(SCANNER_BEAM_LENGTH_M, Math.max(-0.02, this.beamPoint.copy(this.beamBeacon).sub(this.beamOrigin).dot(this.beamDir)));
+      const perp = this.beamPoint.copy(this.beamOrigin).addScaledVector(this.beamDir, along).distanceTo(this.beamBeacon);
+      const sectorId = (sectorEntity.getValue(OrbitSectorNode, 'sectorId') || 'B') as SectorId;
+      if (sectorId === current) {
+        currentPerp = perp;
+        currentAlong = along;
+      }
+      if (perp < bestPerp) {
+        bestPerp = perp;
+        bestAlong = along;
+        bestId = sectorId;
       }
     }
-
-    if (closestSector) {
-      this.applyAction({ type: 'SELECT_SECTOR', sectorId: closestSector });
-      this.handleScan();
-    } else if (this.tempVec.distanceTo(GLOBE_CENTER_WORLD) < 0.34) {
-      this.handleScan();
+    if (current && currentPerp <= SCANNER_BEAM_LOCK_RADIUS_M + SCANNER_BEAM_SWITCH_MARGIN_M && bestPerp > currentPerp - SCANNER_BEAM_SWITCH_MARGIN_M) {
+      this.scannerBeamAlong = currentAlong;
+      return current;
     }
-    returnHome();
+    if (bestId && bestPerp <= SCANNER_BEAM_LOCK_RADIUS_M) {
+      this.scannerBeamAlong = bestAlong;
+      return bestId;
+    }
+    return null;
   }
 
   private getCubeDropTargets(): CubeDropTarget[] {
@@ -4704,7 +4792,7 @@ export class MissionControlSystem extends createSystem({
 
     if (closestTarget === 'DISCARD') {
       this.playCue('CUBE_DOCK');
-      this.handleDiscardSelected();
+      this.handleDiscardSelected(true); // carrying the cube into the chute is the deliberate gesture
       return;
     }
     if (closestTarget === 'PROCESS') {
@@ -5852,6 +5940,11 @@ export class MissionControlSystem extends createSystem({
           : `QUEUE ${selectedPkt.id} IN DOWNLINK BAY (${mb} MB / ${selectedPkt.transmitSec.toFixed(1)}s Tx)`,
       );
     }
+    this.setText(
+      this.telemetryPanel,
+      'Lbl_DiscardCube',
+      this.isDiscardArmed() ? 'PINCH AGAIN TO DISCARD' : 'DISCARD SELECTED CUBE',
+    );
   }
 
   private syncDebriefPanel(): void {

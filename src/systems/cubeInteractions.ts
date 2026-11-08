@@ -89,7 +89,9 @@ const STATION_ANCHORS: StationAnchorSpec[] = [
   { kind: 'PROCESS', local: [0.18, 0.79, 0.07], radius: 0.15 },
   ...[0.25, 0.32, 0.39].map((x, slotIndex) => ({ kind: 'QUEUE' as const, slotIndex, local: [x, 0.79, 0.13] as [number, number, number], radius: 0.18 })),
   ...[-0.38, -0.31, -0.24].map((x, slotIndex) => ({ kind: 'RAW_TRAY' as const, slotIndex, local: [x, 0.792, 0.14] as [number, number, number], radius: 0.20 })),
-  { kind: 'DISCARD', local: [0.44, 0.79, 0.22], radius: 0.15 },
+  // Discard destroys evidence, so its zone is the chute mouth only (rim radius 5.8 cm), not a 15 cm halo
+  // that also covered most of Downlink Slot 3 (10 cm away).
+  { kind: 'DISCARD', local: [0.44, 0.79, 0.22], radius: 0.09 },
 ];
 
 const anchorName = (spec: StationAnchorSpec) => `CubeStation_${spec.kind}_${spec.slotIndex ?? 0}`;
