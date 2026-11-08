@@ -53,15 +53,13 @@ export class OrbitalAudioController {
   }
 
   /**
-   * Silence everything while the pass is paused (Quest menu, headset off, tab hidden). The context is
-   * suspended and no cue is scheduled meanwhile; cues queued on a frozen clock would all fire on resume.
+   * Silence everything while the pass is paused (Quest menu, headset off, tab hidden): the master gain ramps
+   * to zero and no new cue is scheduled. The context keeps running, so resuming needs no device restart.
    */
   public setHeld(held: boolean): void {
     if (this.held === held) return;
     this.held = held;
-    if (!this.ctx) return;
-    if (held) void this.ctx.suspend().catch(() => {});
-    else void this.ctx.resume().catch(() => {});
+    this.applyMasterGain(0.02);
   }
 
   public getState(): { held: boolean; context: AudioContextState | 'none' } {
@@ -70,7 +68,7 @@ export class OrbitalAudioController {
 
   private applyMasterGain(rampTime = 0.03): void {
     if (!this.master || !this.ctx) return;
-    const effectiveVolume = this.isDucked ? this.volume * 0.35 : this.volume;
+    const effectiveVolume = this.held ? 0 : this.isDucked ? this.volume * 0.35 : this.volume;
     try {
       this.master.gain.setTargetAtTime(effectiveVolume, this.ctx.currentTime, rampTime);
     } catch {
