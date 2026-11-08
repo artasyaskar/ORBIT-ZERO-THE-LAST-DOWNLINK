@@ -118,6 +118,11 @@ function deriveCard(card: CampaignCardSpec): CampaignCardSpec {
 
 export const CAMPAIGN_MENU_CARDS: readonly CampaignCardSpec[] = RAW_CAMPAIGN_CARDS.map(deriveCard);
 
+/** First-time players start in the 90-second Academy; returning players go straight to OP 01. */
+export function defaultCampaignCard(): CampaignCardSpec {
+  return loadMissionProfile().tutorialComplete ? CAMPAIGN_MENU_CARDS[1] : CAMPAIGN_MENU_CARDS[0];
+}
+
 export interface LandingLaunchSelection {
   launchXR: boolean;
   scenarioId: MissionScenarioId;
@@ -144,8 +149,7 @@ export class LandingUI {
   private vrAdvisoryEl!: HTMLDivElement;
 
   private isWebXRSupported = false;
-  // First-time players start in the 90-second Academy; returning players go straight to OP 01.
-  private selectedCard: CampaignCardSpec = loadMissionProfile().tutorialComplete ? CAMPAIGN_MENU_CARDS[1] : CAMPAIGN_MENU_CARDS[0];
+  private selectedCard: CampaignCardSpec = defaultCampaignCard();
 
   constructor(container: HTMLElement, events: LandingUIEvents) {
     this.container = container;

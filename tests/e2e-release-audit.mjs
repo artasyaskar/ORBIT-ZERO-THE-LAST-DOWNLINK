@@ -113,9 +113,10 @@ try {
   });
 
   // =========================================================================
-  // STAGE 1: First Launch Hero Screen (Normal Root URL `/` without `?landing=1`)
+  // STAGE 1: First Launch Hero Screen. IWER reports the Meta Quest user agent, which routes the root URL
+  // to the headset lobby, so ?landing forces the cinematic landing that desktop visitors get.
   // =========================================================================
-  await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${baseUrl}${baseUrl.includes('?') ? '&' : '?'}landing`, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#oz-hero-screen', { state: 'visible', timeout: 15000 });
   await page.waitForTimeout(500);
   const heroText = await page.locator('#oz-hero-screen').innerText();

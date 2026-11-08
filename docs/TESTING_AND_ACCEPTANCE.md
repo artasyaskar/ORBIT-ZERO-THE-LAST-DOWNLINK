@@ -58,6 +58,12 @@ Executed in desktop Chrome/Edge over `https://localhost:5173` (or `4173`) using 
 
 ## 5. Tier 4: Physical Meta Quest Headset Protocol (If Hardware Access Secured)
 If a Meta Quest 2, 3, or 3S is available during Phase 6:
+0. **Enter VR (verify first; emulator coverage: `node tests/e2e-enter-vr.mjs`).**
+   - Open the deployed HTTPS URL in Meta Quest Browser: the lobby (not the cinematic landing) shows "Loading the mission...", then ENTER VR. Note the load time.
+   - One tap on ENTER VR enters VR. Count the taps; anything above one is a failure.
+   - If the browser's own Enter VR button (address bar, from IWSDK `offerSession`) appears, check that using it also works, and that it does not block our button.
+   - Leave VR (Meta button > Exit or Quit): the lobby comes back with "You left VR..."; one tap re-enters.
+   - If VR ever fails to start, the lobby must show a message and TRY AGAIN, never a silent flat page. Write down the error line shown under the message.
 1. Open the deployed HTTPS URL in **Meta Quest Browser** with controllers set aside (hand tracking active).
 2. Verify **Fixed Foveated Rendering (`medium`)** and **Multiview (`OCULUS_multiview`)** activation in `chrome://inspect` logs.
 3. Measure sustained framerate (`>= 60 FPS` required by Devpost rubric; `72 FPS` target) using OVR Metrics Tool.

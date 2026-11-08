@@ -141,17 +141,11 @@ async function renderCost(label) {
 
 const perf = [];
 try {
-  // 1. Enter like a judge: landing -> Fireline -> ENTER VR.
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('#oz-hero-screen', { state: 'visible', timeout: 20000 });
-  await page.click('#btn-enter-experience');
-  await page.waitForSelector('#oz-selection-screen', { state: 'visible', timeout: 10000 });
-  await page.click('#card-op-fireline');
-  await page.click('#btn-enter-vr');
-  await page.waitForFunction(() => Boolean(window.__ORBIT_ZERO__), null, { timeout: 90000 });
-  if (!(await page.evaluate(() => window.__ORBIT_ZERO__.getRuntimeStatus().immersive))) {
-    await page.evaluate(() => window.__ORBIT_ZERO__.clickPanel('briefing-panel', 'xr-button'));
-  }
+  // 1. Enter like a judge on a Quest: the link opens the headset lobby, then ONE tap on ENTER VR.
+  //    ?scenario picks Fireline (a first-time judge gets the Academy; e2e-hands-only covers that).
+  await page.goto(`${url}?scenario=FIRELINE_PASS`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => document.querySelector('#oz-xr-entry')?.dataset.phase === 'ready', null, { timeout: 90000 });
+  await page.click('#oz-xr-enter');
   await page.waitForFunction(() => window.__ORBIT_ZERO__.getRuntimeStatus().immersive, null, { timeout: 30000 });
   await page.evaluate(async () => {
     const remote = window.__ORBIT_IWER__.remote;

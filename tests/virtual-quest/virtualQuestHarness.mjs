@@ -122,7 +122,8 @@ export async function launchImmersiveGame({ skipBuild = false, headed = false, c
   const page = await context.newPage();
   const pageErrors = [];
   page.on('pageerror', (e) => pageErrors.push(String(e)));
-  await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+  // IWER reports the Meta Quest user agent (headset lobby); ?landing keeps this harness on the landing flow.
+  await page.goto(`${baseUrl}?landing`, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#oz-hero-screen', { state: 'visible', timeout: 15000 });
   await page.click('#btn-enter-experience');
   await page.waitForSelector('#oz-selection-screen', { state: 'visible', timeout: 10000 });

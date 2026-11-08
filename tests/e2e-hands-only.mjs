@@ -110,21 +110,14 @@ try {
   // =========================================================================
   // 1. Entry from Public Root URL `/` -> Campaign Selection -> Enter VR
   // =========================================================================
-  console.log('[1/8] Navigating to public root URL / and selecting Orbital Academy VR...');
+  // IWER reports the Meta Quest user agent, so the root URL opens the headset lobby. A first-time
+  // visitor gets the Orbital Academy; one tap on ENTER VR starts the session.
+  console.log('[1/8] Navigating to public root URL / (headset lobby) and entering VR with one tap...');
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('#oz-hero-screen', { state: 'visible', timeout: 15000 });
-  await page.click('#btn-enter-experience');
-  await page.waitForSelector('#oz-selection-screen', { state: 'visible', timeout: 10000 });
-  await page.click('#card-op-academy');
-  await page.waitForTimeout(200);
-  await page.click('#btn-enter-vr');
+  await page.waitForFunction(() => document.querySelector('#oz-xr-entry')?.dataset.phase === 'ready', null, { timeout: 60000 });
+  await page.click('#oz-xr-enter');
 
   await page.waitForFunction(() => Boolean(window.__ORBIT_ZERO__), null, { timeout: 60000 });
-  // Ensure immersive WebXR session is active (if browser required in-world xr-button activation)
-  const isAlreadyImmersive = await page.evaluate(() => window.__ORBIT_ZERO__.getRuntimeStatus().immersive);
-  if (!isAlreadyImmersive) {
-    await page.evaluate(() => window.__ORBIT_ZERO__.clickPanel('briefing-panel', 'xr-button'));
-  }
   await page.waitForFunction(
     () => Boolean(window.__ORBIT_ZERO__) && window.__ORBIT_ZERO__.getRuntimeStatus().immersive,
     null,

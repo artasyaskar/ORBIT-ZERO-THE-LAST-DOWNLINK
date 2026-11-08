@@ -22,7 +22,8 @@ const results = [];
 const settle = () => page.waitForTimeout(240);
 
 try {
-  await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 120000 });
+  // IWER reports the Meta Quest user agent (headset lobby); ?landing forces the desktop landing flow.
+  await page.goto(`${baseUrl}${baseUrl.includes('?') ? '&' : '?'}landing`, { waitUntil: 'domcontentloaded', timeout: 120000 });
   await page.locator('#btn-enter-experience').click();
   await page.locator('#card-op-fireline').click();
   await page.locator('#btn-play-desktop').click();

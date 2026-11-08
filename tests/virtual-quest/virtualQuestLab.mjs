@@ -158,7 +158,8 @@ try {
   // STAGE 1: Launch & Enter WebXR Immersive Session
   // -------------------------------------------------------------------------
   console.log('\n[Stage 1/8] Booting game, entering Orbital Academy WebXR session...');
-  await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+  // IWER reports the Meta Quest user agent (headset lobby); ?landing keeps this lab on the landing flow.
+  await page.goto(`${baseUrl}${baseUrl.includes('?') ? '&' : '?'}landing`, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#oz-hero-screen', { state: 'visible', timeout: 15000 });
   await page.screenshot({ path: join(artifactsDir, '01-landing-hero.png') });
 

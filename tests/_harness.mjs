@@ -11,7 +11,39 @@ import { chromium } from 'playwright';
 export const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const vite = join(root, 'node_modules', 'vite', 'bin', 'vite.js');
 
-export async function launchApp({ skipLanding = false, viewport = { width: 1440, height: 960 } } = {}) {
+/** Console errors every harness page ignores (offline font/CDN lookups). Extra patterns per page via `ignoreErrors`. */
+const OFFLINE_NOISE = ['ERR_NAME_NOT_RESOLVED', 'ERR_INTERNET_DISCONNECTED'];
+
+/**
+ * Opens a page in a fresh browser context.
+ * - iwer: install the IWER Meta Quest 3 emulator (hand input) as navigator.xr (default true)
+ * - userAgent: override the browser's user agent (e.g. Meta Quest Browser)
+ * - initScript: extra script that runs after IWER in every document
+ */
+export async function openPage(browser, { skipLanding = false, viewport = { width: 1440, height: 960 }, userAgent, iwer = true, initScript = '', ignoreErrors = [] } = {}) {
+  const context = await browser.newContext({ viewport, ignoreHTTPSErrors: true, ...(userAgent ? { userAgent } : {}) });
+  if (iwer) {
+    const iwerSource = await readFile(join(root, 'node_modules', 'iwer', 'build', 'iwer.js'), 'utf8');
+    await context.addInitScript({
+      content: `${iwerSource}\nconst device = new window.IWER.XRDevice(window.IWER.metaQuest3, { stereoEnabled: false }); device.installRuntime({forceInstall:true}); device.primaryInputMode = 'hand'; window.__ORBIT_IWER__ = device;`,
+    });
+  }
+  const extra = `${skipLanding ? 'window.__ORBIT_SKIP_LANDING__ = true;' : ''}${initScript}`;
+  if (extra) await context.addInitScript({ content: extra });
+  const page = await context.newPage();
+  const failures = [];
+  const ignored = [...OFFLINE_NOISE, ...ignoreErrors];
+  page.on('pageerror', (e) => failures.push(String(e)));
+  page.on('console', (m) => {
+    if (m.type() === 'error') {
+      const t = m.text();
+      if (!ignored.some((needle) => t.includes(needle))) failures.push(t);
+    }
+  });
+  return { context, page, failures };
+}
+
+export async function launchApp({ skipLanding = false, viewport = { width: 1440, height: 960 }, userAgent, iwer = true, initScript = '', ignoreErrors = [] } = {}) {
   const port = await new Promise((res, rej) => {
     const s = createServer();
     s.once('error', rej);
@@ -48,20 +80,7 @@ export async function launchApp({ skipLanding = false, viewport = { width: 1440,
     headless: process.env.ORBIT_HEADED !== '1',
     args: ['--enable-webgl', '--ignore-gpu-blocklist', ...(process.platform === 'win32' ? ['--use-angle=d3d11'] : [])],
   });
-  const context = await browser.newContext({ viewport, ignoreHTTPSErrors: true });
-  const iwerSource = await readFile(join(root, 'node_modules', 'iwer', 'build', 'iwer.js'), 'utf8');
-  await context.addInitScript({
-    content: `${iwerSource}\nconst device = new window.IWER.XRDevice(window.IWER.metaQuest3, { stereoEnabled: false }); device.installRuntime({forceInstall:true}); device.primaryInputMode = 'hand'; window.__ORBIT_IWER__ = device;${skipLanding ? ' window.__ORBIT_SKIP_LANDING__ = true;' : ''}`,
-  });
-  const page = await context.newPage();
-  const failures = [];
-  page.on('pageerror', (e) => failures.push(String(e)));
-  page.on('console', (m) => {
-    if (m.type() === 'error') {
-      const t = m.text();
-      if (!t.includes('ERR_NAME_NOT_RESOLVED') && !t.includes('ERR_INTERNET_DISCONNECTED')) failures.push(t);
-    }
-  });
+  const { context, page, failures } = await openPage(browser, { skipLanding, viewport, userAgent, iwer, initScript, ignoreErrors });
   const close = async () => {
     await browser.close().catch(() => {});
     preview.kill();
@@ -71,7 +90,8 @@ export async function launchApp({ skipLanding = false, viewport = { width: 1440,
 
 /** Drive the desktop landing flow to the game with the given campaign card id. */
 export async function enterGame(page, url, cardId = 'card-op-fireline') {
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  // IWER reports the Meta Quest user agent, which routes to the headset lobby; ?landing forces the landing.
+  await page.goto(`${url}?landing`, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#oz-hero-screen', { state: 'visible', timeout: 15000 });
   await page.click('#btn-enter-experience');
   await page.waitForTimeout(700);

@@ -14,7 +14,8 @@ const report = { tier: 'Desktop Chromium d3d11, 1440x960, production build. NOT 
   const { page } = app;
   await page.coverage.startJSCoverage({ resetOnNavigation: false });
   const t0 = Date.now();
-  await page.goto(app.url, { waitUntil: 'domcontentloaded' });
+  // IWER reports the Meta Quest user agent (headset lobby); ?landing profiles the desktop landing.
+  await page.goto(`${app.url}?landing`, { waitUntil: 'domcontentloaded' });
   const domMs = Date.now() - t0;
   await page.waitForSelector('#oz-hero-screen', { state: 'visible', timeout: 30000 });
   const heroMs = Date.now() - t0;

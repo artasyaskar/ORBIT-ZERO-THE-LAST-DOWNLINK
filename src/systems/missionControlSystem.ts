@@ -76,6 +76,7 @@ import { GLOBE_CARD_SCALE, IMMERSIVE_PANEL_POSES, MISSION_HUD_POSES, type PanelP
 import { animateWeather, applyWeather, createWeatherFx } from './sectorWeatherFx';
 import { paintSensorView } from '../ui/sensorViewPainter';
 import { missionCardModel, resultModel, trackerText } from '../ui/hudText';
+import { getXrEntryOverlay, isXrEntryOverlayShowing } from '../ui/xrEntryOverlay';
 import { SCORING } from '../mission/missionConfig';
 import { fmtRate, rateOf, rawStorageUnits } from '../mission/budgetText';
 import type { DataPacket, MissionScenarioId, MissionState, SectorId, SensorMode } from '../mission/types';
@@ -1208,10 +1209,33 @@ export class MissionControlSystem extends createSystem({
 
     // Trigger Commander ARIA-7 Opening Tactical Pass Briefing
     window.setTimeout(() => {
-      this.announceActiveScenarioPassStart();
+      this.whenPlayerReady(() => this.announceActiveScenarioPassStart());
     }, 600);
 
     this.syncAll();
+  }
+
+  /**
+   * Runs `speak` once the player can hear it: the page has had a user gesture (browsers block speech
+   * and sound before the first one) and the VR entry overlay is not up. In the headset lobby the game
+   * loads before any tap, so the opening line plays after entering VR (or choosing the flat screen)
+   * instead of being blocked or spoken over the lobby.
+   */
+  private whenPlayerReady(speak: () => void): void {
+    const ready = () => {
+      const activation = (navigator as Navigator & { userActivation?: { hasBeenActive: boolean } }).userActivation;
+      return (!activation || activation.hasBeenActive) && !isXrEntryOverlayShowing();
+    };
+    if (ready()) {
+      speak();
+      return;
+    }
+    const timer = window.setInterval(() => {
+      if (!ready()) return;
+      window.clearInterval(timer);
+      window.setTimeout(speak, 600);
+    }, 250);
+    this.cleanupFuncs.push(() => window.clearInterval(timer));
   }
 
   private announceActiveScenarioPassStart(): void {
@@ -3535,7 +3559,10 @@ export class MissionControlSystem extends createSystem({
       } else {
         const launchXR = () => {
           const isArRequested = this.profile.preferences.tabletopMode && this.isArSupported;
-          this.world.launchXR({
+          // Same defensive path as the DOM ENTER VR button: a failed request shows a message and TRY AGAIN.
+          const overlay = getXrEntryOverlay();
+          overlay.attach(this.world);
+          overlay.enter({
             sessionMode: isArRequested ? SessionMode.ImmersiveAR : SessionMode.ImmersiveVR,
           });
         };

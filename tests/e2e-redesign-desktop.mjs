@@ -7,7 +7,8 @@ import { launchApp, root } from './_harness.mjs';
 
 const out = join(root, 'artifacts', 'redesign');
 await mkdir(out, { recursive: true });
-const { url, page, failures, close } = await launchApp();
+// A desktop visitor: no WebXR emulator (IWER would also report a Meta Quest user agent).
+const { url, page, failures, close } = await launchApp({ iwer: false });
 const log = (...a) => console.log('[redesign]', ...a);
 const shot = (name) => page.screenshot({ path: join(out, `${name}.png`) });
 const click = async (sel) => { await page.click(sel); await page.waitForTimeout(250); };

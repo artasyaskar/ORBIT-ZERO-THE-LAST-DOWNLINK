@@ -4,14 +4,19 @@
  *
  * Provides seamless routing between:
  * 1. Cinematic Landing Experience (3D Earth space environment, video briefing, audio, mode selection)
- * 2. Core Game Engine (Meta Immersive Web SDK 1.0.1, MissionControlSystem, spatial interactions)
+ * 2. Headset lobby: headset browsers skip the landing (no 3D landing scene, no voice-over download) and
+ *    get one ENTER VR button as soon as the game has loaded
+ * 3. Core Game Engine (Meta Immersive Web SDK 1.0.1, MissionControlSystem, spatial interactions)
  */
 
-import { GrabSystem, VisibilityState, World } from '@iwsdk/core';
+import { GrabSystem, World } from '@iwsdk/core';
 import projectOptions from 'virtual:iwsdk-project';
 import type { MissionScenarioId } from './mission/types';
 import { MissionControlSystem } from './systems/missionControlSystem';
 import { LandingController } from './landing/landingController';
+import { defaultCampaignCard } from './landing/landingUI';
+import { getXrEntryOverlay } from './ui/xrEntryOverlay';
+import { detectImmersiveVr, isStandaloneHeadsetBrowser } from './ui/xrEntryText';
 import './landing/landing.css';
 
 export interface OrbitZeroLaunchConfig {
@@ -58,39 +63,45 @@ export async function initOrbitZeroGame(
 
   if (config.launchXR) {
     // requestSession() needs a live user gesture. World.create() above loads every critical asset first,
-    // which can outlast Chromium's ~5 s activation window on a cold Quest cache. IWSDK's launchXR() also
-    // swallows the async rejection, so a try/catch here never fires. Ask only while the gesture is live,
-    // and offer a fresh tap target whenever no session exists shortly afterwards.
+    // which can outlast Chromium's ~5 s activation window on a cold Quest cache. Ask only while the gesture
+    // is live; otherwise (or if the request fails) the overlay offers a fresh tap with a plain message.
+    const overlay = getXrEntryOverlay();
+    overlay.attach(world, { promptOnReturn: true });
     const activation = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation;
     const gestureLive = activation ? activation.isActive : true;
-    if (gestureLive) world.launchXR();
-    window.setTimeout(() => {
-      if (!world.session) showEnterVrButton(world);
-    }, gestureLive ? 2500 : 0);
+    if (gestureLive) overlay.enter();
+    else overlay.showReady();
   }
 
   return world;
 }
 
-/** Full-width DOM button whose own click starts the immersive session (a fresh, valid user gesture). */
-function showEnterVrButton(world: World): void {
-  if (typeof document === 'undefined' || document.getElementById('oz-enter-vr-fallback')) return;
-  const button = document.createElement('button');
-  button.id = 'oz-enter-vr-fallback';
-  button.type = 'button';
-  button.textContent = 'TAP TO ENTER VR';
-  button.style.cssText = 'position:fixed;left:50%;bottom:48px;transform:translateX(-50%);z-index:99999;min-width:320px;padding:22px 36px;background:#064e3b;color:#ecfeff;border:2px solid #34d399;border-radius:14px;font:800 22px/1 system-ui,sans-serif;letter-spacing:1px;cursor:pointer;';
-  button.addEventListener('click', () => world.launchXR());
-  document.body.appendChild(button);
-  let unsubscribe: (() => void) | undefined;
-  let done = false;
-  unsubscribe = world.visibilityState.subscribe((state) => {
-    if (state === VisibilityState.NonImmersive || done) return;
-    done = true;
-    button.remove();
-    unsubscribe?.();
-  });
-  if (done) unsubscribe();
+/**
+ * Headset visitors: load the game at once behind a one-button lobby. The tap on ENTER VR is the user
+ * gesture requestSession() needs, so entry is one tap; failures show a message and TRY AGAIN.
+ */
+function startHeadsetLobby(scenarioId: MissionScenarioId | null, tutorial: boolean): void {
+  const overlay = getXrEntryOverlay();
+  overlay.showLoading();
+  const support = detectImmersiveVr(navigator.xr, window.isSecureContext);
+  const card = defaultCampaignCard();
+  initOrbitZeroGame({
+    launchXR: false,
+    initialScenarioId: scenarioId ?? card.scenarioId,
+    startTutorial: scenarioId ? tutorial : card.startTutorial,
+  })
+    .then(async (world) => {
+      overlay.attach(world, { promptOnReturn: true });
+      if (world.session) return;
+      const result = await support;
+      if (world.session) return;
+      if (result === 'supported' || result === 'unknown') overlay.showReady();
+      else overlay.showUnavailable(result);
+    })
+    .catch((err) => {
+      console.error('[ORBIT ZERO] Headset lobby: the game failed to load:', err);
+      overlay.showLoadFailed(err);
+    });
 }
 
 function showLaunchNotice(message: string): void {
@@ -128,6 +139,13 @@ function bootstrap(): void {
     }).catch((err) => {
       console.error('[ORBIT ZERO] Direct game bootstrap failed:', err);
     });
+    return;
+  }
+
+  // Headset browsers (or ?headset) skip the cinematic landing; ?landing shows it anyway.
+  const headsetVisit = !forceLanding && Boolean(urlParams?.has('headset') || isStandaloneHeadsetBrowser(navigator.userAgent));
+  if (headsetVisit) {
+    startHeadsetLobby(urlScenario, urlTutorial);
     return;
   }
 

@@ -1,7 +1,8 @@
 /**
  * Production-hosting check: serves dist/ from a plain static server (no Vite plugin, no IWER emulator)
  * at the site root and at a subpath, then verifies that the landing page, assets and desktop game load,
- * that a reload works, and that a failed VR entry falls back to the desktop game.
+ * that a reload works, that a failed VR entry falls back to the desktop game, and that a Meta Quest
+ * Browser user agent gets the headset lobby (no landing media) with a working no-VR fallback.
  *
  *   node tests/deploy-static-check.mjs            (requires an existing dist/ build)
  *
@@ -16,6 +17,7 @@ import { chromium } from 'playwright';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = join(root, 'dist');
+const QUEST_UA = 'Mozilla/5.0 (X11; Linux x86_64; Quest 3) AppleWebKit/537.36 (KHTML, like Gecko) OculusBrowser/39.2.0.0.56.754450099 Chrome/136.0.7103.177 VR Safari/537.36';
 assert.ok(existsSync(join(dist, 'index.html')), 'dist/ is missing: run the production build first');
 
 const MIME = {
@@ -134,6 +136,42 @@ try {
     assert.deepEqual(failures, [], `[${prefix}] no request may fail`);
     assert.ok(incoming >= 400, `[${prefix}] incoming source models must not be deployed`);
     await context.close();
+
+    step('quest browser lobby');
+    // 6. A Meta Quest Browser visitor (user agent only; this headless Chrome has no VR runtime): the headset
+    //    lobby replaces the landing, the landing skybox and voice-over are not downloaded, and without VR
+    //    the lobby says so and offers the flat game.
+    const questContext = await browser.newContext({ viewport: { width: 1280, height: 720 }, userAgent: QUEST_UA });
+    const quest = await questContext.newPage();
+    const questSeen = [];
+    const questBad = [];
+    const questErrors = [];
+    quest.on('response', (r) => {
+      questSeen.push(r.url());
+      if (r.status() >= 400) questBad.push(`${r.status()} ${r.url()}`);
+    });
+    quest.on('requestfailed', (r) => questBad.push(`FAILED ${r.url()} ${r.failure()?.errorText ?? ''}`));
+    quest.on('console', (m) => { if (m.type() === 'error') questErrors.push(m.text()); });
+    quest.on('pageerror', (e) => questErrors.push(`pageerror: ${e.message}`));
+    await quest.goto(base, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await quest.waitForFunction(() => ['unavailable', 'ready'].includes(document.querySelector('#oz-xr-entry')?.dataset.phase), null, { timeout: 60000 });
+    const lobby = await quest.evaluate(() => ({
+      phase: document.querySelector('#oz-xr-entry')?.dataset.phase,
+      message: document.querySelector('#oz-xr-problem-message')?.textContent ?? '',
+      landing: Boolean(document.querySelector('#orbit-landing-root')),
+    }));
+    assert.equal(lobby.landing, false, `[${prefix}] a Quest browser visitor must not get the cinematic landing`);
+    assert.equal(lobby.phase, 'unavailable', `[${prefix}] without a VR runtime the lobby must say VR is unavailable`);
+    assert.equal(lobby.message, 'No VR headset was found.', `[${prefix}] lobby message`);
+    const landingMedia = questSeen.filter((u) => /milky_way_skybox|gemini_generated_video/.test(u));
+    assert.deepEqual(landingMedia, [], `[${prefix}] the headset lobby must not download landing media`);
+    assert.ok(questSeen.some((u) => u.includes('main.iwsdk.scene.json')), `[${prefix}] the lobby must load the game scene`);
+    await quest.locator('#oz-xr-enter').click();
+    await quest.waitForFunction(() => window.__ORBIT_ZERO__?.getState?.()?.phase === 'OPERATIONS' && document.querySelector('#oz-xr-entry')?.hidden, null, { timeout: 30000 });
+    const questFailures = questBad.filter((b) => !ignorable(b));
+    report.push({ mount: prefix, questLobby: lobby, failedRequests: questFailures, consoleErrors: questErrors.filter((e) => !ignorable(e)) });
+    assert.deepEqual(questFailures, [], `[${prefix}] no request may fail in the headset lobby`);
+    await questContext.close();
     server.close();
   }
   console.log(JSON.stringify({ status: 'PASS', report }, null, 2));

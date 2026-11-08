@@ -27,8 +27,8 @@ const shot = async (name) => {
   console.log('shot', file);
 };
 try {
-  // Landing + campaign selection
-  await page.goto(app.url, { waitUntil: 'domcontentloaded' });
+  // Landing + campaign selection (?landing: IWER reports the Meta Quest user agent, which opens the lobby)
+  await page.goto(`${app.url}?landing`, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#oz-hero-screen', { state: 'visible', timeout: 15000 });
   await shot('landing-hero');
   await page.click('#btn-enter-experience');
