@@ -21,7 +21,7 @@ import {
   SENSOR_PLAIN_GUIDE,
 } from '../mission/missionConfig';
 import { formatClock } from '../mission/guidance';
-import { loadMissionProfile } from '../systems/missionProfile';
+import { loadMissionProfile, starsFor, starString } from '../systems/missionProfile';
 
 export interface CampaignCardSpec {
   id: 'ORBITAL_ACADEMY' | 'FIRELINE_PASS' | 'STANDARD_INDUS_PASS' | 'AFTERSHOCK_PASS';
@@ -376,11 +376,14 @@ export class LandingUI {
   /** Writes config-derived text into the card grid and the briefing preview for the default card. */
   private refreshCardsFromConfig(): void {
     const metaFor: Record<string, string> = {};
+    const profile = loadMissionProfile();
     for (const card of CAMPAIGN_MENU_CARDS) {
       const s = MISSION_SCENARIOS[card.scenarioId];
+      const record = profile.mastery[card.scenarioId];
+      const stars = card.startTutorial ? '' : ` • ${starString(starsFor(record, getScenarioThresholds(card.scenarioId).successScore))}`;
       metaFor[card.id] = card.startTutorial
-        ? 'No clock • learn the 5 moves in 90s'
-        : `${s.budget.initialPower} Wh • ${s.budget.downlinkDurationSec.toFixed(1)}s window • ${s.passDurationSec ? formatClock(s.passDurationSec) : 'no'} clock`;
+        ? `No clock • learn the 5 moves in 90s${profile.tutorialComplete ? ' • DONE' : ''}`
+        : `${s.budget.initialPower} Wh • ${s.budget.downlinkDurationSec.toFixed(1)}s window • ${s.passDurationSec ? formatClock(s.passDurationSec) : 'no'} clock${stars}`;
     }
     this.rootEl.querySelectorAll<HTMLButtonElement>('.oz-op-card').forEach((btn) => {
       const id = btn.getAttribute('data-op-id') ?? '';

@@ -89,7 +89,7 @@ import { OrbitalAudioController, type OrbitalSoundCue } from './orbitalAudio';
 import { VoiceCommander, type VoiceDialogueId } from './voiceCommander';
 import { AgenticCoPilot, type AgenticIntervention } from './agenticCoPilot';
 import {
-  getDailyPass, loadMissionProfile, recordDailyPass, recordMissionMastery, saveMissionProfile,
+  getDailyPass, loadMissionProfile, recordDailyPass, recordMissionMastery, saveMissionProfile, starsFor, starString,
   type MissionPreferences,
 } from './missionProfile';
 import type { ActionResult, MissionAction, MissionSolution } from '../mission/types';
@@ -3563,7 +3563,11 @@ export class MissionControlSystem extends createSystem({
 
     if (mode === 'card') {
       const card = missionCardModel(state, custom);
-      this.setText(hud, 'CardKicker', card.kicker);
+      const record = this.profile.mastery[state.scenarioId];
+      const stars = starsFor(record, getScenarioThresholds(state.scenarioId, custom).successScore);
+      this.setText(hud, 'CardKicker', record?.attempts
+        ? `${card.kicker} | ${stars}/3 STARS | BEST ${record.bestScore} PTS`
+        : card.kicker);
       this.setText(hud, 'CardTitle', card.title);
       this.setText(hud, 'CardStory', card.story);
       card.requests.forEach((r, i) => {

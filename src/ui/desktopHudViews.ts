@@ -22,6 +22,7 @@ import {
 import { coveredRequestIds, formatClock, isPassStalled, type NextStep } from '../mission/guidance';
 import type { MissionScenarioConfig, MissionScenarioId, MissionState, SensorMode } from '../mission/types';
 import { escapeHtml } from './debriefText';
+import { starsFor, starString, type MissionMastery } from '../systems/missionProfile';
 
 const SENSOR_COLOR: Record<SensorMode, string> = { OPTICAL: '#38bdf8', THERMAL: '#fb923c', RADAR: '#facc15' };
 const TONE_COLOR: Record<NextStep['tone'], string> = { info: '#38bdf8', warn: '#f59e0b', critical: '#f87171', success: '#34d399' };
@@ -86,7 +87,7 @@ export function missionCardHtml(state: MissionState, custom?: MissionScenarioCon
     ? `<b style="color:#f59e0b;">${formatClock(state.passDurationSec)} pass clock</b> starts at your first scan. When it hits zero the link opens by itself.`
     : '<b style="color:#34d399;">No clock</b> on this pass.';
   const best = mastery && mastery.attempts > 0
-    ? `<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Your best: <b style="color:#f8fafc;">${mastery.bestScore} pts (Grade ${mastery.bestGrade})</b> in ${mastery.attempts} attempt(s).</div>`
+    ? `<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Your best: <b style="color:#f8fafc;">${mastery.bestScore} pts (Grade ${mastery.bestGrade})</b> in ${mastery.attempts} attempt(s) <span style="color:#fbbf24;font-size:14px;letter-spacing:2px;">${starString(starsFor(mastery as MissionMastery, getScenarioThresholds(state.scenarioId, custom).successScore))}</span></div>`
     : '';
   return `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
@@ -226,7 +227,8 @@ export function campaignHtml(state: MissionState, mastery: Partial<Record<Missio
       <div style="font-size:12px;color:#cbd5e1;line-height:1.45;min-height:52px;">${escapeHtml(s.storyLine ?? s.subtitle)}</div>
       <div style="font-size:11px;color:#94a3b8;margin-top:8px;">${s.budget.initialPower} Wh · ${s.budget.maxStorage} memory · ${s.budget.downlinkDurationSec.toFixed(1)}s window${s.passDurationSec ? ` · ${formatClock(s.passDurationSec)} clock` : ''}</div>
       <div style="font-size:11px;color:#94a3b8;">Sensors: ${sensors} · win at ${successScore}+ pts${weighted ? ' · weighted triage' : ''}</div>
-      <div style="font-size:11px;margin-top:6px;color:${m?.attempts ? '#34d399' : '#64748b'};font-weight:800;">${m?.attempts ? `BEST ${m.bestScore} PTS · GRADE ${m.bestGrade}` : 'NOT PLAYED YET'}${active ? ' · ACTIVE' : ''}</div>
+      <div style="font-size:16px;margin-top:6px;color:#fbbf24;letter-spacing:2px;">${starString(starsFor(m as MissionMastery | undefined, successScore))}</div>
+      <div style="font-size:11px;margin-top:2px;color:${m?.attempts ? '#34d399' : '#64748b'};font-weight:800;">${m?.attempts ? `BEST ${m.bestScore} PTS · GRADE ${m.bestGrade}` : 'NOT PLAYED YET'}${active ? ' · ACTIVE' : ''}</div>
     </div>`;
   };
   const accents = ['#f59e0b', '#38bdf8', '#34d399'];

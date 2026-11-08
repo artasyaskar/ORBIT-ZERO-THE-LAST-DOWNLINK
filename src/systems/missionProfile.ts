@@ -135,6 +135,21 @@ export function recordMissionMastery(
   return earned;
 }
 
+/**
+ * Stars for an operation from the saved best result: 1 = reached the win line, 2 = Grade A or better,
+ * 3 = Grade S. 0 when never passed. `successScore` comes from the scenario config.
+ */
+export function starsFor(record: MissionMastery | undefined, successScore: number): 0 | 1 | 2 | 3 {
+  if (!record || record.bestScore < successScore) return 0;
+  if (record.bestGrade === 'S') return 3;
+  if (record.bestGrade === 'A') return 2;
+  return 1;
+}
+
+export function starString(stars: number): string {
+  return `${'★'.repeat(stars)}${'☆'.repeat(3 - stars)}`;
+}
+
 export function getDailyPass(date: string): MissionScenarioId {
   const templates: MissionScenarioId[] = ['STANDARD_INDUS_PASS', 'MONSOON_SUPERCELL_PASS', 'SOLAR_BROWNOUT_PASS'];
   let hash = 2166136261;
