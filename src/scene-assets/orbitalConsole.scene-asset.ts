@@ -38,6 +38,7 @@ import {
     alignSpan,
     bevelBox,
     mergeStaticMeshesByMaterial,
+    mergeStaticMeshesIntoBakedMaterial,
     taperPlate,
 } from './lib/hardsurface';
 import { installCubeStationAnchors } from '../systems/cubeInteractions';
@@ -1584,13 +1585,18 @@ export function createOrbitalConsoleAsset(): Object3D {
     const consoleDesk = new Group();
     consoleDesk.name = 'ConsoleDeskAssembly';
     consoleDesk.add(baseGroup, deckGroup);
-    mergeStaticMeshesByMaterial(consoleDesk, [
+    const consoleDeskKeep = [
         'SensorToggleStem',
         'SensorSwitchLed',
+        // Desktop-only click targets; kept out of the merge (bezels too) so the headset can hide them.
         'TactileBtn_SensorMode',
         'TactileBtn_ScanTrigger',
         'TactileBtn_Compress',
         'TactileBtn_Transmit',
+        'TactileBtn_SensorMode_Bezel',
+        'TactileBtn_ScanTrigger_Bezel',
+        'TactileBtn_Compress_Bezel',
+        'TactileBtn_Transmit_Bezel',
         'TacticalRadarSweepBlade',
         'ProcessingCradleAssembly',
         'CradleClampLeft',
@@ -1603,6 +1609,15 @@ export function createOrbitalConsoleAsset(): Object3D {
         'DownlinkSlotProgress_2',
         'DownlinkSlotProgress_3',
         'LeverArmAssembly',
+    ];
+    mergeStaticMeshesByMaterial(consoleDesk, consoleDeskKeep);
+    // Then the remaining plain static parts become one draw; each keeps its own colour, glow, roughness and
+    // metalness (baked into vertex attributes). Subtrees the desktop clicks by name keep their own meshes.
+    mergeStaticMeshesIntoBakedMaterial(consoleDesk, [
+        ...consoleDeskKeep,
+        'TactileDeckControls',
+        'SBandTransmissionLever',
+        'SensorToggleSwitch',
     ]);
     root.add(consoleDesk);
 
@@ -1613,6 +1628,7 @@ export function createOrbitalConsoleAsset(): Object3D {
     mergeStaticMeshesByMaterial(cabinEnclosureShell, [
         'StarboardPlanetaryHorizonVista',
     ]);
+    mergeStaticMeshesIntoBakedMaterial(cabinEnclosureShell, ['StarboardPlanetaryHorizonVista']);
     root.add(cabinEnclosureShell);
     root.userData.hasCanopyBrowStrut = true;
 

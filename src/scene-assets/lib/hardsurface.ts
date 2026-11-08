@@ -25,12 +25,16 @@
 import {
   BufferAttribute,
   BufferGeometry,
+  Color,
   ExtrudeGeometry,
   Float32BufferAttribute,
+  InstancedMesh,
   InterleavedBufferAttribute,
   Material,
   Matrix4,
   Mesh,
+  MeshStandardMaterial,
+  NormalBlending,
   Object3D,
   Shape,
   Vector3,
@@ -695,4 +699,158 @@ export function mergeStaticMeshesByMaterial(
     mergedMesh.name = meshes[0].name;
     root.add(mergedMesh);
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * Baked-material static merge (one draw for many plain materials)
+ * ------------------------------------------------------------------ */
+
+const BAKED_PROGRAM_KEY = 'oz-baked-standard-v1';
+
+/** Shader text this patch replaces in three.js r181 MeshStandardMaterial (checked when a program compiles). */
+const BAKED_FRAGMENT_PATCHES: ReadonlyArray<[string, string]> = [
+  ['#include <common>', '#include <common>\nvarying vec3 vBakedEmissive;\nvarying vec2 vBakedRoughMetal;'],
+  ['vec3 totalEmissiveRadiance = emissive;', 'vec3 totalEmissiveRadiance = vBakedEmissive;'],
+  ['#include <roughnessmap_fragment>', 'float roughnessFactor = vBakedRoughMetal.x;'],
+  ['#include <metalnessmap_fragment>', 'float metalnessFactor = vBakedRoughMetal.y;'],
+];
+const BAKED_VERTEX_PATCHES: ReadonlyArray<[string, string]> = [
+  ['#include <common>', '#include <common>\nattribute vec3 bakedEmissive;\nattribute vec2 bakedRoughMetal;\nvarying vec3 vBakedEmissive;\nvarying vec2 vBakedRoughMetal;'],
+  ['#include <begin_vertex>', '#include <begin_vertex>\nvBakedEmissive = bakedEmissive;\nvBakedRoughMetal = bakedRoughMetal;'],
+];
+
+/**
+ * A MeshStandardMaterial whose colour comes from the `color` vertex attribute and whose emissive (already
+ * multiplied by emissiveIntensity), roughness and metalness come from two more attributes. If the shader text
+ * ever stops matching (a three.js upgrade), it renders with the material's own neutral values and warns,
+ * instead of glowing white.
+ */
+export function createBakedStandardMaterial(side: Material['side'], flatShading: boolean): MeshStandardMaterial {
+  const material = new MeshStandardMaterial({
+    color: 0xffffff,
+    vertexColors: true,
+    emissive: 0x000000,
+    roughness: 0.5,
+    metalness: 0.5,
+    side,
+    flatShading,
+  });
+  material.name = 'BakedStaticMat';
+  material.onBeforeCompile = (shader) => {
+    const missing = [...BAKED_VERTEX_PATCHES.filter(([from]) => !shader.vertexShader.includes(from)),
+      ...BAKED_FRAGMENT_PATCHES.filter(([from]) => !shader.fragmentShader.includes(from))];
+    if (missing.length > 0) {
+      console.warn('[hardsurface] baked material patch did not match this three.js version:', missing.map(([from]) => from));
+      return;
+    }
+    for (const [from, to] of BAKED_VERTEX_PATCHES) shader.vertexShader = shader.vertexShader.replace(from, to);
+    for (const [from, to] of BAKED_FRAGMENT_PATCHES) shader.fragmentShader = shader.fragmentShader.replace(from, to);
+  };
+  material.customProgramCacheKey = () => BAKED_PROGRAM_KEY;
+  return material;
+}
+
+/** True for a material whose whole look is colour, emissive, roughness and metalness. */
+function isBakeableStandardMaterial(material: Material): material is MeshStandardMaterial {
+  if (material.type !== 'MeshStandardMaterial') return false;
+  const m = material as MeshStandardMaterial;
+  return (
+    m.visible && !m.transparent && m.opacity === 1 && m.alphaTest === 0 && m.blending === NormalBlending &&
+    m.depthTest && m.depthWrite && m.colorWrite && !m.polygonOffset && !m.wireframe && !m.vertexColors &&
+    !m.map && !m.emissiveMap && !m.normalMap && !m.roughnessMap && !m.metalnessMap && !m.aoMap &&
+    !m.alphaMap && !m.lightMap && !m.bumpMap && !m.displacementMap && !m.envMap &&
+    m.envMapIntensity === 1 && m.onBeforeCompile === Material.prototype.onBeforeCompile
+  );
+}
+
+/**
+ * Merges static opaque MeshStandardMaterial meshes into one draw per (side, flat shading), even when their
+ * materials differ: each part's colour, emissive x intensity, roughness and metalness are baked into vertex
+ * attributes read by createBakedStandardMaterial, so every part keeps its own look. A mesh is left alone when
+ * it, or any ancestor below `root`, is named in `keepNames`; when it or an ancestor is hidden; or when its
+ * material has textures, transparency, vertex colours or a custom shader. Returns the merged meshes.
+ */
+export function mergeStaticMeshesIntoBakedMaterial(root: Object3D, keepNames: string[] = []): Mesh[] {
+  root.updateMatrixWorld(true);
+  const inverseRoot = new Matrix4().copy(root.matrixWorld).invert();
+  const keep = new Set(keepNames);
+  const groups = new Map<string, { side: Material['side']; flat: boolean; meshes: Mesh[] }>();
+
+  const eligible = (mesh: Mesh): boolean => {
+    for (let o: Object3D | null = mesh; o && o !== root; o = o.parent) {
+      if (!o.visible || keep.has(o.name)) return false;
+    }
+    if (mesh instanceof InstancedMesh || (mesh as unknown as { isSkinnedMesh?: boolean }).isSkinnedMesh) return false;
+    if (mesh.morphTargetInfluences || mesh.renderOrder !== 0 || Array.isArray(mesh.material)) return false;
+    if (mesh.geometry.groups.length > 0 || !mesh.geometry.getAttribute('position')) return false;
+    return isBakeableStandardMaterial(mesh.material);
+  };
+
+  root.traverse((obj) => {
+    if (!(obj instanceof Mesh) || !eligible(obj)) return;
+    const m = obj.material as MeshStandardMaterial;
+    const key = `${m.side}|${m.flatShading ? 1 : 0}`;
+    const group = groups.get(key) ?? { side: m.side, flat: m.flatShading, meshes: [] };
+    group.meshes.push(obj);
+    groups.set(key, group);
+  });
+
+  const merged: Mesh[] = [];
+  const toRoot = new Matrix4();
+  const emissive = new Color();
+  for (const { side, flat, meshes } of groups.values()) {
+    if (meshes.length < 2) continue;
+    const positions: number[] = [];
+    const normals: number[] = [];
+    const colors: number[] = [];
+    const emissives: number[] = [];
+    const roughMetal: number[] = [];
+    const indices: number[] = [];
+    let vertexOffset = 0;
+    for (const mesh of meshes) {
+      const m = mesh.material as MeshStandardMaterial;
+      toRoot.multiplyMatrices(inverseRoot, mesh.matrixWorld);
+      const geo = mesh.geometry.clone();
+      geo.applyMatrix4(toRoot);
+      if (!geo.getAttribute('normal')) geo.computeVertexNormals();
+      const pos = geo.getAttribute('position');
+      const nrm = geo.getAttribute('normal');
+      emissive.copy(m.emissive).multiplyScalar(m.emissiveIntensity);
+      for (let i = 0; i < pos.count; i++) {
+        positions.push(pos.getX(i), pos.getY(i), pos.getZ(i));
+        normals.push(nrm.getX(i), nrm.getY(i), nrm.getZ(i));
+        colors.push(m.color.r, m.color.g, m.color.b);
+        emissives.push(emissive.r, emissive.g, emissive.b);
+        roughMetal.push(m.roughness, m.metalness);
+      }
+      // A mirroring transform flips triangle winding; flip it back so front faces stay front faces.
+      const mirrored = toRoot.determinant() < 0;
+      const idx = geo.getIndex();
+      const triCount = idx ? idx.count : pos.count;
+      for (let i = 0; i + 2 < triCount; i += 3) {
+        const a = idx ? idx.getX(i) : i;
+        const b = idx ? idx.getX(i + 1) : i + 1;
+        const c = idx ? idx.getX(i + 2) : i + 2;
+        if (mirrored) indices.push(vertexOffset + a, vertexOffset + c, vertexOffset + b);
+        else indices.push(vertexOffset + a, vertexOffset + b, vertexOffset + c);
+      }
+      vertexOffset += pos.count;
+      geo.dispose();
+      mesh.parent?.remove(mesh);
+    }
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('normal', new Float32BufferAttribute(normals, 3));
+    geometry.setAttribute('color', new Float32BufferAttribute(colors, 3));
+    geometry.setAttribute('bakedEmissive', new Float32BufferAttribute(emissives, 3));
+    geometry.setAttribute('bakedRoughMetal', new Float32BufferAttribute(roughMetal, 2));
+    geometry.setIndex(indices);
+    geometry.computeBoundingSphere();
+    geometry.computeBoundingBox();
+    const mesh = new Mesh(geometry, createBakedStandardMaterial(side, flat));
+    mesh.name = `BakedStatic_${root.name || 'root'}_${merged.length}`;
+    root.add(mesh);
+    merged.push(mesh);
+  }
+  return merged;
 }

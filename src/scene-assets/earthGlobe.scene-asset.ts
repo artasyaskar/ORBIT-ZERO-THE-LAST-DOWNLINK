@@ -36,6 +36,7 @@ import {
   alignSpan,
   bevelBox,
   mergeStaticMeshesByMaterial,
+  mergeStaticMeshesIntoBakedMaterial,
 } from './lib/hardsurface';
 
 export const GLOBE_RADIUS = 0.195;
@@ -1378,6 +1379,8 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
   }
 
   mergeStaticMeshesByMaterial(root);
+  // Remaining plain static parts (rails, panels, chassis, lens, fasteners) become one draw with their own looks.
+  mergeStaticMeshesIntoBakedMaterial(root);
 
   // 9. Dynamic Dual-Mode Payload Telemetry Indicators (attached after static merge for runtime ECS control)
   const opticalRingMat = new MeshStandardMaterial({

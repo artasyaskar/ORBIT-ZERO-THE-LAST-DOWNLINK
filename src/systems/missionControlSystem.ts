@@ -131,6 +131,31 @@ interface PointerEventTarget {
  * Desk pads (and the ARIA hologram) a hand can press, with the action each fires. Far presses come only
  * from IWSDK's hand ray (the visible laser); near presses from the app's fingertip/pinch proximity check.
  */
+/**
+ * Headset size of the main desk pads. The four front pads match the console push buttons they replace in
+ * the headset (5.3 x 3.8 cm, was 2.6 x 1.9 cm); commit and discard get the same cap size class.
+ */
+const XR_DESK_PAD_SCALE: Readonly<Record<string, number>> = {
+  'pad-toggle-sensor': 1.2,
+  'pad-process-cradle': 1.2,
+  'pad-queue-downlink': 1.2,
+  'pad-fire-swath': 0.8,
+  'pad-commit-downlink': 1.0,
+  'pad-discard-chute': 1.0,
+  // Hit targets under the round gauge-row buttons (3.1 x 2.2 cm, was 1.8 x 1.3 cm), still hidden by them.
+  'pad-recenter-desk': 0.7,
+  'pad-master-power': 0.7,
+  'pad-aria-delegate': 0.7,
+};
+/**
+ * The gauge-row buttons are drawn by the desk-gauges asset; the pad entity under each one is what the
+ * laser and the near pinch press. Hover and press are mirrored onto the visible button.
+ */
+const GAUGE_BUTTON_TWIN: Readonly<Record<string, { group: string; cap: string }>> = {
+  'pad-recenter-desk': { group: 'RecenterDeskButton', cap: 'PadIlluminatedCap' },
+  'pad-master-power': { group: 'MasterIgnitionSwitch', cap: 'MasterIgnitionCap' },
+  'pad-aria-delegate': { group: 'AriaDelegationBeacon', cap: 'AriaBeaconCap' },
+};
 const LASER_PADS: ReadonlyArray<{ id: string; action: string }> = [
   { id: 'pad-fire-swath', action: 'SCAN' },
   { id: 'pad-toggle-sensor', action: 'TOGGLE_SENSOR' },
@@ -539,37 +564,8 @@ export class MissionControlSystem extends createSystem({
       globe.add(this.earthGlobeEnhancements);
     }
 
-    // Keep the 6 desk tactile pad ECS targets active for XR hand/ray interaction while stripping
-    // duplicate decorative child meshes (already rendered by orbital-console) to stay under Quest GPU budget.
-    const deskPadIds = [
-      'pad-fire-swath',
-      'pad-toggle-sensor',
-      'pad-process-cradle',
-      'pad-queue-downlink',
-      'pad-commit-downlink',
-      'pad-discard-chute',
-    ];
-    const syncDeskPadsForXR = (isImmersive: boolean) => {
-      for (const id of deskPadIds) {
-        const obj = this.sceneObject(id);
-        if (!obj) continue;
-        obj.visible = isImmersive;
-        if (isImmersive) {
-          let keptPrimaryMesh = false;
-          obj.traverse((child) => {
-            if (child instanceof Mesh) {
-              if (!keptPrimaryMesh) {
-                child.visible = true;
-                keptPrimaryMesh = true;
-              } else {
-                child.visible = false;
-              }
-            }
-          });
-        }
-      }
-    };
-    syncDeskPadsForXR(this.world.visibilityState.value !== VisibilityState.NonImmersive);
+    // Desk pads: headset-only ECS targets (desktop clicks the console's own buttons). See syncDeskPadsForXR.
+    this.syncDeskPadsForXR(this.world.visibilityState.value !== VisibilityState.NonImmersive);
 
     // 1b. Bind Deep-Space Milky Way Cosmic Skybox Dome
     this.bindCosmicEnvironmentAndTextures();
@@ -1292,20 +1288,25 @@ export class MissionControlSystem extends createSystem({
       const obj = this.sceneObject(id);
       if (!obj) continue;
       obj.visible = isImmersive;
-      if (isImmersive) {
-        let keptPrimaryMesh = false;
+      // Every part of a pad is shown (the FIRE SWATH plunger is base + guard ring + cap; showing only its
+      // first mesh left a dark stub). In the headset the main pads take the size of the console buttons
+      // they replace, so the button the laser presses is the one the player sees.
+      const authored = (obj.userData.authoredScale ??= obj.scale.x) as number;
+      const scale = isImmersive ? XR_DESK_PAD_SCALE[id] ?? authored : authored;
+      obj.scale.setScalar(scale);
+      obj.userData.laserBaseScale = scale;
+      if (GAUGE_BUTTON_TWIN[id]) {
+        // The round button above it is what the player sees. This pad stays a hit target (IWSDK's pointers
+        // test Object3D.visible) but is not drawn, so its corners never show under the button.
         obj.traverse((child) => {
-          if (child instanceof Mesh) {
-            if (!keptPrimaryMesh) {
-              child.visible = true;
-              keptPrimaryMesh = true;
-            } else {
-              child.visible = false;
-            }
-          }
+          if (child instanceof Mesh && !Array.isArray(child.material)) child.material.visible = !isImmersive;
         });
       }
     }
+    // The console's own push buttons (and their bezels) are the desktop click targets for these actions.
+    // In the headset they duplicated the pads 3 cm behind them and did nothing when pinched or lasered.
+    const tactileButtons = this.sceneObject('orbital-console')?.getObjectByName('TactileDeckControls');
+    if (tactileButtons) tactileButtons.visible = !isImmersive;
   }
 
   update(delta: number): void {
@@ -1487,6 +1488,10 @@ export class MissionControlSystem extends createSystem({
       const padObj = this.sceneObject(padId);
       const cap = this.childByName(padObj, 'PadIlluminatedCap');
       const stroke = padId === 'pad-fire-swath' ? 0.012 : 0.009; // -12mm stroke for plunger, -9mm for pads
+      // Gauge-row pads sit under a visible button of the desk-gauges asset: that button's cap moves too.
+      const twin = GAUGE_BUTTON_TWIN[padId];
+      const twinCap = twin ? this.childByName(this.childByName(this.sceneObject('desk-gauges'), twin.group), twin.cap) : undefined;
+      const twinRestY = twinCap ? ((twinCap.userData.pressRestY ??= twinCap.position.y) as number) : 0;
       if (cap) {
         // Spring back to the cap's authored height. A fixed 0.016 left pad caps 1 cm above their socket
         // after the first press, where a laser aimed at the pad missed them.
@@ -1496,6 +1501,7 @@ export class MissionControlSystem extends createSystem({
           const progress = 1.0 - newTimer / 0.18;
           const depression = reducedMotion ? 0 : Math.sin(progress * Math.PI) * Math.exp(-1.8 * progress);
           cap.position.y = restY - depression * stroke;
+          if (twinCap) twinCap.position.y = twinRestY - depression * 0.005; // 5 mm on the small round caps
 
           // Diegetic console vibration pulse during button press (never camera)
           if (vibratingDesk && progress < 0.5) {
@@ -1504,6 +1510,7 @@ export class MissionControlSystem extends createSystem({
           }
         } else {
           cap.position.y = restY;
+          if (twinCap) twinCap.position.y = twinRestY;
           this.padPressTimers.delete(padId);
           this.audio.playMechanicalSwitchClick(false);
         }
@@ -3705,9 +3712,9 @@ export class MissionControlSystem extends createSystem({
   }
 
   /**
-   * Shows or hides a spatial panel. A hidden panel also leaves pointer hit-testing: @pmndrs/pointer-events
-   * tests invisible objects too, so a hidden panel cost ray and sphere tests for every hand pointer every
-   * frame and could catch a laser aimed through the empty space where it sits.
+   * Shows or hides a spatial panel. A hidden panel also leaves pointer hit-testing. IWSDK's pointers skip
+   * invisible objects through a visibility filter, but only after visiting each one and walking all of its
+   * ancestors, for every hand pointer, every frame; pruning the panel skips that work entirely.
    */
   private setPanelShown(panel: Object3D | null | undefined, shown: boolean): void {
     if (!panel) return;
@@ -5282,7 +5289,10 @@ export class MissionControlSystem extends createSystem({
       const pad = this.sceneObject(id);
       if (!pad) continue;
       const base = (pad.userData.laserBaseScale ??= pad.scale.x) as number; // pads are authored at 0.4-0.8
-      pad.scale.setScalar(this.isLaserHovered(id) ? base * LASER_PAD_HOVER_SCALE : base);
+      const hovered = this.isLaserHovered(id);
+      pad.scale.setScalar(hovered ? base * LASER_PAD_HOVER_SCALE : base);
+      const twin = GAUGE_BUTTON_TWIN[id];
+      if (twin) this.childByName(this.sceneObject('desk-gauges'), twin.group)?.scale.setScalar(hovered ? LASER_PAD_HOVER_SCALE : 1);
     }
   }
 
