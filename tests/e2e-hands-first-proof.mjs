@@ -31,6 +31,15 @@ await page.addInitScript(() => {
     rest(hand) {
       return { x: hand === 'hand-left' ? -0.2 : 0.2, y: 1.02, z: -0.12 };
     },
+    /** IWER animates hand-pose changes; wait for the fingers to settle before reaching (anchors move meanwhile). */
+    async setPose(hand, poseId) {
+      const r = window.__ORBIT_IWER__.remote;
+      await r.dispatch('set_hand_pose', { device: hand, poseId });
+      for (let i = 0; i < 30; i++) {
+        if (!(await r.dispatch('get_hand_state', { device: hand })).transition) break;
+        await window.__HANDS__.settle();
+      }
+    },
     async travel(hand, to, anchor = 'grasp', steps = 8) {
       const r = window.__ORBIT_IWER__.remote;
       const s = await r.dispatch('get_hand_state', { device: hand });
@@ -50,15 +59,21 @@ await page.addInitScript(() => {
       await window.__ORBIT_IWER__.remote.dispatch('set_select_value', { device: hand, value });
       await window.__HANDS__.settle();
     },
-    /** Seated far-target pinch: hand at rest, its target ray (the laser) aimed at the point, pinch, release. */
-    async rayPinch(hand, target) {
+    /** Seated far-target aim: hand at rest, its target ray (the laser) turned toward the point. No pinch. */
+    async rayAim(hand, target) {
       const r = window.__ORBIT_IWER__.remote;
-      await r.dispatch('set_hand_pose', { device: hand, poseId: 'point' });
+      await window.__HANDS__.setPose(hand, 'point');
       await window.__HANDS__.pinch(hand, 0);
       await r.dispatch('set_transform', { device: hand, position: window.__HANDS__.rest(hand) });
       await r.dispatch('look_at', { device: hand, target });
       await window.__HANDS__.settle();
       await window.__HANDS__.settle();
+      const api = window.__ORBIT_ZERO__;
+      return { pointer: api.getHandPointerState(hand === 'hand-left' ? 'left' : 'right'), hover: api.getLaserHover() };
+    },
+    /** Seated far-target pinch: aim the laser, pinch, release. */
+    async rayPinch(hand, target) {
+      await window.__HANDS__.rayAim(hand, target);
       await window.__HANDS__.pinch(hand, 1);
       await window.__HANDS__.pinch(hand, 0);
       await new Promise((res) => setTimeout(res, 120));
@@ -67,13 +82,38 @@ await page.addInitScript(() => {
     /** Reach to a near object along a path, pinch it, carry it along a path, release. */
     async carry(hand, from, to) {
       const r = window.__ORBIT_IWER__.remote;
-      await r.dispatch('set_hand_pose', { device: hand, poseId: 'default' });
+      await window.__HANDS__.setPose(hand, 'default');
       await window.__HANDS__.pinch(hand, 0);
       await window.__HANDS__.travel(hand, from);
       await window.__HANDS__.pinch(hand, 1);
       await window.__HANDS__.travel(hand, to, 'grasp', 10);
       await window.__HANDS__.pinch(hand, 0);
       await window.__HANDS__.travel(hand, window.__HANDS__.rest(hand), 'grasp', 6);
+    },
+    /**
+     * Put the fingertip on a near control, turn the hand so its laser points at a far target while the
+     * fingertip stays on the control, then pinch once. Returns what the laser was on at the pinch.
+     */
+    async touchWhileAiming(hand, touchId, aimId) {
+      const r = window.__ORBIT_IWER__.remote;
+      const api = window.__ORBIT_ZERO__;
+      const touchAt = api.get3DTargetWorldPosition(touchId);
+      await window.__HANDS__.setPose(hand, 'point');
+      await window.__HANDS__.pinch(hand, 0);
+      await window.__HANDS__.travel(hand, touchAt, 'index-tip');
+      // Turning the hand swings the fingertip off the control; alternate turn and re-place until both hold.
+      for (let i = 0; i < 4; i++) {
+        await r.dispatch('look_at', { device: hand, target: api.get3DTargetWorldPosition(aimId) });
+        await r.dispatch('set_transform', { device: hand, anchor: 'index-tip', position: touchAt });
+      }
+      await window.__HANDS__.settle();
+      await window.__HANDS__.settle();
+      const pointer = api.getHandPointerState(hand === 'hand-left' ? 'left' : 'right');
+      await window.__HANDS__.pinch(hand, 1);
+      await window.__HANDS__.pinch(hand, 0);
+      await new Promise((res) => setTimeout(res, 120));
+      await window.__HANDS__.travel(hand, window.__HANDS__.rest(hand), 'grasp', 6);
+      return { pointer };
     },
     /**
      * Brush the scanner head with the fingertip (no pinch), then pull the hand back up toward the globe.
@@ -85,7 +125,7 @@ await page.addInitScript(() => {
       const scanner = api.getSceneObject('scanner-tool');
       const laser = scanner.getObjectByName('ScannerAimLaser');
       const home = scanner.getWorldPosition(new scanner.position.constructor());
-      await r.dispatch('set_hand_pose', { device: hand, poseId: 'point' });
+      await window.__HANDS__.setPose(hand, 'point');
       await window.__HANDS__.pinch(hand, 0);
       await window.__HANDS__.travel(hand, { x: home.x, y: home.y + 0.09, z: home.z + 0.03 }, 'index-tip');
       await window.__HANDS__.settle();
@@ -106,7 +146,7 @@ await page.addInitScript(() => {
     /** Reach to a desk control and pinch it `times` times where it sits (the hand stays on the control between pinches). */
     async pressDesk(hand, at, times = 1) {
       const r = window.__ORBIT_IWER__.remote;
-      await r.dispatch('set_hand_pose', { device: hand, poseId: 'default' });
+      await window.__HANDS__.setPose(hand, 'default');
       await window.__HANDS__.pinch(hand, 0);
       await window.__HANDS__.travel(hand, at);
       for (let i = 0; i < times; i++) {
@@ -136,11 +176,14 @@ await page.addInitScript(() => {
         return new V(p.x, p.y, p.z);
       };
       const grasp = async () => (await r.dispatch('get_hand_state', { device: hand })).anchors.grasp;
-      await r.dispatch('set_hand_pose', { device: hand, poseId: 'default' });
+      await window.__HANDS__.setPose(hand, 'default');
       await window.__HANDS__.pinch(hand, 0);
       await window.__HANDS__.travel(hand, api.get3DTargetWorldPosition('scanner-tool'));
       const before = scanner.getWorldPosition(new V());
+      const side = hand === 'hand-left' ? 'left' : 'right';
+      const atHolster = { pointer: api.getHandPointerState(side), transition: (await r.dispatch('get_hand_state', { device: hand })).transition };
       await window.__HANDS__.pinch(hand, 1);
+      atHolster.afterPinch = api.getHandPointerState(side);
       // Coarse reach along a path to where the beam would pass through the aim point 6 cm ahead of the lens.
       let { aperture, dir } = aim();
       let g = await grasp();
@@ -178,7 +221,8 @@ await page.addInitScript(() => {
         stepTitle: api.getPanelText('mission-hud', 'StepTitle'),
         beamOpacity: laser?.material?.opacity ?? null,
         beamLengthM: laser ? Number((0.28 * laser.scale.y).toFixed(3)) : null,
-        trace,
+        atHolster: grabbed ? undefined : atHolster,
+        trace: trace.slice(0, 2),
       };
       await window.__HANDS__.pinch(hand, 0);
       await new Promise((res) => setTimeout(res, 150));
@@ -204,10 +248,48 @@ try {
   });
   await page.waitForTimeout(1200);
 
-  // ---- Mission Card: START by laser ----
+  const cuesSince = (t0) => page.evaluate((t) => window.__ORBIT_ZERO__.getCueLog().filter((c) => c.at >= t).map((c) => c.cue), t0);
+  const now = () => page.evaluate(() => Math.round(performance.now()));
+  const borderOf = (panelId, id) => page.evaluate(({ panelId, id }) =>
+    window.__ORBIT_ZERO__.getSceneObject(panelId)?.getElementById(id)?.borderInset?.value?.[0] ?? null, { panelId, id });
+
+  // ---- Mission Card: START by laser (hover feedback first, then pinch) ----
+  const startBorder = await borderOf('mission-hud', 'Btn_StartPass');
+  let t0 = await now();
+  let aim = await H('rayAim', 'hand-right', await pos('mission-hud:Btn_StartPass'));
+  check(aim.pointer?.activeKind === 'ray' && aim.pointer?.rayTarget === 'mission-hud',
+    'seated hand at rest: the laser (IWSDK hand ray) is the active pointer and is on the Mission Card', JSON.stringify(aim.pointer));
+  check(aim.hover.includes('ui:Btn_StartPass') && (await borderOf('mission-hud', 'Btn_StartPass')) > startBorder && (await cuesSince(t0)).includes('HOVER_TICK'),
+    'laser on START PASS: the button border thickens and a hover tick plays', `border ${startBorder} -> ${await borderOf('mission-hud', 'Btn_StartPass')}, cues ${await cuesSince(t0)}`);
   await H('rayPinch', 'hand-right', await pos('mission-hud:Btn_StartPass'));
   await page.waitForTimeout(900);
   check(/PICK A TARGET|SCAN SECTOR/i.test((await hud('StepTitle')) ?? ''), 'laser + pinch on START PASS opens the Next Step strip', await hud('StepTitle'));
+
+  // ---- Laser on a sector beacon and on a desk pad: hover feedback, then the pinch acts on exactly that ----
+  t0 = await now();
+  aim = await H('rayAim', 'hand-right', await pos('sector-c'));
+  const beaconScale = await page.evaluate(() => window.__ORBIT_ZERO__.getSceneObject('sector-c').scale.x);
+  check(aim.pointer?.rayTarget === 'sector-c' && aim.hover.includes('sector-c') && beaconScale > 1.2 && (await cuesSince(t0)).includes('HOVER_TICK'),
+    'laser on Sector C: the beacon grows and a hover tick plays', `target=${aim.pointer?.rayTarget} scale=${beaconScale.toFixed(2)} cues=${await cuesSince(t0)}`);
+  await H('rayPinch', 'hand-right', await pos('sector-c'));
+  check((await state()).selectedSectorId === 'C' && /SECTOR C/i.test((await hud('StepTitle')) ?? ''),
+    'laser + pinch on Sector C selects C and the HUD names it', `${(await state()).selectedSectorId} | ${await hud('StepTitle')}`);
+  const sensorBefore = (await state()).activeSensorMode;
+  const padBase = await page.evaluate(() => window.__ORBIT_ZERO__.getSceneObject('pad-toggle-sensor').scale.x);
+  aim = await H('rayAim', 'hand-right', await pos('pad-toggle-sensor'));
+  const padHoverScale = await page.evaluate(() => window.__ORBIT_ZERO__.getSceneObject('pad-toggle-sensor').scale.x);
+  check(aim.pointer?.rayTarget === 'pad-toggle-sensor' && padHoverScale > padBase * 1.1,
+    'laser on the SENSOR pad: the pad grows', `target=${aim.pointer?.rayTarget} scale ${padBase.toFixed(2)} -> ${padHoverScale.toFixed(2)}`);
+  await H('rayPinch', 'hand-right', await pos('pad-toggle-sensor'));
+  check((await state()).activeSensorMode !== sensorBefore, 'laser + pinch on the SENSOR pad switches the sensor', `${sensorBefore} -> ${(await state()).activeSensorMode}`);
+
+  // ---- A pinch acts on what the hand touches, not on what its laser happens to point at ----
+  const beforeTouch = await state();
+  const touch = await H('touchWhileAiming', 'hand-right', 'pad-toggle-sensor', 'sector-e');
+  const afterTouch = await state();
+  check(/^sector-/.test(touch.pointer?.rayTarget ?? '') && afterTouch.activeSensorMode !== beforeTouch.activeSensorMode && afterTouch.selectedSectorId === beforeTouch.selectedSectorId,
+    'fingertip on the SENSOR pad with the laser on a beacon: the pinch presses the pad and does not select the beacon',
+    `laser=${touch.pointer?.rayTarget} sensor ${beforeTouch.activeSensorMode} -> ${afterTouch.activeSensorMode} selected ${beforeTouch.selectedSectorId} -> ${afterTouch.selectedSectorId}`);
 
   // ---- Scan B with the scanner (thermal), then pinch the scanner again: evidence must survive ----
   await page.evaluate(() => window.__ORBIT_ZERO__.setSensor('THERMAL')); // test setup: the sensor switch is not under test here
@@ -216,12 +298,13 @@ try {
   check(!brush.everHeld && brush.maxMoveCm < 1 && (await state()).packets.length === 0,
     'a fingertip brushing the scanner without a pinch leaves it in the holster', JSON.stringify(brush));
   const powerBeforeMiss = (await state()).power;
+  t0 = await now();
   const miss = await H('scanWithScanner', 'hand-right', { x: 0.12, y: 1.2, z: -0.36 }); // over the globe, beam on no beacon
   let s = await state();
   check(miss.grabbed, 'pinching the scanner in its holster picks it up (the tool follows the hand)', JSON.stringify(miss));
-  const missCaption = await page.evaluate(() => window.__ORBIT_ZERO__.getRuntimeStatus().caption);
-  check(s.packets.length === 0 && s.power === powerBeforeMiss && miss.beamOpacity < 0.6 && /point the scanner beam/i.test(missCaption ?? ''),
-    'letting go at the globe with the beam on no beacon scans nothing, spends nothing and says why', `packets=${s.packets.length} power=${s.power} caption=${missCaption} ${JSON.stringify(miss)}`);
+  const missCues = await cuesSince(t0);
+  check(s.packets.length === 0 && s.power === powerBeforeMiss && miss.beamOpacity < 0.6 && missCues.includes('ERROR_REJECT'),
+    'letting go at the globe with the beam on no beacon scans nothing, spends nothing and plays the reject cue', `packets=${s.packets.length} power=${s.power} cues=${missCues} ${JSON.stringify(miss)}`);
 
   const aimB = await H('scanWithScanner', 'hand-right', 'sector-b');
   check(aimB.selectedWhileAiming === 'B' && /SECTOR B/i.test(aimB.stepTitle ?? '') && aimB.beamOpacity > 0.8,

@@ -24,7 +24,7 @@ function runtime() {
     profile: { preferences: { oneHanded: false } },
     world: { getSceneObject: (id: string) => id === 'orbital-console' ? console : undefined },
     sceneLookups: { get: (id: string) => id === 'orbital-console' ? console : undefined },
-    pressResolvedTarget: new Map(),
+    pressResolvedTarget: new Map(), lastPadPress: { id: '', at: -Infinity },
     tempVec: new Vector3(), currentInputSource: 'xr-hand', suppressReleaseActions: false,
     tutorial: { notifyCradleRelease: vi.fn(), notifyDownlinkBayRelease: vi.fn() },
     playCue: vi.fn(),

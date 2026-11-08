@@ -122,6 +122,12 @@
     padding-top: 7px;
     padding-bottom: 7px;
   }
+  .action-btn:hover {
+    border-width: 3.5px;
+    padding-top: 5px;
+    padding-bottom: 5px;
+    background-color: #123a63ee;
+  }
 </style>
 <Panel id="DebriefRoot" class="panel-root">
   <div id="DebriefBannerCard" class="debrief-banner">

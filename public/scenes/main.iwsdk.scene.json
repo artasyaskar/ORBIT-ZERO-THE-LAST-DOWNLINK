@@ -158,7 +158,6 @@
       },
       "components": {
         "RayInteractable": {},
-        "PokeInteractable": {},
         "ConsoleControlNode": {
           "action": "ARIA_DELEGATE"
         }
@@ -237,7 +236,6 @@
       },
       "components": {
         "RayInteractable": {},
-        "PokeInteractable": {},
         "OrbitSectorNode": {
           "sectorId": "A"
         }
@@ -269,7 +267,6 @@
       },
       "components": {
         "RayInteractable": {},
-        "PokeInteractable": {},
         "OrbitSectorNode": {
           "sectorId": "B"
         }
@@ -301,7 +298,6 @@
       },
       "components": {
         "RayInteractable": {},
-        "PokeInteractable": {},
         "OrbitSectorNode": {
           "sectorId": "C"
         }
@@ -333,7 +329,6 @@
       },
       "components": {
         "RayInteractable": {},
-        "PokeInteractable": {},
         "OrbitSectorNode": {
           "sectorId": "D"
         }
@@ -365,7 +360,6 @@
       },
       "components": {
         "RayInteractable": {},
-        "PokeInteractable": {},
         "OrbitSectorNode": {
           "sectorId": "E"
         }
@@ -397,7 +391,6 @@
       },
       "components": {
         "RayInteractable": {},
-        "PokeInteractable": {},
         "OrbitSectorNode": {
           "sectorId": "F"
         }
@@ -443,7 +436,6 @@
       },
       "components": {
         "RayInteractable": {},
-        "PokeInteractable": {},
         "EvidenceCubeNode": {
           "slotIndex": 0,
           "packetId": ""
@@ -467,7 +459,6 @@
       },
       "components": {
         "RayInteractable": {},
-        "PokeInteractable": {},
         "EvidenceCubeNode": {
           "slotIndex": 1,
           "packetId": ""
@@ -491,7 +482,6 @@
       },
       "components": {
         "RayInteractable": {},
-        "PokeInteractable": {},
         "EvidenceCubeNode": {
           "slotIndex": 2,
           "packetId": ""
@@ -535,7 +525,6 @@
       },
       "components": {
         "RayInteractable": {},
-        "PokeInteractable": {},
         "ConsoleControlNode": {
           "action": "SCAN"
         }
@@ -558,7 +547,6 @@
       },
       "components": {
         "RayInteractable": {},
-        "PokeInteractable": {},
         "ConsoleControlNode": {
           "action": "TOGGLE_SENSOR"
         }
@@ -581,7 +569,6 @@
       },
       "components": {
         "RayInteractable": {},
-        "PokeInteractable": {},
         "ConsoleControlNode": {
           "action": "PROCESS"
         }
@@ -604,7 +591,6 @@
       },
       "components": {
         "RayInteractable": {},
-        "PokeInteractable": {},
         "ConsoleControlNode": {
           "action": "QUEUE"
         }
@@ -627,7 +613,6 @@
       },
       "components": {
         "RayInteractable": {},
-        "PokeInteractable": {},
         "ConsoleControlNode": {
           "action": "COMMIT_DOWNLINK"
         }
@@ -650,7 +635,6 @@
       },
       "components": {
         "RayInteractable": {},
-        "PokeInteractable": {},
         "ConsoleControlNode": {
           "action": "DISCARD"
         }
@@ -673,7 +657,6 @@
       },
       "components": {
         "RayInteractable": {},
-        "PokeInteractable": {},
         "ConsoleControlNode": {
           "action": "RECENTER"
         }
@@ -696,7 +679,6 @@
       },
       "components": {
         "RayInteractable": {},
-        "PokeInteractable": {},
         "ConsoleControlNode": {
           "action": "MASTER_POWER"
         }
@@ -719,7 +701,6 @@
       },
       "components": {
         "RayInteractable": {},
-        "PokeInteractable": {},
         "ConsoleControlNode": {
           "action": "ARIA_DELEGATE"
         }

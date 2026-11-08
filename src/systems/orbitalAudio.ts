@@ -32,7 +32,8 @@ export type OrbitalSoundCue =
   | 'MAGNETIC_HOVER'
   | 'FSK_BURST'
   | 'SOLENOID_LATCH'
-  | 'HANDSHAKE_CONFIRM';
+  | 'HANDSHAKE_CONFIRM'
+  | 'HOVER_TICK';
 
 export class OrbitalAudioController {
   private ctx: AudioContext | null = null;
@@ -170,6 +171,10 @@ export class OrbitalAudioController {
       case 'WAND_LOCK':
         // High-frequency target acquisition lock chirp
         this.tone(ctx, 880, 1320, 0.05, 'sine', 0.07, now);
+        break;
+      case 'HOVER_TICK':
+        // Quiet 25 ms tick when a hand laser lands on something it can press
+        this.tone(ctx, 1500, 1750, 0.025, 'sine', 0.035, now);
         break;
       case 'ERROR_REJECT':
         this.tone(ctx, 210, 165, 0.2, 'sawtooth', 0.11, now);

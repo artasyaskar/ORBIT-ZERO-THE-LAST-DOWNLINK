@@ -71,7 +71,7 @@ import { SolverMemo } from '../mission/solverMemo';
 import { coveredRequestIds, formatClock, getNextStep, isPassStalled } from '../mission/guidance';
 import { SceneObjectCache } from './sceneObjectCache';
 import { clipText, retryGuidanceFor } from '../ui/debriefText';
-import { SCANNER_TARGET_ID, isStrayScannerGrab, pressOwner } from './scannerArbitration';
+import { DELIBERATE_SCANNER_PRESS_RADIUS_M, SCANNER_TARGET_ID, isStrayScannerGrab, pressOwner } from './scannerArbitration';
 import { GLOBE_CARD_SCALE, IMMERSIVE_PANEL_POSES, MISSION_HUD_POSES, type PanelPose } from '../ui/spatialLayout';
 import { animateWeather, applyWeather, createWeatherFx } from './sectorWeatherFx';
 import { paintSensorView } from '../ui/sensorViewPainter';
@@ -114,11 +114,48 @@ const MAX_SIMULATION_STEP_SEC = 0.1;
 const UI_CLICK_SAME_PINCH_MS = 1500;
 /** Both the custom hand path and IWSDK's pointer can select a sector on one pinch; select once. */
 const SECTOR_SELECT_DEDUPE_MS = 600;
-/** Object3D as seen by IWSDK's pointer events (@pmndrs/pointer-events dispatches on scene objects). */
-interface PointerEventTarget {
-  addEventListener(type: 'pointerdown', listener: (event: { pointerType?: string }) => void): void;
-  removeEventListener(type: 'pointerdown', listener: (event: { pointerType?: string }) => void): void;
+/** Pointer event as seen on scene objects (@pmndrs/pointer-events, dispatched by IWSDK's input system). */
+interface ScenePointerEvent {
+  pointerType?: string;
+  pointerId?: number;
 }
+type ScenePointerEventType = 'pointerdown' | 'pointerenter' | 'pointerleave';
+/** Object3D as seen by IWSDK's pointer events. */
+interface PointerEventTarget {
+  addEventListener(type: ScenePointerEventType, listener: (event: ScenePointerEvent) => void): void;
+  removeEventListener(type: ScenePointerEventType, listener: (event: ScenePointerEvent) => void): void;
+}
+/**
+ * Desk pads (and the ARIA hologram) a hand can press, with the action each fires. Far presses come only
+ * from IWSDK's hand ray (the visible laser); near presses from the app's fingertip/pinch proximity check.
+ */
+const LASER_PADS: ReadonlyArray<{ id: string; action: string }> = [
+  { id: 'pad-fire-swath', action: 'SCAN' },
+  { id: 'pad-toggle-sensor', action: 'TOGGLE_SENSOR' },
+  { id: 'pad-process-cradle', action: 'PROCESS' },
+  { id: 'pad-queue-downlink', action: 'QUEUE' },
+  { id: 'pad-commit-downlink', action: 'COMMIT_DOWNLINK' },
+  { id: 'pad-discard-chute', action: 'DISCARD' },
+  { id: 'pad-recenter-desk', action: 'RECENTER' },
+  { id: 'pad-master-power', action: 'MASTER_POWER' },
+  { id: 'pad-aria-delegate', action: 'ARIA_DELEGATE' },
+  { id: 'avatar-aria', action: 'ARIA_DELEGATE' },
+];
+/**
+ * A pinch acts on what the hand touches when the fingertip or pinch point is this close to it; otherwise
+ * the laser decides. Pad centres are 9-12 cm apart and beacons 6.4-12 cm apart; the nearest one wins.
+ */
+const NEAR_PAD_REACH_M = 0.06;
+const NEAR_BEACON_REACH_M = 0.05;
+/** A pad under a hand laser grows by this factor. */
+const LASER_PAD_HOVER_SCALE = 1.15;
+/**
+ * The laser and the fingertip check can both report one pinch on a pad, in the same frame. A second press of
+ * the same pad inside this window is that duplicate; a deliberate second pinch (DISCARD confirm) takes longer.
+ */
+const SAME_PINCH_PAD_MS = 120;
+/** Minimum gap between laser hover ticks, so sweeping across the six beacons is not a buzz. */
+const LASER_HOVER_CUE_GAP_MS = 120;
 /** Scanner sensor aperture in the tool's local frame (see createScannerToolAsset). */
 const SCANNER_APERTURE_LOCAL = new Vector3(0, 0.092, -0.075);
 /** Scanner beam axis in the tool's local frame: forward (-Z) from the aperture. */
@@ -263,6 +300,12 @@ export class MissionControlSystem extends createSystem({
   private customUiClick: { id: string; until: number } | null = null;
   /** Last sector selection, so one pinch seen by two input paths selects (and announces) once. */
   private lastSectorSelect: { id: SectorId | null; at: number } = { id: null, at: -Infinity };
+  /** Hand-ray pointer ids currently over each laser target ('sector-b', 'pad-fire-swath', 'ui:Btn_StartPass'). */
+  private readonly laserHover = new Map<string, Set<number>>();
+  private lastLaserHoverCueAt = -Infinity;
+  private lastPadPress: { id: string; at: number } = { id: '', at: -Infinity };
+  /** The last 40 sound cues (newest last), read by the e2e connection checks. */
+  private readonly cueLog: Array<{ cue: OrbitalSoundCue; at: number }> = [];
   /** XR presentation state the desk pads were last synced for (null = never). */
   private deskPadsPresenting: boolean | null = null;
   private moodLightCache: Light[] | null = null;
@@ -499,22 +542,21 @@ export class MissionControlSystem extends createSystem({
       });
     });
 
-    // 2b. With tracked hands, the visible IWSDK hand ray (point at a beacon, pinch) also selects a sector.
-    // Ray only: a fingertip brushing a beacon (IWSDK's touch pointer) must never retarget the next scan.
-    // selectSectorOnce() drops the duplicate when the custom joint path selects the same sector on this pinch.
+    // 2b. With tracked hands, far targets are pressed only by IWSDK's hand ray: the laser the player sees.
+    // Point at a beacon or desk pad (it grows, a soft tick plays), pinch to press it. Ray only: a fingertip
+    // brushing a beacon (IWSDK's touch pointer) must never retarget the next scan. Near presses (fingertip
+    // within reach of a pad or beacon) stay with the app's proximity check in handleXRHandPressStart.
     for (const sectorEntity of this.queries.sectors.entities) {
-      const beacon = sectorEntity.object3D as unknown as PointerEventTarget | undefined;
-      if (!beacon) continue;
       const sectorId = (sectorEntity.getValue(OrbitSectorNode, 'sectorId') || 'B') as SectorId;
-      const onRayDown = (event: { pointerType?: string }) => {
-        if (event.pointerType !== 'ray' || !this.isLiveXRHandActive() || this.isAnyObjectGrabbed()) return;
+      this.bindLaserTarget(sectorEntity.object3D, `sector-${sectorId.toLowerCase()}`, () => {
         this.withInputSource('xr-hand', () => {
           this.tutorial.notifySectorPointed(sectorId, 'xr-hand');
           this.selectSectorOnce(sectorId);
         });
-      };
-      beacon.addEventListener('pointerdown', onRayDown);
-      this.cleanupFuncs.push(() => beacon.removeEventListener('pointerdown', onRayDown));
+      }, () => this.withInputSource('xr-hand', () => this.tutorial.notifySectorPointed(sectorId, 'xr-hand')));
+    }
+    for (const pad of LASER_PADS) {
+      this.bindLaserTarget(this.sceneObject(pad.id), pad.id, () => this.pressPadByHand(pad.id, pad.action));
     }
 
     // 3. Subscribe to 3D Evidence Cube activations (poke/click selects cube)
@@ -796,6 +838,31 @@ export class MissionControlSystem extends createSystem({
           stepSpec: this.tutorial.getCurrentStepSpec(),
         }),
         get3DTargetWorldPosition: (targetId: string) => this.get3DTargetWorldPosition(targetId),
+        getCueLog: () => this.cueLog.slice(),
+        /** IWSDK's per-hand pointer arbitration: which sub-pointer is active and what the hand ray (the laser) hits. */
+        getHandPointerState: (hand: 'left' | 'right') => {
+          const multi = (this.input as unknown as { xr?: { multiPointers?: Record<string, any> } }).xr?.multiPointers?.[hand];
+          if (!multi) return null;
+          const nodeOf = (hit: any): string | null => {
+            for (let o = hit?.object; o; o = o.parent) if (o.userData?.iwsdkSceneNodeId) return o.userData.iwsdkSceneNodeId;
+            return null;
+          };
+          const ray = multi.getPointer('ray')?.getIntersection?.();
+          const touch = multi.getPointer('touch')?.getIntersection?.();
+          const grab = multi.getPointer('grab')?.getIntersection?.();
+          return {
+            activeKind: multi.getActiveKind?.() ?? null,
+            states: Object.fromEntries(multi.pointerStates ?? []),
+            rayHitObject: ray?.object?.name ?? null,
+            rayTarget: nodeOf(ray),
+            rayDistance: ray?.distance ?? null,
+            touchTarget: nodeOf(touch),
+            touchDistance: touch?.distance ?? null,
+            grabTarget: nodeOf(grab),
+            grabDistance: grab?.distance ?? null,
+          };
+        },
+        getLaserHover: () => [...this.laserHover.entries()].filter(([, pointers]) => pointers.size > 0).map(([id]) => id),
         getXRHandTelemetryLog: () => this.getXRHandTelemetryLog(),
         clearXRHandTelemetryLog: () => this.clearXRHandTelemetryLog(),
         getActiveXRHandGrabs: () =>
@@ -2681,21 +2748,6 @@ export class MissionControlSystem extends createSystem({
   ): Resolved3DHandTarget | null {
     this.syncGlobeSectorBeaconPositions();
 
-    const pointToRay = (targetPos: Vector3) => {
-      const toTarget = targetPos.clone().sub(sample.indexTip);
-      const alongRay = toTarget.dot(sample.fingerDir);
-      if (alongRay <= 0) {
-        return { alongRay, perpDist: Infinity };
-      }
-      const closestOnRay = sample.indexTip
-        .clone()
-        .addScaledVector(sample.fingerDir, alongRay);
-      return {
-        alongRay,
-        perpDist: targetPos.distanceTo(closestOnRay),
-      };
-    };
-
     const candidates: Resolved3DHandTarget[] = [];
     const isPointPose = sample.poseId === 'point' || !sample.pressed;
 
@@ -2721,7 +2773,10 @@ export class MissionControlSystem extends createSystem({
       }
     }
 
-    // 2. Check 3D Sector Beacons on the Earth Globe (near fingertip < 9.5 cm or pointed ray)
+    // Far targets (beacons, pads, HUD buttons) are not resolved here: IWSDK's hand ray, the visible laser,
+    // presses them (bindLaserTarget, UIKit click). This check covers only what the hand itself reaches.
+
+    // 2. Check 3D Sector Beacons on the Earth Globe (fingertip or pinch point on the beacon)
     for (const sectorEntity of this.queries.sectors.entities) {
       const sObj = sectorEntity.object3D;
       if (!sObj || !isVisible(sObj)) continue;
@@ -2732,61 +2787,28 @@ export class MissionControlSystem extends createSystem({
         sample.indexTip.distanceTo(sPos),
         sample.graspPoint.distanceTo(sPos),
       );
-      const rayInfo = pointToRay(sPos);
-      const effectiveDist =
-        directDist <= 0.095
-          ? directDist
-          : isPointPose &&
-            rayInfo.alongRay > 0 &&
-            rayInfo.alongRay <= 0.75 &&
-            rayInfo.perpDist <= 0.055
-            ? rayInfo.perpDist + 0.02
-            : Infinity;
-
-      if (effectiveDist < Infinity) {
+      if (directDist <= NEAR_BEACON_REACH_M) {
         candidates.push({
           targetType: 'SECTOR',
           targetId: `sector-${sectorId.toLowerCase()}`,
-          distance: effectiveDist,
+          distance: directDist,
           worldPosition: sPos,
           sectorId,
         });
       }
     }
 
-    // 3. Check 3D Console Control Pads (< 9.5 cm direct or pointed ray)
-    const padNodes: Array<{ id: string; action: string }> = [
-      { id: 'pad-fire-swath', action: 'SCAN' },
-      { id: 'pad-toggle-sensor', action: 'TOGGLE_SENSOR' },
-      { id: 'pad-process-cradle', action: 'PROCESS' },
-      { id: 'pad-queue-downlink', action: 'QUEUE' },
-      { id: 'pad-commit-downlink', action: 'COMMIT_DOWNLINK' },
-      { id: 'pad-discard-chute', action: 'DISCARD' },
-      { id: 'pad-recenter-desk', action: 'RECENTER' },
-      { id: 'pad-master-power', action: 'MASTER_POWER' },
-      { id: 'pad-aria-delegate', action: 'ARIA_DELEGATE' },
-      { id: 'avatar-aria', action: 'ARIA_DELEGATE' },
-    ];
-    for (const pad of padNodes) {
+    // 3. Check 3D Console Control Pads (fingertip or pinch point on the pad)
+    for (const pad of LASER_PADS) {
       const obj = this.sceneObject(pad.id);
-      if (!obj) continue;
+      if (!obj || !isVisible(obj)) continue;
       obj.updateWorldMatrix(true, false);
       const pPos = obj.getWorldPosition(new Vector3());
-      const directDist = Math.min(
+      const effectiveDist = Math.min(
         sample.indexTip.distanceTo(pPos),
         sample.graspPoint.distanceTo(pPos),
       );
-      const rayInfo = pointToRay(pPos);
-      const effectiveDist =
-        directDist <= 0.095
-          ? directDist
-          : isPointPose &&
-            rayInfo.alongRay > 0 &&
-            rayInfo.alongRay <= 0.85 &&
-            rayInfo.perpDist <= 0.055
-            ? rayInfo.perpDist + 0.02
-            : Infinity;
-      if (effectiveDist < Infinity) {
+      if (effectiveDist <= NEAR_PAD_REACH_M) {
         candidates.push({
           targetType: 'CONTROL_PAD',
           targetId: pad.id,
@@ -2797,7 +2819,7 @@ export class MissionControlSystem extends createSystem({
       }
     }
 
-    // 4. Check 3D Spatial UIKitML Panel Buttons (direct fingertip proximity < 14 cm or pointed ray < 7.5 cm)
+    // 4. Check 3D Spatial UIKitML Panel Buttons (fingertip or pinch point within 14 cm)
     const panelButtons: Array<{ panelId: string; buttonId: string }> = [
       { panelId: 'briefing-panel', buttonId: 'Btn_StartTutorial' },
       { panelId: 'briefing-panel', buttonId: 'Btn_SelectCampaign' },
@@ -2830,20 +2852,11 @@ export class MissionControlSystem extends createSystem({
     for (const pb of panelButtons) {
       const btnPos = this.getSpatialButtonWorldPosition(pb.panelId, pb.buttonId);
       if (!btnPos) continue;
-      const directDist = Math.min(
+      const effectiveDist = Math.min(
         sample.indexTip.distanceTo(btnPos),
         sample.graspPoint.distanceTo(btnPos),
       );
-      const rayInfo = pointToRay(btnPos);
-      const effectiveDist =
-        directDist <= 0.14
-          ? directDist
-          : rayInfo.alongRay > 0 &&
-            rayInfo.alongRay <= 1.45 &&
-            rayInfo.perpDist <= 0.075
-            ? rayInfo.perpDist + 0.03
-            : Infinity;
-      if (effectiveDist < Infinity) {
+      if (effectiveDist <= 0.14) {
         candidates.push({
           targetType: 'SPATIAL_UI_BUTTON',
           targetId: `${pb.panelId}:${pb.buttonId}`,
@@ -2881,6 +2894,7 @@ export class MissionControlSystem extends createSystem({
       this.forceReleaseAllGrabs();
       this.nativeHands.reset();
       this.boundXRSession = null;
+      this.laserHover.clear(); // hand rays end with the session and may not send pointerleave
       this.syncAll();
     };
     // Quest system menu (visible-blurred) or headset taken off (hidden): hand input stops, so hold the pass
@@ -3004,14 +3018,7 @@ export class MissionControlSystem extends createSystem({
       }
 
       if (resolved.targetType === 'CONTROL_PAD' && resolved.controlAction) {
-        if (this.isAnyObjectGrabbed()) return;
-        if (resolved.controlAction === 'SCAN') {
-          this.tutorial.notifyPinchScan('xr-hand');
-        }
-        if (resolved.controlAction === 'COMMIT_DOWNLINK') {
-          this.tutorial.notifyTransmitActivated('xr-hand');
-        }
-        this.handleControlAction(resolved.controlAction);
+        this.pressPadByHand(resolved.targetId, resolved.controlAction);
         return;
       }
 
@@ -3297,7 +3304,7 @@ export class MissionControlSystem extends createSystem({
           if (this.lastHandPointTarget[side] !== resolved.targetId) {
             this.lastHandPointTarget[side] = resolved.targetId;
             if (resolved.targetType === 'SECTOR' && resolved.sectorId) {
-              this.gazeSectorId = resolved.sectorId;
+              // The beacon highlight comes from the laser hover (setLaserHover); this only informs the tutorial.
               this.withInputSource('xr-hand', () => {
                 this.tutorial.notifySectorPointed(resolved.sectorId!, 'xr-hand');
               });
@@ -3435,7 +3442,21 @@ export class MissionControlSystem extends createSystem({
         }
       };
       el.addEventListener('click', onClick);
-      this.cleanupFuncs.push(() => el.removeEventListener('click', onClick));
+      // A hand laser landing on a HUD button ticks once (the button's :hover style is the visual).
+      const hoverKey = `ui:${id}`;
+      const onEnter = (event?: ScenePointerEvent) => {
+        if (event?.pointerType === 'ray' && typeof event.pointerId === 'number' && this.isLiveXRHandActive()) this.setLaserHover(hoverKey, event.pointerId, true);
+      };
+      const onLeave = (event?: ScenePointerEvent) => {
+        if (event?.pointerType === 'ray' && typeof event.pointerId === 'number') this.setLaserHover(hoverKey, event.pointerId, false);
+      };
+      el.addEventListener('pointerenter', onEnter);
+      el.addEventListener('pointerleave', onLeave);
+      this.cleanupFuncs.push(() => {
+        el.removeEventListener('click', onClick);
+        el.removeEventListener('pointerenter', onEnter);
+        el.removeEventListener('pointerleave', onLeave);
+      });
     };
 
     // Briefing Panel controls
@@ -3789,6 +3810,65 @@ export class MissionControlSystem extends createSystem({
     if (holo instanceof Light) found.push(holo);
     if (found.length) this.moodLightCache = found;
     return found;
+  }
+
+  /**
+   * Wires a far target to IWSDK's hand ray (the visible laser): hover state plus a pinch handler. Only
+   * `pointerType === 'ray'` with live tracked hands counts; controllers and the desktop keep their own paths.
+   */
+  private bindLaserTarget(object: Object3D | undefined, key: string, onPinch: () => void, onFirstHover?: () => void): void {
+    const target = object as unknown as PointerEventTarget | undefined;
+    if (!target) return;
+    const isHandRay = (event: ScenePointerEvent) => event.pointerType === 'ray' && this.isLiveXRHandActive();
+    const onDown = (event: ScenePointerEvent) => {
+      if (!isHandRay(event) || this.isAnyObjectGrabbed()) return;
+      // A pinch on something within reach (a cube, a pad, a beacon) acts on that, in handleXRHandPressStart.
+      if (this.isRayHandTouchingTarget(event.pointerId)) return;
+      onPinch();
+    };
+    const onEnter = (event: ScenePointerEvent) => {
+      if (!isHandRay(event) || typeof event.pointerId !== 'number') return;
+      const wasHovered = this.isLaserHovered(key);
+      this.setLaserHover(key, event.pointerId, true);
+      if (!wasHovered) onFirstHover?.();
+    };
+    const onLeave = (event: ScenePointerEvent) => {
+      if (event.pointerType !== 'ray' || typeof event.pointerId !== 'number') return;
+      this.setLaserHover(key, event.pointerId, false);
+    };
+    target.addEventListener('pointerdown', onDown);
+    target.addEventListener('pointerenter', onEnter);
+    target.addEventListener('pointerleave', onLeave);
+    this.cleanupFuncs.push(() => {
+      target.removeEventListener('pointerdown', onDown);
+      target.removeEventListener('pointerenter', onEnter);
+      target.removeEventListener('pointerleave', onLeave);
+    });
+  }
+
+  /** True when the hand that owns this IWSDK ray pointer has the scanner, a cube, pad, beacon or button within reach. */
+  private isRayHandTouchingTarget(pointerId: number | undefined): boolean {
+    const pointers = this.input.xr.multiPointers;
+    const side = pointers.left.getPointer('ray').id === pointerId ? 'left'
+      : pointers.right.getPointer('ray').id === pointerId ? 'right' : null;
+    const sample = side ? this.sampleLiveXRHandState(side) : null;
+    if (!sample) return false;
+    const scanner = this.sceneObject('scanner-tool')?.getWorldPosition(this.tempVec);
+    if (scanner && Math.min(sample.graspPoint.distanceTo(scanner), sample.indexTip.distanceTo(scanner)) <= DELIBERATE_SCANNER_PRESS_RADIUS_M) return true;
+    return this.resolve3DTargetForHand(sample) !== null;
+  }
+
+  /** A hand pressed a desk pad (laser pinch or fingertip). One pinch seen by both paths presses once. */
+  private pressPadByHand(padId: string, action: string): void {
+    if (this.isAnyObjectGrabbed()) return;
+    const now = performance.now();
+    if (this.lastPadPress.id === padId && now - this.lastPadPress.at < SAME_PINCH_PAD_MS) return;
+    this.lastPadPress = { id: padId, at: now };
+    this.withInputSource('xr-hand', () => {
+      if (action === 'SCAN') this.tutorial.notifyPinchScan('xr-hand');
+      if (action === 'COMMIT_DOWNLINK') this.tutorial.notifyTransmitActivated('xr-hand');
+      this.handleControlAction(action);
+    });
   }
 
   /** Hand and pointer entry point for sector selection: the custom joint path and IWSDK's ray can both see one pinch. */
@@ -4223,6 +4303,8 @@ export class MissionControlSystem extends createSystem({
 
   private playCue(cue: OrbitalSoundCue): void {
     this.audio.playCue(cue);
+    this.cueLog.push({ cue, at: Math.round(performance.now()) });
+    if (this.cueLog.length > 40) this.cueLog.shift();
     const captions: Partial<Record<OrbitalSoundCue, string>> = {
       SCAN_OPTICAL: 'OPTICAL APERTURE: Visible-band reflectance frame acquired.',
       SCAN_RADAR: 'SAR BACKSCATTER: Active microwave return acquired through cloud layer.',
@@ -4906,23 +4988,13 @@ export class MissionControlSystem extends createSystem({
     });
   }
 
-  private syncAll(): void {
-    const state = this.engine.getState();
-    const globe = this.sceneObject('earth-globe');
-    this.syncSectorWeather();
-
-    // Single source of truth: engine's committed downlink time vs. the active window.
-    // Withdraw the one-shot QUEUE_OVERFLOW advisory as soon as it is no longer true.
-    if (state.downlinkCommittedSec <= state.downlinkWindowSec + 0.01) {
-      this.voiceCommander?.retract('QUEUE_OVERFLOW');
-    }
-
-    // 1. Update 3D Sector Beacons & Surface-Conforming Spherical Sector Polygons on the Globe
+  /** Beacon size and colour per sector: delivered/cut pins, scan result, selected, hovered by a laser or the head. */
+  private syncSectorBeacons(state: MissionState, globe: Object3D | undefined): void {
     for (const sectorEntity of this.queries.sectors.entities) {
       const sectorId = (sectorEntity.getValue(OrbitSectorNode, 'sectorId') ||
         'B') as SectorId;
       const isSelected = sectorId === state.selectedSectorId;
-      const isGazed = sectorId === this.gazeSectorId;
+      const isGazed = sectorId === this.gazeSectorId || this.isLaserHovered(`sector-${sectorId.toLowerCase()}`);
       const sectorCfg = getScenarioSector(
         state.scenarioId,
         sectorId,
@@ -4933,7 +5005,7 @@ export class MissionControlSystem extends createSystem({
 
       const scannedPkt = state.packets.find((p) => p.sectorId === sectorId);
       const isScanned = scannedPkt !== undefined;
-      const scale = isSelected ? 1.35 : isGazed ? 1.18 : isScanned ? 1.12 : 1.0;
+      const scale = isSelected ? (isGazed ? 1.45 : 1.35) : isGazed ? 1.25 : isScanned ? 1.12 : 1.0;
       obj.scale.set(scale, scale, scale);
 
       let hex = 0x38bdf8;
@@ -4972,7 +5044,7 @@ export class MissionControlSystem extends createSystem({
               ? 0xf59e0b
               : 0x38bdf8;
       }
-      this.setObjectTint(obj, hex, isSelected ? 1.45 : isGazed ? 1.25 : isScanned ? 1.15 : 0.85);
+      this.setObjectTint(obj, hex, isSelected ? 1.45 : isGazed ? 1.35 : isScanned ? 1.15 : 0.85);
 
       if (globe) {
         const polyRibbon = globe.getObjectByName(`SectorPoly_${sectorId}`);
@@ -5028,6 +5100,63 @@ export class MissionControlSystem extends createSystem({
         }
       }
     }
+  }
+
+  /** A desk pad under a hand laser grows slightly, so the player sees what a pinch will press. */
+  private syncPadHover(): void {
+    for (const { id } of LASER_PADS) {
+      const pad = this.sceneObject(id);
+      if (!pad) continue;
+      const base = (pad.userData.laserBaseScale ??= pad.scale.x) as number; // pads are authored at 0.4-0.8
+      pad.scale.setScalar(this.isLaserHovered(id) ? base * LASER_PAD_HOVER_SCALE : base);
+    }
+  }
+
+  private isLaserHovered(id: string): boolean {
+    return (this.laserHover.get(id)?.size ?? 0) > 0;
+  }
+
+  /**
+   * Hover from IWSDK's hand ray (the visible laser) over a sector beacon, desk pad or HUD button. One
+   * pointer entering a target that nothing hovered yet plays a soft tick (throttled) and restyles it.
+   */
+  private setLaserHover(id: string, pointerId: number, hovering: boolean): void {
+    let pointers = this.laserHover.get(id);
+    const before = (pointers?.size ?? 0) > 0;
+    if (hovering) {
+      if (!pointers) this.laserHover.set(id, (pointers = new Set()));
+      pointers.add(pointerId);
+    } else {
+      pointers?.delete(pointerId);
+    }
+    const after = (pointers?.size ?? 0) > 0;
+    if (before === after) return;
+    if (after) {
+      const now = performance.now();
+      if (now - this.lastLaserHoverCueAt >= LASER_HOVER_CUE_GAP_MS) {
+        this.lastLaserHoverCueAt = now;
+        this.playCue('HOVER_TICK');
+      }
+    }
+    // HUD buttons restyle themselves (UIKit :hover rules in public/ui/*.uikitml).
+    if (id.startsWith('sector-')) this.syncSectorBeacons(this.engine.getState(), this.sceneObject('earth-globe'));
+    else if (!id.startsWith('ui:')) this.syncPadHover();
+  }
+
+  private syncAll(): void {
+    const state = this.engine.getState();
+    const globe = this.sceneObject('earth-globe');
+    this.syncSectorWeather();
+
+    // Single source of truth: engine's committed downlink time vs. the active window.
+    // Withdraw the one-shot QUEUE_OVERFLOW advisory as soon as it is no longer true.
+    if (state.downlinkCommittedSec <= state.downlinkWindowSec + 0.01) {
+      this.voiceCommander?.retract('QUEUE_OVERFLOW');
+    }
+
+    // 1. Update 3D Sector Beacons & Surface-Conforming Spherical Sector Polygons on the Globe
+    this.syncSectorBeacons(state, globe);
+    this.syncPadHover();
 
     // 2. Update Scanner Tool & 3U CubeSat payload aperture colors for active sensor mode
     const scannerObj = this.sceneObject('scanner-tool');

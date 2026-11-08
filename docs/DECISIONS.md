@@ -88,3 +88,14 @@ This document records major technical, gameplay, and tooling decisions for **ORB
   7. Player-facing campaign is Academy + Fireline + Monsoon + Aftershock; Supercell, Brownout and daily passes stay in code but are hidden.
 - **Supersedes:** ADR-005's "two sensor modes" (Thermal IR was already shipped in Fireline/Aftershock); sensors are now enforced per scenario via `availableSensors`.
 - **Consequences:** The puzzle now requires reading weather and choosing what to sacrifice. Balance is verified by `tests/passClockAndLiveDownlink.test.ts` and the planner tests. The pass-clock lengths and Aftershock budget still need human playtest tuning.
+---
+## ADR-007: Hand input — one laser for far targets, the touched object for near ones
+- **Date:** 2026-11-08
+- **Status:** Accepted (P0-3 of the pre-submission fix list)
+- **Context:** Far sector, pad and HUD-button pinches were resolved by an app-side ray from the index fingertip (`fingerDir`), while the laser drawn in the headset is IWSDK's hand ray (`targetRaySpace`). The two point in different directions, so a pinch could act on a neighbour of what the laser showed. In addition, every beacon, pad and cube carried `PokeInteractable`; IWSDK's pointer arbitration (touch > grab > ray, 15/20 cm hysteresis) let the fingertip "touch-hover" a beacon 17 cm away from the seated rest pose, which hid the laser and disabled its pinch.
+- **Decision:**
+  1. Far presses come only from IWSDK's hand ray (`pointerType === 'ray'`): beacons and pads via `pointerdown` listeners, HUD buttons via UIKit `click`. The fingertip-ray branches are removed.
+  2. Near presses stay with the app's proximity check, tightened to "on the object": pads 6 cm, beacons 5 cm, cubes 5.5/8.5 cm, scanner 12 cm. When the pinching hand is on something, the laser press of that pinch is ignored.
+  3. `PokeInteractable` only on the four UIKit panels (all out of reach when seated), so the laser stays active over the desk and globe. The scanner also lost it: a fingertip poke picked it up without a pinch.
+  4. Hover feedback from the same ray: beacons grow, pads grow, HUD buttons thicken their border (`:hover` in `public/ui/*.uikitml`), and a 25 ms tick plays (throttled to 120 ms).
+- **Consequences:** What the laser shows is what a far pinch acts on. Verified in IWER only (`tests/e2e-hands-first-proof.mjs`); Quest hand-ray stability, the 5-6 cm near radii and the hover tick level need a headset check. Controllers keep their ray; controller poke on pads and beacons is gone.

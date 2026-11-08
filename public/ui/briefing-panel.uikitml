@@ -109,6 +109,12 @@
     padding-top: 7px;
     padding-bottom: 7px;
   }
+  .action-btn:hover {
+    border-width: 3.5px;
+    padding-top: 5px;
+    padding-bottom: 5px;
+    background-color: #123a63ee;
+  }
 </style>
 <Panel class="panel-root">
   <div id="BriefingHeader" class="header-banner">
