@@ -287,7 +287,7 @@ export function helpHtml(state: MissionState, custom?: MissionScenarioConfig | n
           ${row('R / N', 'Retry / next operation (press twice during a pass)')}
           ${row('?', 'This help')}
         </table>
-        <div style="margin-top:8px;color:#94a3b8;">In VR: grab the scanner and release it over a sector to scan; grab cubes and drop them in the stations; pinch the lever to transmit.</div>
+        <div style="margin-top:8px;color:#94a3b8;">In VR: point your hand laser and pinch to choose; pinch the plunger or aim the scanner beam at a sector and let go to scan; carry cubes to the stations; pinch the green lever to transmit.</div>
       </div>
     </div>`;
 }

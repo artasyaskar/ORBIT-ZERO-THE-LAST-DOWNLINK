@@ -464,8 +464,8 @@ try {
   assert.equal(tutorialFinal.state.debrief.efficiencyGrade, 'A');
   assert.equal(tutorialFinal.state.debrief.certification, 'SILVER');
 
-  // Advance directly from ORBITAL_ACADEMY to OP 01: FIRELINE (FIRELINE_PASS) using hand-right pinch on debrief-panel:Btn_NextMission
-  const toFirelineRes = await handPointAndPinch('hand-right', 'debrief-panel:Btn_NextMission');
+  // Advance directly from ORBITAL_ACADEMY to OP 01: FIRELINE (FIRELINE_PASS) using hand-right pinch on mission-hud:Btn_HudNext (the headset result is on the HUD)
+  const toFirelineRes = await handPointAndPinch('hand-right', 'mission-hud:Btn_HudNext');
   assert.equal(toFirelineRes.missionState.scenarioId, 'FIRELINE_PASS', 'Hand pinch on Btn_NextMission after Orbital Academy must launch OP 01: FIRELINE');
   assert.equal(toFirelineRes.missionState.phase, 'OPERATIONS');
   assert.equal(toFirelineRes.missionState.packets.length, 0);
@@ -548,8 +548,8 @@ try {
   // =========================================================================
   // 8. Advance to Next Operation (OP 02: MONSOON SHIELD) with Hand Pinch
   // =========================================================================
-  console.log('[8/8] Advancing to OP 02: MONSOON SHIELD via debrief-panel:Btn_NextMission pinch...');
-  const nextOpRes = await handPointAndPinch('hand-right', 'debrief-panel:Btn_NextMission');
+  console.log('[8/8] Advancing to OP 02: MONSOON SHIELD via mission-hud:Btn_HudNext pinch...');
+  const nextOpRes = await handPointAndPinch('hand-right', 'mission-hud:Btn_HudNext');
   assert.equal(nextOpRes.missionState.scenarioId, 'STANDARD_INDUS_PASS', 'Hand pinch on Btn_NextMission must load OP 02: MONSOON SHIELD');
   assert.equal(nextOpRes.missionState.phase, 'OPERATIONS');
 

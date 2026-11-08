@@ -1,7 +1,7 @@
 <!--
   ORBIT ZERO: THE LAST DOWNLINK — Forward Mission HUD (headset-first)
   One centred panel above the globe that switches between three modes:
-    CardSection   - Mission Card before the pass (story, requests, sensors, win line, START)
+    CardSection   - Mission Card before the pass: three lines (what / how / win), TRAINING or START
     PlaySection   - Next Step instruction + big pass clock + request tracker during the pass
     ResultSection - Outcome, score vs best possible, one lesson, RETRY / NEXT after the pass
   All text is written at runtime from mission state and scenario config (MissionControlSystem.syncMissionHud).
@@ -25,23 +25,9 @@
   .hud-title { font-size: 26px; font-weight: 800; color: #f8fafc; margin-top: 4px; }
   .hud-body { font-size: 18px; font-weight: 600; color: #cbd5e1; margin-top: 6px; line-height: 1.35; }
   .hud-hands { font-size: 17px; font-weight: 700; color: #67e8f9; margin-top: 6px; }
-  .req-row {
-    flex-direction: column;
-    width: 100%;
-    margin-top: 6px;
-    padding-top: 7px;
-    padding-bottom: 7px;
-    padding-left: 12px;
-    padding-right: 12px;
-    background-color: #0b1a2eee;
-    border-radius: 10px;
-    border-width: 1px;
-    border-color: #1e3a5f;
-  }
-  .req-title { font-size: 19px; font-weight: 800; color: #f8fafc; }
-  .req-meta { font-size: 16px; font-weight: 600; color: #94a3b8; margin-top: 2px; }
-  .sensor-line { font-size: 16px; font-weight: 600; color: #e2e8f0; margin-top: 3px; }
-  .rules { font-size: 17px; font-weight: 800; color: #fde68a; margin-top: 8px; }
+  .card-line { font-size: 22px; font-weight: 600; color: #e2e8f0; margin-top: 10px; line-height: 1.35; }
+  .card-how { font-size: 22px; font-weight: 700; color: #67e8f9; margin-top: 10px; line-height: 1.35; }
+  .card-rules { font-size: 22px; font-weight: 800; color: #fde68a; margin-top: 10px; line-height: 1.35; }
   .row { flex-direction: row; width: 100%; gap: 10px; margin-top: 10px; }
   .big-btn {
     flex-grow: 1;
@@ -71,25 +57,11 @@
 </style>
 <Panel id="MissionHudRoot" class="panel-root">
   <div id="CardSection" class="section">
-    <div id="CardKicker" class="kicker">OP 01 // MISSION CARD [SIMULATED]</div>
+    <div id="CardKicker" class="kicker">OP 01: FIRELINE | SIMULATED</div>
     <div id="CardTitle" class="hud-title">Fireline Pass</div>
-    <div id="CardStory" class="hud-body">A wildfire is racing through the canyon. Save the most important requests first.</div>
-    <div id="CardReq1" class="req-row">
-      <div id="CardReq1Title" class="req-title">SECTOR B | CANYON FIRELINE | 40 pts</div>
-      <div id="CardReq1Meta" class="req-meta">Weather: thick wildfire smoke | needs CONFIRMED</div>
-    </div>
-    <div id="CardReq2" class="req-row">
-      <div id="CardReq2Title" class="req-title">SECTOR C | VIADUCT FIREBREAK | 25 pts</div>
-      <div id="CardReq2Meta" class="req-meta">Weather: clear sky | needs CONFIRMED</div>
-    </div>
-    <div id="CardReq3" class="req-row">
-      <div id="CardReq3Title" class="req-title">SECTOR E | RIDGE DEPOT | 35 pts</div>
-      <div id="CardReq3Meta" class="req-meta">Weather: wildfire smoke | needs CONFIRMED</div>
-    </div>
-    <div id="CardSensor1" class="sensor-line">OPTICAL: sharpest in clear sky; blind in cloud, smoke and dust.</div>
-    <div id="CardSensor2" class="sensor-line">THERMAL IR: sees heat through smoke; blocked by thick cloud.</div>
-    <div id="CardSensor3" class="sensor-line">RADAR: sees through cloud and dust; blurry on metal.</div>
-    <div id="CardRules" class="rules">WIN: 75+ pts. Clock starts at your first scan.</div>
+    <div id="CardStory" class="card-line">A wildfire is closing in. Send the evidence that helps the most people.</div>
+    <div id="CardHow" class="card-how">HOW: point your hand laser at a glowing sector and pinch. Then follow the strip above the globe.</div>
+    <div id="CardRules" class="card-rules">WIN 75+ pts. Under 40 pts the mission fails. The clock starts at your first scan.</div>
     <div class="row">
       <Button id="Btn_StartTraining" class="big-btn" style="border-color: #a78bfa;">
         <ButtonLabel id="Lbl_StartTraining" style="color: #c4b5fd; font-size: 19px; font-weight: 800;">TRAINING FIRST</ButtonLabel>

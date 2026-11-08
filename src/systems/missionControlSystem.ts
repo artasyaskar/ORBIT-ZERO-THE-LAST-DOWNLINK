@@ -77,7 +77,7 @@ import { animateWeather, applyWeather, createWeatherFx } from './sectorWeatherFx
 import { paintSensorView } from '../ui/sensorViewPainter';
 import { missionCardModel, resultModel, trackerText } from '../ui/hudText';
 import { SCORING } from '../mission/missionConfig';
-import { compressedSizeLine, fmtRate, processCostLine, rateOf, rawStorageUnits } from '../mission/budgetText';
+import { fmtRate, rateOf, rawStorageUnits } from '../mission/budgetText';
 import type { DataPacket, MissionScenarioId, MissionState, SectorId, SensorMode } from '../mission/types';
 import {
   GLOBE_RADIUS,
@@ -1269,6 +1269,7 @@ export class MissionControlSystem extends createSystem({
     if (presenting !== this.deskPadsPresenting) {
       this.deskPadsPresenting = presenting;
       this.syncDeskPadsForXR(presenting);
+      this.syncAll(); // headset and flat page show different panels and panel content
     }
     this.updateXRHandInteractions(delta);
     this.updateMissionHudPose(Math.min(Math.max(0, delta), 0.1));
@@ -3618,22 +3619,24 @@ export class MissionControlSystem extends createSystem({
   }
 
   public syncSpatialPanelsVisibility(): void {
-    const isXRorIWER = Boolean((window as any).__ORBIT_IWER__) || this.world.renderer.xr.isPresenting;
+    const xr = Boolean(this.world.renderer.xr.isPresenting);
+    const isXRorIWER = Boolean((window as any).__ORBIT_IWER__) || xr;
     const show = isXRorIWER || this.spatialHudVisible;
     const phase = this.engine.getState().phase;
     const isDebrief = phase === 'DEBRIEF';
-    // Headset climax: during the live window the beam, the globe, the bay and the forward countdown own the
-    // view. Everything the player can still do (dock a tray cube, close the link) is on the desk or the HUD.
-    const liveWindowInXR = phase === 'DOWNLINK' && Boolean(this.world.renderer.xr.isPresenting);
 
-    if (this.briefingPanel) {
-      this.briefingPanel.visible = show && !isDebrief && !liveWindowInXR;
-    }
-    if (this.telemetryPanel) {
-      this.telemetryPanel.visible = show && !isDebrief && !liveWindowInXR;
-    }
-    if (this.debriefPanel) {
-      this.debriefPanel.visible = isDebrief;
+    if (xr) {
+      // Headset: the forward Mission HUD carries the card, the next step, the clock and the result. The only
+      // side panel is the cube inspector (with pause and settings), and only while cubes are being worked on.
+      // Card, live window and result own the view on their own; the briefing panel duplicates the HUD.
+      const playing = phase === 'OPERATIONS' && this.missionHudMode() === 'play';
+      if (this.briefingPanel) this.briefingPanel.visible = false;
+      if (this.telemetryPanel) this.telemetryPanel.visible = playing;
+      if (this.debriefPanel) this.debriefPanel.visible = false;
+    } else {
+      if (this.briefingPanel) this.briefingPanel.visible = show && !isDebrief;
+      if (this.telemetryPanel) this.telemetryPanel.visible = show && !isDebrief;
+      if (this.debriefPanel) this.debriefPanel.visible = isDebrief;
     }
     // The forward Mission HUD exists only in a live immersive session; on flat screens the DOM HUD
     // shows the same content (shared models in src/ui/hudText.ts).
@@ -3679,16 +3682,11 @@ export class MissionControlSystem extends createSystem({
         ? `${card.kicker} | ${stars}/3 STARS | BEST ${record.bestScore} PTS`
         : card.kicker);
       this.setText(hud, 'CardTitle', card.title);
-      this.setText(hud, 'CardStory', card.story);
-      card.requests.forEach((r, i) => {
-        this.setText(hud, `CardReq${i + 1}Title`, r.title);
-        this.setText(hud, `CardReq${i + 1}Meta`, r.meta);
-      });
-      for (let i = 0; i < 3; i++) {
-        this.setDisplay(hud, `CardSensor${i + 1}`, card.sensors[i] ? 'flex' : 'none');
-        if (card.sensors[i]) this.setText(hud, `CardSensor${i + 1}`, card.sensors[i]);
-      }
-      this.setText(hud, 'CardRules', card.rules);
+      // Three lines only. Requests and sensors are learned in play: selecting a sector speaks its weather and
+      // value, switching the sensor speaks what it can see, and the strip above the globe tracks each request.
+      this.setText(hud, 'CardStory', card.what);
+      this.setText(hud, 'CardHow', card.how);
+      this.setText(hud, 'CardRules', card.win);
       return;
     }
 
@@ -5953,6 +5951,11 @@ export class MissionControlSystem extends createSystem({
   private syncTelemetryPanel(): void {
     if (!this.telemetryPanel) return;
     const state = this.engine.getState();
+    // In the headset the Mission HUD strip already shows the next step, battery, memory, clock and send time;
+    // this panel keeps only the selected-cube inspector, the cube buttons, pause and settings.
+    const xr = Boolean(this.world.renderer.xr.isPresenting);
+    this.setDisplay(this.telemetryPanel, 'StatusBannerCard', xr ? 'none' : 'flex');
+    this.setDisplay(this.telemetryPanel, 'TelemetryHeaderCard', xr ? 'none' : 'flex');
 
     const scenario = this.engine.getActiveScenario();
     const tutStep = this.tutorial.getCurrentStepSpec();
@@ -5967,12 +5970,12 @@ export class MissionControlSystem extends createSystem({
       this.telemetryPanel,
       'OperationPhaseBadge',
       state.phase === 'DOWNLINK'
-        ? 'PHASE: DOWNLINK PASS'
+        ? 'LIVE LINK'
         : state.phase === 'DEBRIEF'
-          ? 'PHASE: MISSION DEBRIEF'
+          ? 'RESULT'
           : tutStep
-            ? 'MODE: GESTURE TRAINING'
-            : 'PHASE: RECON & PROCESSING',
+            ? 'TRAINING'
+            : 'SCAN, COMPRESS, LOAD',
     );
 
     const pwrRatio = Math.max(0, Math.min(1, state.power / state.maxPower));
@@ -6065,7 +6068,7 @@ export class MissionControlSystem extends createSystem({
       this.setText(
         this.telemetryPanel,
         'InspectorConfidence',
-        'Scan a sector or poke/grab a Data Cube on the console tray to inspect.',
+        'Scan a sector, then pick up a cube on the tray to see it here.',
       );
       this.setText(
         this.telemetryPanel,
@@ -6097,7 +6100,7 @@ export class MissionControlSystem extends createSystem({
       this.setText(
         this.telemetryPanel,
         'InspectorConfidence',
-        `${selectedPkt.confidenceBadge} (${confPct}% sim. conf.)${selectedPkt.processed ? ' | compression did not change this' : ''}`,
+        `${selectedPkt.confidenceBadge} | ${confPct}% sure (simulated)${selectedPkt.processed ? ' | compression did not change this' : ''}`,
       );
       this.setText(
         this.telemetryPanel,
@@ -6123,10 +6126,10 @@ export class MissionControlSystem extends createSystem({
         this.telemetryPanel,
         'Lbl_ProcessCube',
         selectedPkt.processed
-          ? `${selectedPkt.id} ALREADY PROCESSED (${compressedSizeLine(scenario.budget)})`
+          ? `${selectedPkt.id} IS ALREADY COMPRESSED`
           : selectedPkt.confidence === 'UNVERIFIED'
-            ? `CANNOT PROCESS [X] UNVERIFIED CUBE (DISCARD INSTEAD)`
-            : `PROCESS ${selectedPkt.id} (${processCostLine(scenario.budget)})`,
+            ? 'THIS SCAN SAW NOTHING: DISCARD IT INSTEAD'
+            : `COMPRESS ${selectedPkt.id} (-${scenario.budget.onboardProcess.powerCost} Wh, then ${scenario.budget.onboardProcess.compressedTransmitSec.toFixed(1)}s to send)`,
       );
 
       this.setText(
@@ -6134,7 +6137,7 @@ export class MissionControlSystem extends createSystem({
         'Lbl_QueueCube',
         selectedPkt.queued
           ? `REMOVE ${selectedPkt.id} FROM DOWNLINK SLOT #${(selectedPkt.queueIndex ?? 0) + 1}`
-          : `QUEUE ${selectedPkt.id} IN DOWNLINK BAY (${mb} MB / ${selectedPkt.transmitSec.toFixed(1)}s Tx)`,
+          : `LOAD ${selectedPkt.id} INTO THE DOWNLINK BAY (${selectedPkt.transmitSec.toFixed(1)}s to send)`,
       );
     }
     this.setText(

@@ -167,10 +167,14 @@ try {
   // 2. Mission Card in the headset.
   const cardTitle = await hudText('CardTitle');
   const cardRules = await hudText('CardRules');
+  const cardLines = [await hudText('CardStory'), await hudText('CardHow'), cardRules];
   check(/Fireline/i.test(cardTitle ?? ''), 'headset Mission Card shows the operation', cardTitle);
   check(/WIN \d+\+ pts/.test(cardRules ?? ''), 'headset Mission Card states the win line', cardRules);
-  const card1 = await hudText('CardReq1Title');
-  check(!/THERMAL|RADAR|OPTICAL|SAR/.test(card1 ?? ''), 'Mission Card request row does not give the sensor answer', card1);
+  check(cardLines.every((l) => l && l.length <= 110) && /laser/i.test(cardLines[1] ?? '') && /pinch/i.test(cardLines[1] ?? ''),
+    'Mission Card is three short lines: what, how (laser + pinch), win/lose', cardLines.join(' | '));
+  check(!cardLines.some((l) => /THERMAL|RADAR|OPTICAL|SAR/.test(l ?? '')), 'Mission Card does not give the sensor answer', cardLines.join(' | '));
+  const sidePanels = await page.evaluate(() => ['briefing-panel', 'telemetry-hud', 'debrief-panel'].filter((id) => window.__ORBIT_ZERO__.getSceneObject(id)?.visible));
+  check(sidePanels.length === 0, 'while the Mission Card is open no side panel competes with it', JSON.stringify(sidePanels));
   const hudPos = await page.evaluate(() => window.__ORBIT_ZERO__.get3DTargetWorldPosition('mission-hud'));
   check(hudPos && offAxisDeg(hudPos) < 20, 'Mission Card is within 20 deg of seated forward', hudPos ? `${offAxisDeg(hudPos).toFixed(1)} deg` : 'missing');
   check(s.passStarted === false && s.passRemainingSec === 150, 'pass clock waits while the card is open', `${s.passRemainingSec}`);
@@ -182,6 +186,11 @@ try {
   await page.waitForTimeout(500);
   const stepTitle = await hudText('StepTitle');
   check(start.ok && /PICK A TARGET|SCAN SECTOR/.test(stepTitle ?? ''), 'pinching START PASS opens the Next Step strip', stepTitle);
+  const playPanels = await page.evaluate(() => ({
+    briefing: window.__ORBIT_ZERO__.getSceneObject('briefing-panel')?.visible,
+    telemetry: window.__ORBIT_ZERO__.getSceneObject('telemetry-hud')?.visible,
+  }));
+  check(!playPanels.briefing && playPanels.telemetry, 'during play only the cube-inspector panel sits beside the HUD', JSON.stringify(playPanels));
   const stripPos = await page.evaluate(() => window.__ORBIT_ZERO__.get3DTargetWorldPosition('mission-hud'));
   check(stripPos && stripPos.y > 1.4, 'Next Step strip moved above the globe', stripPos ? `y=${stripPos.y.toFixed(2)}` : 'missing');
   await shot('hmd-02-next-step');
@@ -244,6 +253,8 @@ try {
   const resultScore = await hudText('ResultScore');
   check(/MISSION SUCCESS \| GRADE [SABC]/.test(resultTitle ?? ''), 'headset result headline agrees with the grade', resultTitle);
   check(/best possible/.test(resultScore ?? ''), 'headset result shows best possible score', resultScore);
+  const resultPanels = await page.evaluate(() => ['briefing-panel', 'telemetry-hud', 'debrief-panel'].filter((id) => window.__ORBIT_ZERO__.getSceneObject(id)?.visible));
+  check(resultPanels.length === 0, 'the result is shown once, on the HUD (no side panels)', JSON.stringify(resultPanels));
   check(!/GRADE S\)/.test(s.debrief.summaryHeadline) || s.debrief.efficiencyGrade === 'S', 'summary headline grade matches efficiency grade', s.debrief.summaryHeadline);
   await shot('hmd-05-result');
 
@@ -262,7 +273,8 @@ try {
   check(false, 'run completed without exceptions', String(err?.stack ?? err));
   await shot('hmd-error').catch(() => {});
 } finally {
-  const pageErrors = failures.filter((f) => !/ERR_BLOB_OUT_OF_MEMORY|Couldn't load texture blob/.test(f));
+  // No error is masked: the blob-texture errors came from an unused GLB that is no longer loaded.
+  const pageErrors = failures;
   check(pageErrors.length === 0, 'no page errors', pageErrors.slice(0, 3).join(' | '));
   const passed = results.filter((r) => r.ok).length;
   const report = { when: new Date().toISOString(), passed, total: results.length, results, perf, note: 'IWER Meta Quest 3 emulation on desktop Chromium. Not a physical-headset measurement.' };

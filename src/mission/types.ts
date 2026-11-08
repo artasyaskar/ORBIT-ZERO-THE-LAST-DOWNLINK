@@ -269,6 +269,8 @@ export interface MissionScenarioConfig {
   partialScore?: number;
   /** Two-line player-facing story for the Mission Card (no sensor answers). */
   storyLine?: string;
+  /** One short plain line for the headset Mission Card: what is happening and what is at stake. */
+  cardLine?: string;
 }
 
 export interface EvidenceProvenanceRecord {

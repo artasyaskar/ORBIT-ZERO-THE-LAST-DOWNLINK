@@ -6,7 +6,7 @@
 
 import type { MissionState, ResourceBudgetConfig, SectorId, SensorMode } from './types';
 import { MISSION_SCENARIOS } from './missionConfig';
-import { compressedSizeLine, fmtRate, rawPayloadRange, rawStorageUnits, scanCostLine } from './budgetText';
+import { fmtRate, rawPayloadRange, rawStorageUnits, scanCostLine } from './budgetText';
 
 export type TutorialStepId =
   | 'STEP_1_ENVIRONMENT'
@@ -56,8 +56,8 @@ export function buildTutorialSteps(
   {
     index: 1,
     id: 'STEP_1_ENVIRONMENT',
-    title: 'STEP 1/9: SEATED ENVELOPE & HAND TRACKING RECOVERY',
-    vrInstruction: 'Hold both hands 35-60 cm in front of your headset inside the console arc and touch the Globe Gimbal Ring. If hand tracking ever loses your pinch, bring your hand back to chest height — dropped cubes automatically snap back to their tray slot.',
+    title: 'STEP 1/9: GET COMFORTABLE',
+    vrInstruction: 'Sit back: everything is 35-60 cm in front of you. Touch the globe with a fingertip. If your hand is lost, a cube you held will automatically snap back to its tray.',
     desktopInstruction: 'Drag the 3D Earth Globe or click any Sector Beacon to orient the orbital console (dropped cubes auto-return to their slot).',
     scientificNote: `ORBIT ZERO flies a sun-synchronous low-Earth orbit. Every pass over Karachi Ground Station has a finite S-Band horizon window (${rate}).`,
     ghostHandTarget: 'GLOBE_GIMBAL',
@@ -65,8 +65,8 @@ export function buildTutorialSteps(
   {
     index: 2,
     id: 'STEP_2_POINT',
-    title: 'STEP 2/9: HOW TO POINT (SECTOR AIM & RAY LOCK)',
-    vrInstruction: 'HOW TO POINT: Aim your index finger or wrist ray directly at Sector B on the 3D Earth Globe until the cyan targeting reticle locks, then pinch or poke to select Sector B.',
+    title: 'STEP 2/9: HOW TO POINT AND PINCH',
+    vrInstruction: 'Point your hand at Sector B on the globe. A laser appears and the beacon grows. Touch thumb and index together (pinch) to select it.',
     desktopInstruction: 'Point and click Sector B on the 3D Globe (or press [2]) to lock target telemetry.',
     scientificNote: 'Each ground emergency request targets a specific geographic sector with distinct cloud, smoke, or terrain backscatter physics.',
     ghostHandTarget: 'SECTOR_B',
@@ -74,8 +74,8 @@ export function buildTutorialSteps(
   {
     index: 3,
     id: 'STEP_3_PINCH',
-    title: 'STEP 3/9: HOW TO PINCH (SENSOR TOGGLE & FIRE SWATH)',
-    vrInstruction: 'HOW TO PINCH: Bring your thumb and index finger together (or poke directly with your index fingertip) on the Sensor Mode button to match Sector B weather, then pinch/press FIRE SWATH.',
+    title: 'STEP 3/9: HOW TO PINCH A SWITCH: SENSOR, THEN SCAN',
+    vrInstruction: 'Pinch the sensor pad left of the plunger until the sensor can see through the smoke over Sector B. Then pinch the plunger to scan.',
     desktopInstruction: 'Select the optimal sensor mode for Sector B and click FIRE SWATH (or press [Space]) to materialize a 3D Data Cube.',
     scientificNote: `${scanCostLine(budget, 'OPTICAL')} needs clear skies; ${scanCostLine(budget, 'THERMAL')} pierces thin smoke; ${scanCostLine(budget, 'RADAR')} pierces storm clouds.`,
     ghostHandTarget: 'SENSOR_AND_SCAN',
@@ -83,8 +83,8 @@ export function buildTutorialSteps(
   {
     index: 4,
     id: 'STEP_4_GRAB',
-    title: 'STEP 4/9: HOW TO GRAB A 3D DATA CUBE',
-    vrInstruction: 'HOW TO GRAB: Reach to the left Evidence Tray (within 45 cm), close your thumb and index/middle fingers around the glowing 3D Data Cube, and hold the pinch to lift it.',
+    title: 'STEP 4/9: GRAB THE CUBE',
+    vrInstruction: 'Reach to the tray on your left. Pinch the glowing cube and keep pinching to lift it.',
     desktopInstruction: 'Click or drag-hold the glowing 3D Data Cube in the left Evidence Tray.',
     scientificNote: `Each raw scan occupies 1 of ${slots} physical tray slots and ${rawStr} STR (${rawRange}) of onboard solid-state memory.`,
     ghostHandTarget: 'EVIDENCE_CUBE',
@@ -92,8 +92,8 @@ export function buildTutorialSteps(
   {
     index: 5,
     id: 'STEP_5_INSPECT',
-    title: 'STEP 5/9: INSPECT HOLOGRAM & SCIENTIFIC CAVEATS',
-    vrInstruction: 'Hold the Data Cube up to inspect its internal 3D confidence hologram ([OK] CONFIRMED vs [?] PROBABLE), observation confidence %, and NASA remote-sensing caveat.',
+    title: 'STEP 5/9: READ THE CUBE',
+    vrInstruction: 'Lift the cube toward your eyes. It shows what the scan saw and how sure it is: CONFIRMED, PROBABLE, or UNVERIFIED (nothing usable).',
     desktopInstruction: 'Inspect the selected Data Cube badge, MB payload size, and scientific caveat on the HUD.',
     scientificNote: 'Cloud-blocked [X] UNVERIFIED frames contain zero ground signal and cannot be salvaged by onboard compression.',
     ghostHandTarget: 'CUBE_INSPECT',
@@ -101,8 +101,8 @@ export function buildTutorialSteps(
   {
     index: 6,
     id: 'STEP_6_PROCESS',
-    title: 'STEP 6/9: HOW TO PLACE & RELEASE IN THE CRADLE',
-    vrInstruction: `HOW TO PLACE & RELEASE: Carry the valid Data Cube into the center amber Processing Cradle (15 cm magnetic snap ring). When the ring flares gold, open your thumb and fingers to release and compress (${rawStr} STR -> ${compressedSizeLine(budget)}, -${proc.powerCost} Wh).`,
+    title: 'STEP 6/9: COMPRESS IT',
+    vrInstruction: `Carry the cube to the amber Cradle in the middle and open your fingers. For ${proc.powerCost} Wh of battery it gets smaller and quicker to send.`,
     desktopInstruction: `Drag and release the Data Cube into the center Processing Cradle (or click PROCESS / press [P]) to compress ${rawStr} STR -> ${proc.compressedStorageCost} STR (-${proc.powerCost} Wh).`,
     scientificNote: `Onboard feature extraction strips redundant background pixels, cutting payload to ${proc.compressedPayloadMb} MB (${proc.compressedTransmitSec.toFixed(1)}s @ ${rate}) at a ${proc.powerCost} Wh compute cost.`,
     ghostHandTarget: 'PROCESSING_CRADLE',
@@ -110,8 +110,8 @@ export function buildTutorialSteps(
   {
     index: 7,
     id: 'STEP_7_STAGE',
-    title: 'STEP 7/9: HOW TO DOCK IN THE DOWNLINK BAY',
-    vrInstruction: 'HOW TO DOCK: Grab the compressed gold Data Cube, move it into Slot #1 of the right-hand Downlink Bay (18 cm magnetic capture zone), and open your fingers to release. If tracking drops mid-carry, the cube safely returns to its slot.',
+    title: 'STEP 7/9: LOAD THE DOWNLINK BAY',
+    vrInstruction: 'Pick up the compressed cube and drop it in Slot 1 of the Downlink Bay on your right. Slot 1 is sent first.',
     desktopInstruction: 'Drag and release the compressed Data Cube into Slot #1 of the right-hand Downlink Bay (or click QUEUE / press [Q]).',
     scientificNote: `Packets transmit sequentially in Slot ${slotOrder} order at ${rate}. Any packet exceeding the pass horizon cutoff is dropped.`,
     ghostHandTarget: 'DOWNLINK_BAY',
@@ -119,8 +119,8 @@ export function buildTutorialSteps(
   {
     index: 8,
     id: 'STEP_8_TRANSMIT',
-    title: 'STEP 8/9: COMMIT LIVE S-BAND DOWNLINK',
-    vrInstruction: 'Point or reach to the green COMMIT DOWNLINK lever on the right console and pinch/press to stream your queued evidence to Karachi Ground Station.',
+    title: 'STEP 8/9: SEND IT',
+    vrInstruction: 'Pinch the green lever on the right to open the link. Your loaded cubes stream down to the ground station.',
     desktopInstruction: `Click COMMIT DOWNLINK (or press [T]) to initiate the live ${rate} S-Band transmission.`,
     scientificNote: 'Once S-Band transmission begins, orbital sensors lock and queued packets stream to the ground dish in real time.',
     ghostHandTarget: 'COMMIT_LEVER',
@@ -128,8 +128,8 @@ export function buildTutorialSteps(
   {
     index: 9,
     id: 'STEP_9_DEBRIEF',
-    title: 'STEP 9/9: DEBRIEF & LAUNCH OPERATION 01: FIRELINE',
-    vrInstruction: 'Review the After-Action Debrief (Outcome, Score, Wh & MB/s stats) and pinch/press NEXT OPERATION or REPLAY PASS.',
+    title: 'STEP 9/9: YOUR RESULT',
+    vrInstruction: 'Read your result above the globe. Pinch START OP 01 for the real mission, or RETRY PASS to train again.',
     desktopInstruction: 'Review your After-Action Debrief and click NEXT OPERATION or REPLAY PASS.',
     scientificNote: 'Orbital Academy gesture certification complete. You are cleared for Operation 01: Fireline.',
     ghostHandTarget: 'DEBRIEF_PANEL',

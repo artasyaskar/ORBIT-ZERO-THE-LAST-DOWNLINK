@@ -98,7 +98,7 @@ export function getNextStep(state: MissionState, custom?: MissionScenarioConfig 
       body: 'Read what reached the ground and what did not. Retry the pass to beat your score, or go to the next operation.',
       tone: d?.outcome === 'SUCCESS' ? 'success' : d?.outcome === 'PARTIAL_SUCCESS' ? 'warn' : 'critical',
       desktop: 'R = retry  |  N = next operation',
-      hands: 'Poke RESTART or NEXT on the debrief panel',
+      hands: 'Point at RETRY PASS or NEXT OPERATION and pinch',
     };
   }
 
@@ -123,7 +123,7 @@ export function getNextStep(state: MissionState, custom?: MissionScenarioConfig 
         body: 'Packets stream in slot order. Watch which ones finish before loss of signal.',
         tone: 'info',
         desktop: 'T = close link early',
-        hands: 'Pull the lever again to close the link early',
+        hands: 'Pinch the green lever again to close the link early',
       };
   }
 
@@ -133,7 +133,7 @@ export function getNextStep(state: MissionState, custom?: MissionScenarioConfig 
       body: `Battery (${state.power} Wh) cannot pay for another scan and no usable evidence is on board. Abort the pass and try a new plan.`,
       tone: 'critical',
       desktop: 'Click ABORT PASS',
-      hands: 'Pull the lever to abort',
+      hands: 'Pinch the green lever (or ABORT PASS above) to end the pass',
     };
   }
 
@@ -174,7 +174,7 @@ export function getNextStep(state: MissionState, custom?: MissionScenarioConfig 
         body: `${targetRequest.shortLabel.split('|')[1]?.trim() ?? targetRequest.title} needs ${targetRequest.minimumConfidence} evidence. Pick the sensor that can see through "${weather.toLowerCase()}", then fire the scan.`,
         tone: clockWarn ? 'warn' : 'info',
         desktop: 'Click a sensor chip, then SCAN (Space)',
-        hands: 'Grab the scanner and release it over the sector',
+        hands: 'Pinch the plunger, or aim the scanner beam at the sector and let go',
       };
     }
     const sectors = open.map((r) => r.targetSectorId).join(', ');
@@ -214,10 +214,10 @@ export function getNextStep(state: MissionState, custom?: MissionScenarioConfig 
   if (state.queuePacketIds.length) {
     return {
       title: `${clockPrefix}READY TO TRANSMIT`,
-      body: `Bay holds ${state.downlinkCommittedSec.toFixed(1)}s of ${state.downlinkWindowSec.toFixed(1)}s. Pull the lever to open the link.${open.length ? ' Some requests stay unanswered: that can be the right call.' : ''}`,
+      body: `Bay holds ${state.downlinkCommittedSec.toFixed(1)}s of ${state.downlinkWindowSec.toFixed(1)}s. Use the green lever to open the link.${open.length ? ' Some requests stay unanswered: that can be the right call.' : ''}`,
       tone: 'success',
       desktop: 'Click TRANSMIT (T) or the lever',
-      hands: 'Pinch and pull the TRANSMIT lever',
+      hands: 'Pinch the green lever, or TRANSMIT above',
     };
   }
 
@@ -226,7 +226,7 @@ export function getNextStep(state: MissionState, custom?: MissionScenarioConfig 
     body: `Sector ${state.selectedSectorId}: ${weather}. Choose a sensor and scan.`,
     tone: 'info',
     desktop: 'Space = scan',
-    hands: 'Grab the scanner and release it over the sector',
+    hands: 'Pinch the plunger, or aim the scanner beam at the sector and let go',
   };
 }
 

@@ -66,10 +66,25 @@ export function rulesLine(state: MissionState, custom?: MissionScenarioConfig | 
   return `WIN ${successScore}+ pts | PARTIAL ${partialScore}+ | below that FAILS.${weighted ? '' : ' Answer all three.'} ${clock} Hints cost ${SCORING.hintPenalty}.`;
 }
 
+/** How to start, for every operation: the laser and the pinch. The Next Step strip guides the rest. */
+export const CARD_HOW_LINE = 'HOW: point your hand laser at a glowing sector and pinch. Then follow the strip above the globe.';
+
+/** When you win and when you lose, in one line. */
+export function winLine(state: MissionState, custom?: MissionScenarioConfig | null): string {
+  if (state.scenarioId === 'ORBITAL_ACADEMY') return 'No clock in training. You pass when the Sector B evidence reaches the ground.';
+  const { successScore, partialScore } = getScenarioThresholds(state.scenarioId, custom);
+  const clock = state.passDurationSec ? ' The clock starts at your first scan.' : ' No clock on this pass.';
+  return `WIN ${successScore}+ pts. Under ${partialScore} pts the mission fails.${clock}`;
+}
+
 export interface MissionCardModel {
   kicker: string;
   title: string;
   story: string;
+  /** Headset card, one line each: what is happening, how to start, when you win or lose. */
+  what: string;
+  how: string;
+  win: string;
   requests: { title: string; meta: string }[];
   sensors: string[];
   rules: string;
@@ -79,9 +94,12 @@ export function missionCardModel(state: MissionState, custom?: MissionScenarioCo
   const scenario = scenarioOf(state, custom);
   const requests = getScenarioRequests(state.scenarioId, custom);
   return {
-    kicker: `${scenario.operationCode ?? 'OPERATION'} // MISSION CARD [SIMULATED]`,
+    kicker: `${scenario.operationCode ?? 'OPERATION'} | SIMULATED`,
     title: scenario.name,
     story: scenario.storyLine ?? scenario.briefing,
+    what: scenario.cardLine ?? scenario.storyLine ?? scenario.briefing,
+    how: CARD_HOW_LINE,
+    win: winLine(state, custom),
     requests: GROUND_REQUEST_ORDER.map((id) => {
       const r = requests[id];
       const sector = getScenarioSector(state.scenarioId, r.targetSectorId, custom);

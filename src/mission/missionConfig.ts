@@ -620,6 +620,7 @@ export const MISSION_SCENARIOS: Record<MissionScenarioId, MissionScenarioConfig>
     subtitle: 'Indus Basin Flood Triage — SAR Cloud Penetration vs. Optical Resolution [SIMULATED]',
     briefing: '[SIMULATED SCENARIO] A monsoon levee breach is flooding the Indus basin. Two targets sit under storm clouds; the river bridge is in a clear gap. Three raw scans will not fit the downlink window.',
     storyLine: 'Levees have failed across the Indus basin. Ground teams need three answers before the satellite drops below the horizon.',
+    cardLine: 'The Indus levees broke. Rescue teams need three answers before your pass ends.',
     budget: MISSION_BUDGET,
     availableSensors: ['RADAR', 'OPTICAL'],
     requests: GROUND_REQUESTS,
@@ -708,6 +709,7 @@ export const MISSION_SCENARIOS: Record<MissionScenarioId, MissionScenarioConfig>
     briefing:
       '[SIMULATED TRAINING TELEMETRY] Complete the 9-step Orbital Academy qualification pass: target Sector B, arm Thermal IR (3.9 um), fire scan, grab and inspect the 3D Data Cube, compress in the Amber Processing Cradle (3 STR -> 1 STR), dock into Downlink Bay Slot #1, and commit transmission.',
     storyLine: 'Training pass, no clock. Learn the five moves: aim, scan, inspect, compress, transmit. Smoke over Sector B hides a fire front.',
+    cardLine: 'Training, no clock: learn to aim, scan, compress and send one evidence cube.',
     budget: {
       ...MISSION_BUDGET,
       initialPower: 52,
@@ -724,6 +726,7 @@ export const MISSION_SCENARIOS: Record<MissionScenarioId, MissionScenarioConfig>
     subtitle: 'Bolan Fireline Emergency Zone — Thermal IR Smoke Penetration & Optical Triage [SIMULATED]',
     briefing: '[SIMULATED SCENARIO] A wildfire is racing through the Bolan canyon. Thick smoke covers the highway and the ridge depot; the viaduct sits in clear upwind air. A heat report from Sector D may be a false alarm.',
     storyLine: 'A wildfire is racing through the Bolan canyon. Evacuees, a fuel depot and a water route all need answers. Save the most important ones first.',
+    cardLine: 'A wildfire is closing in. Send the evidence that helps the most people.',
     budget: {
       ...MISSION_BUDGET,
       initialPower: 52,
@@ -1039,6 +1042,7 @@ export const MISSION_SCENARIOS: Record<MissionScenarioId, MissionScenarioConfig>
     subtitle: 'Quetta Fault Seismic Crisis — Multi-Sensor Change Detection & 6-STR Buffer [SIMULATED]',
     briefing: '[SIMULATED SCENARIO] An earthquake struck the Quetta fault. A solar storm damaged the battery and memory: there is not enough power to confirm all three requests. Choose which two matter most.',
     storyLine: 'An earthquake hit the Quetta fault and a solar storm crippled your battery. You cannot answer all three requests. Decide who gets the evidence.',
+    cardLine: 'An earthquake and a weak battery: you cannot answer everyone. Choose who gets help.',
     budget: {
       ...MISSION_BUDGET,
       initialPower: 42,
