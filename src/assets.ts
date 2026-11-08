@@ -1,8 +1,8 @@
 /**
  * ORBIT ZERO: THE LAST DOWNLINK
  * Canonical IWSDK 1.0.1 Asset Manifest (Evaluated in both runtime and editor realms).
- * Includes real NASA 3U CubeSat GLB spacecraft, NASA Blue Marble 2K Earth textures,
- * procedural hard-surface console/globe/hardware prototypes, and spatial UIKitML panels.
+ * NASA Blue Marble 2K Earth textures, procedural console/globe/CubeSat/hardware models, and spatial
+ * UIKitML panels. No GLB model is loaded in the headset scene.
  */
 
 import { AssetType, defineAssets } from '@iwsdk/core';
@@ -31,12 +31,6 @@ export default defineAssets({
   'orbital-console': createOrbitalConsoleAsset(),
   'earth-globe': createEarthGlobeAsset(),
   'nasa-cubesat': createOrbitZeroCubeSatAsset(),
-  'nasa-acrimsat': {
-    url: publicAssetUrl('assets/models/nasa_acrimsat.glb'),
-    type: AssetType.GLTF,
-    priority: 'critical',
-    name: 'NASA AcrimSAT Spacecraft',
-  },
   'earth-albedo-tex': {
     url: publicAssetUrl('assets/textures/earth_atmos_2048.jpg'),
     type: AssetType.Texture,
