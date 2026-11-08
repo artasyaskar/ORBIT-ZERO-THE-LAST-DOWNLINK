@@ -22,6 +22,7 @@ import {
   InstancedMesh,
   Light,
   Line,
+  Matrix4,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
@@ -69,7 +70,7 @@ import { TutorialEngine } from '../mission/tutorialEngine';
 import { describeMissionPlan, getMissionBenchmark, getNextPlanAction, getQueueSchedule, solveMission } from '../mission/missionPlanner';
 import { SolverMemo } from '../mission/solverMemo';
 import { coveredRequestIds, formatClock, getNextStep, isPassStalled } from '../mission/guidance';
-import { SceneObjectCache } from './sceneObjectCache';
+import { NamedChildCache, SceneObjectCache } from './sceneObjectCache';
 import { clipText, retryGuidanceFor } from '../ui/debriefText';
 import { DELIBERATE_SCANNER_PRESS_RADIUS_M, SCANNER_TARGET_ID, isStrayScannerGrab, pressOwner } from './scannerArbitration';
 import { GLOBE_CARD_SCALE, IMMERSIVE_PANEL_POSES, MISSION_HUD_POSES, type PanelPose } from '../ui/spatialLayout';
@@ -264,6 +265,21 @@ export class MissionControlSystem extends createSystem({
   private tempVec = new Vector3();
   private tempObj = new Object3D();
   private hasHiddenParkedPads = false;
+  private static readonly CUBE_COMPRESSED_SCALE = new Vector3(0.72, 0.72, 0.72);
+  private static readonly CUBE_FULL_SCALE = new Vector3(1, 1, 1);
+  private static readonly RETICLE_AXIS = new Vector3(0, 0, 1);
+  private static readonly RIGHT_AXIS = new Vector3(1, 0, 0);
+  /** Panels farther than this from a hand cannot have a button within its 14 cm touch reach. */
+  private static readonly PANEL_TOUCH_SCAN_RADIUS_M = 0.9;
+  private readonly tempVecB = new Vector3();
+  private readonly tempVecC = new Vector3();
+  private readonly tempQuatA = new Quaternion();
+  private readonly tempQuatB = new Quaternion();
+  /** Globe world matrix the sector beacons were last placed for; skips re-placing them when unchanged. */
+  private readonly beaconGlobeMatrix = new Matrix4();
+  private beaconsPlaced: Object3D | null = null;
+  /** Last values written to the desk gauges; instance colours are only rewritten when one changes. */
+  private gaugeKey = -1;
   private static readonly GAUGE_COLOR_UNLIT = new Color(0x1e293b);
   private static readonly GAUGE_COLOR_CYAN = new Color(0x38bdf8);
   private static readonly GAUGE_COLOR_AMBER = new Color(0xf59e0b);
@@ -338,6 +354,11 @@ export class MissionControlSystem extends createSystem({
       object.userData.iwsdkSceneNodeId === id &&
       (object.userData.iwsdkSceneLevelId == null || object.userData.iwsdkSceneLevelId === this.world.activeLevelId),
   });
+  /** Cached `root.getObjectByName(name)` for lookups made every frame (see NamedChildCache). */
+  private readonly namedChildren = new NamedChildCache();
+  private childByName<T extends Object3D = Object3D>(root: Object3D | null | undefined, name: string): T | undefined {
+    return this.namedChildren.get<T>(root, name);
+  }
   private sceneObject<T extends Object3D = Object3D>(id: string): T | undefined {
     return this.sceneLookups.get<T>(id);
   }
@@ -581,6 +602,12 @@ export class MissionControlSystem extends createSystem({
     for (const pad of LASER_PADS) {
       this.bindLaserTarget(this.sceneObject(pad.id), pad.id, () => this.pressPadByHand(pad.id, pad.action));
     }
+    // Pointer hit-testing walks every descendant of an interactable entity, for every hand pointer, every
+    // frame, hidden or not. The ARIA hologram has 44 parts (most are hidden proxies) and each cube 14, so
+    // each is hit-tested through one representative mesh instead: ARIA's portrait plate (what the laser
+    // aims at) and the cube's acrylic shell (the box around its core). Events still bubble to the entity.
+    this.limitPointerHitTest(this.sceneObject('avatar-aria'), 'AriaPortraitPlate');
+    for (const cubeEntity of this.queries.cubes.entities) this.limitPointerHitTest(cubeEntity.object3D, 'CubeAcrylicShell');
 
     // 3. Subscribe to 3D Evidence Cube activations (poke/click selects cube)
     this.queries.cubeActivated.subscribe('qualify', (entity) => {
@@ -1322,7 +1349,7 @@ export class MissionControlSystem extends createSystem({
     const intervention = this.coPilot.update(delta);
     const gaugesAsset = this.sceneObject('desk-gauges');
     if (gaugesAsset) {
-      const beaconCap = gaugesAsset.getObjectByName('AriaBeaconCap');
+      const beaconCap = this.childByName(gaugesAsset, 'AriaBeaconCap');
       if (beaconCap && beaconCap instanceof Mesh && beaconCap.material instanceof MeshStandardMaterial) {
         if (intervention) {
           const pulse = 1.0 + 0.65 * Math.sin(this.elapsedTime * 9.0);
@@ -1404,16 +1431,17 @@ export class MissionControlSystem extends createSystem({
       let closestGazedSector: SectorId | null = null;
       let minAngle = 0.22; // ~12.6 degrees cone
 
+      let gazedEntity: Entity | null = null;
       for (const sectorEntity of this.queries.sectors.entities) {
         const sObj = sectorEntity.object3D;
         if (!sObj || !isVisible(sObj)) continue;
         sObj.updateWorldMatrix(true, false);
-        const sPos = new Vector3().setFromMatrixPosition(sObj.matrixWorld);
-        const toSector = sPos.sub(headPos).normalize();
+        const toSector = this.tempVecB.setFromMatrixPosition(sObj.matrixWorld).sub(headPos).normalize();
         const angle = headDir.angleTo(toSector);
         if (angle < minAngle) {
           minAngle = angle;
           closestGazedSector = (sectorEntity.getValue(OrbitSectorNode, 'sectorId') || 'B') as SectorId;
+          gazedEntity = sectorEntity;
         }
       }
 
@@ -1426,14 +1454,11 @@ export class MissionControlSystem extends createSystem({
           this.gazeDwellSec += delta;
           if (this.profile.preferences.oneHanded) {
             const dwellProgress = Math.min(1, this.gazeDwellSec / 1.35);
-            const sectorEntity = [...this.queries.sectors.entities].find(
-              (e) => (e.getValue(OrbitSectorNode, 'sectorId') || 'B') === closestGazedSector
-            );
-            if (sectorEntity?.object3D) {
+            if (gazedEntity?.object3D) {
               const isSelected = closestGazedSector === this.engine.getState().selectedSectorId;
               const baseScale = isSelected ? 1.32 : 1.18;
               const dwellScale = baseScale + dwellProgress * 0.16;
-              sectorEntity.object3D.scale.set(dwellScale, dwellScale, dwellScale);
+              gazedEntity.object3D.scale.set(dwellScale, dwellScale, dwellScale);
             }
           }
           if (this.profile.preferences.oneHanded && this.gazeDwellSec >= 1.35) {
@@ -1455,12 +1480,12 @@ export class MissionControlSystem extends createSystem({
     }
 
     // Phase 3: Tactile 3D button mechanical spring-loaded depression & recoil physics (-12mm travel)
-    const vibratingDesk = this.sceneObject('orbital-console')?.getObjectByName('ConsoleDeskAssembly');
+    const vibratingDesk = this.childByName(this.sceneObject('orbital-console'), 'ConsoleDeskAssembly');
     if (vibratingDesk) vibratingDesk.position.x = 0;
     for (const [padId, timer] of this.padPressTimers.entries()) {
       const newTimer = Math.max(0, timer - delta);
       const padObj = this.sceneObject(padId);
-      const cap = padObj?.getObjectByName('PadIlluminatedCap');
+      const cap = this.childByName(padObj, 'PadIlluminatedCap');
       const stroke = padId === 'pad-fire-swath' ? 0.012 : 0.009; // -12mm stroke for plunger, -9mm for pads
       if (cap) {
         // Spring back to the cap's authored height. A fixed 0.016 left pad caps 1 cm above their socket
@@ -1488,22 +1513,19 @@ export class MissionControlSystem extends createSystem({
     }
 
     // Phase 3 SPRINT 3: Data Cube Internal State Visuals & Compression Animation
-    for (const pkt of this.frameSnapshot.packets) {
-      const cubeEntity = [...this.queries.cubes.entities].find((e) =>
-        e.getValue(EvidenceCubeNode, 'packetId') === pkt.id
-      );
-      if (cubeEntity?.object3D) {
-        const cubeRoot = cubeEntity.object3D;
-
-        // Animate 30% compression shrink when processed in cradle (4.5s -> 1.8s transmission)
-        if (!this.cubeInteractions.isHeld(cubeRoot)) {
-          if (pkt.processed && !pkt.queued) {
-            const compressionProgress = Math.min(1, this.elapsedTime * 1.8);
-            cubeRoot.scale.lerp(new Vector3(0.72, 0.72, 0.72), compressionProgress * 0.4);
-          } else {
-            cubeRoot.scale.lerp(new Vector3(1, 1, 1), 0.2);
-          }
-        }
+    // One pass over the (at most three) cube entities; no array copies or new vectors per frame.
+    for (const cubeEntity of this.queries.cubes.entities) {
+      const cubeRoot = cubeEntity.object3D;
+      const packetId = cubeEntity.getValue(EvidenceCubeNode, 'packetId');
+      if (!cubeRoot || !packetId) continue;
+      const pkt = this.frameSnapshot.packets.find((p) => p.id === packetId);
+      // Animate 30% compression shrink when processed in cradle (4.5s -> 1.8s transmission)
+      if (!pkt || this.cubeInteractions.isHeld(cubeRoot)) continue;
+      if (pkt.processed && !pkt.queued) {
+        const compressionProgress = Math.min(1, this.elapsedTime * 1.8);
+        cubeRoot.scale.lerp(MissionControlSystem.CUBE_COMPRESSED_SCALE, compressionProgress * 0.4);
+      } else {
+        cubeRoot.scale.lerp(MissionControlSystem.CUBE_FULL_SCALE, 0.2);
       }
     }
 
@@ -1517,57 +1539,64 @@ export class MissionControlSystem extends createSystem({
       const cRed = MissionControlSystem.GAUGE_COLOR_RED;
       const mats = deskGauges.userData.materials;
 
-      // 1. Battery Gauge (10 segments into 1 InstancedMesh)
-      const battInst = deskGauges.getObjectByName('BatteryGaugeInstanced');
       // Gauges are scaled to this scenario's budget (battery, memory, window), not to fixed numbers.
       const battFrac = state.power / Math.max(1, state.maxPower);
       const litBattSegs = Math.max(0, Math.min(10, Math.ceil(battFrac * 10)));
+      const litStorageSegs = Math.max(0, Math.min(9, Math.ceil((state.storageUsed / Math.max(1, state.maxStorage)) * 9)));
+      let totalTxSec = 0;
+      for (const p of state.packets) if (state.queuePacketIds.includes(p.id)) totalTxSec += p.transmitSec;
+      const isOverflow = totalTxSec > state.downlinkWindowSec;
+      const litWinSegs = Math.max(0, Math.min(10, Math.ceil((totalTxSec / Math.max(0.1, state.downlinkWindowSec)) * 10)));
+      const flashRed = isOverflow && Math.sin(this.elapsedTime * 14) > 0;
+      // The segment colours depend only on these five values: rewrite (and re-upload) them only when one changes.
+      const battTone = battFrac > 0.8 ? 0 : battFrac >= 0.36 ? 1 : 2;
+      const winTone = flashRed ? 2 : totalTxSec <= 0.8 * state.downlinkWindowSec ? 0 : 1;
+      const gaugeKey = litBattSegs + 11 * (battTone + 3 * (litStorageSegs + 10 * (litWinSegs + 11 * winTone)));
+      const gaugesChanged = gaugeKey !== this.gaugeKey;
+      this.gaugeKey = gaugeKey;
+
+      // 1. Battery Gauge (10 segments into 1 InstancedMesh)
+      const battInst = gaugesChanged ? this.childByName(deskGauges, 'BatteryGaugeInstanced') : undefined;
       if (battInst instanceof InstancedMesh) {
         const battColor = battFrac > 0.8 ? cCyan : battFrac >= 0.36 ? cAmber : cRed;
         for (let i = 0; i < 10; i++) {
           battInst.setColorAt(i, i < litBattSegs ? battColor : cUnlit);
         }
         if (battInst.instanceColor) battInst.instanceColor.needsUpdate = true;
-      } else if (mats) {
+      } else if (mats && gaugesChanged) {
         const battMat = battFrac > 0.8 ? mats.cyan : battFrac >= 0.36 ? mats.amber : mats.red;
         for (let i = 0; i < 10; i++) {
-          const seg = deskGauges.getObjectByName(`GaugeBattSeg_${i}`);
+          const seg = this.childByName(deskGauges, `GaugeBattSeg_${i}`);
           if (seg instanceof Mesh) seg.material = i < litBattSegs ? battMat : mats.unlit;
         }
       }
 
       // 2. Solid-State Storage Buffer Gauge (9 segments into 1 InstancedMesh)
-      const storageInst = deskGauges.getObjectByName('StorageGaugeInstanced');
-      const litStorageSegs = Math.max(0, Math.min(9, Math.ceil((state.storageUsed / Math.max(1, state.maxStorage)) * 9)));
+      const storageInst = gaugesChanged ? this.childByName(deskGauges, 'StorageGaugeInstanced') : undefined;
       if (storageInst instanceof InstancedMesh) {
         for (let i = 0; i < 9; i++) {
           storageInst.setColorAt(i, i < litStorageSegs ? cAmber : cUnlit);
         }
         if (storageInst.instanceColor) storageInst.instanceColor.needsUpdate = true;
-      } else if (mats) {
+      } else if (mats && gaugesChanged) {
         for (let i = 0; i < 9; i++) {
-          const seg = deskGauges.getObjectByName(`GaugeStorageSeg_${i}`);
+          const seg = this.childByName(deskGauges, `GaugeStorageSeg_${i}`);
           if (seg instanceof Mesh) seg.material = i < litStorageSegs ? mats.amber : mats.unlit;
         }
       }
 
       // 3. Karachi Contact Window Gauge (10 segments into 1 InstancedMesh)
-      const windowInst = deskGauges.getObjectByName('WindowGaugeInstanced');
-      const queuedPackets = state.packets.filter((p) => state.queuePacketIds.includes(p.id));
-      const totalTxSec = queuedPackets.reduce((acc, p) => acc + p.transmitSec, 0);
-      const isOverflow = totalTxSec > state.downlinkWindowSec;
-      const litWinSegs = Math.max(0, Math.min(10, Math.ceil((totalTxSec / Math.max(0.1, state.downlinkWindowSec)) * 10)));
-      const flashRed = isOverflow && Math.sin(this.elapsedTime * 14) > 0;
+      const windowInst = gaugesChanged ? this.childByName(deskGauges, 'WindowGaugeInstanced') : undefined;
       if (windowInst instanceof InstancedMesh) {
         const winColor = flashRed ? cRed : totalTxSec <= 0.8 * state.downlinkWindowSec ? cCyan : cAmber;
         for (let i = 0; i < 10; i++) {
           windowInst.setColorAt(i, i < litWinSegs ? winColor : cUnlit);
         }
         if (windowInst.instanceColor) windowInst.instanceColor.needsUpdate = true;
-      } else if (mats) {
+      } else if (mats && gaugesChanged) {
         const winMat = flashRed ? mats.red : totalTxSec <= 0.8 * state.downlinkWindowSec ? mats.cyan : mats.amber;
         for (let i = 0; i < 10; i++) {
-          const seg = deskGauges.getObjectByName(`GaugeWindowSeg_${i}`);
+          const seg = this.childByName(deskGauges, `GaugeWindowSeg_${i}`);
           if (seg instanceof Mesh) seg.material = i < litWinSegs ? winMat : mats.unlit;
         }
       }
@@ -1576,7 +1605,7 @@ export class MissionControlSystem extends createSystem({
     // Phase 3: Swath Plunger Safety Guard Ring Pulse
     const plunger = this.sceneObject('pad-fire-swath');
     if (plunger && this.frameSnapshot) {
-      const guardRing = plunger.getObjectByName('PlungerGuardRing');
+      const guardRing = this.childByName(plunger, 'PlungerGuardRing');
       if (guardRing instanceof Mesh && guardRing.material instanceof MeshStandardMaterial) {
         const hasTarget = Boolean(this.frameSnapshot.selectedSectorId);
         guardRing.material.emissiveIntensity = hasTarget ? 0.75 + 0.35 * Math.sin(this.elapsedTime * 4) : 0.2;
@@ -1586,12 +1615,12 @@ export class MissionControlSystem extends createSystem({
     // Phase 4: Dynamic 5Hz pulse on radar multipath backscatter spikes & highway route pulse
     for (const cubeEntity of this.queries.cubes.entities) {
       const obj = cubeEntity.object3D;
-      const spikes = obj?.getObjectByName('CubeRadarSpikes');
+      const spikes = this.childByName(obj, 'CubeRadarSpikes');
       if (spikes && spikes.visible) {
         const pulse = 1.0 + 0.35 * Math.sin(this.elapsedTime * 31.4); // 5Hz pulse
         spikes.scale.set(1, pulse, 1);
       }
-      const hVec = obj?.getObjectByName('CubeHighwayVector');
+      const hVec = this.childByName(obj, 'CubeHighwayVector');
       if (hVec instanceof Mesh && hVec.visible && hVec.material instanceof MeshStandardMaterial) {
         hVec.material.emissiveIntensity = 1.25 + 0.35 * Math.sin(this.elapsedTime * 4.0);
       }
@@ -1600,18 +1629,18 @@ export class MissionControlSystem extends createSystem({
     const orbitalConsole = this.sceneObject('orbital-console');
     if (orbitalConsole) {
       // Phase 1: 2,500 Starfield Scintillation & Cosmic Drift
-      const starfield = orbitalConsole.getObjectByName('CupolaStarfieldDome');
+      const starfield = this.childByName(orbitalConsole, 'CupolaStarfieldDome');
       if (starfield instanceof Points && starfield.material instanceof PointsMaterial) {
         starfield.rotation.y += (reducedMotion ? 0 : delta) * 0.0012;
         starfield.material.opacity = 0.90 + 0.07 * Math.sin(this.elapsedTime * 2.5);
       }
       // Circular Holographic War Table Radar Sweep Blade
-      const sweepBlade = orbitalConsole.getObjectByName('TacticalRadarSweepBlade');
+      const sweepBlade = this.childByName(orbitalConsole, 'TacticalRadarSweepBlade');
       if (sweepBlade) {
         sweepBlade.rotation.z += (reducedMotion ? 0 : delta) * 0.95;
       }
       // Floating 3D Flood Inundation Hologram (Subtle hover & pulse)
-      const floodHolo = orbitalConsole.getObjectByName('FloodInundationHoloRelief');
+      const floodHolo = this.childByName(orbitalConsole, 'FloodInundationHoloRelief');
       if (floodHolo) {
         floodHolo.position.y = 0.24 + Math.sin(this.elapsedTime * 2.0) * 0.008;
       }
@@ -1622,8 +1651,8 @@ export class MissionControlSystem extends createSystem({
     const avatarObj = this.sceneObject('avatar-aria');
     if (avatarObj && this.voiceCommander) {
       const metrics = this.voiceCommander.getAvatarMetrics(delta);
-      const core = avatarObj.getObjectByName('AriaCore');
-      const emitter = avatarObj.getObjectByName('AriaEmitter');
+      const core = this.childByName(avatarObj, 'AriaCore');
+      const emitter = this.childByName(avatarObj, 'AriaEmitter');
 
       if (core) {
         core.rotation.y += (reducedMotion ? 0 : delta) * (metrics.isSpeaking ? 1.8 : 0.45);
@@ -1636,9 +1665,9 @@ export class MissionControlSystem extends createSystem({
       }
 
       // Animate 3D Audio Spectrum Waveform bars beside ARIA's head (Concept Image 1 Match - InstancedMesh)
-      const waveformObj = avatarObj.getObjectByName('AriaWaveform3D');
+      const waveformObj = this.childByName(avatarObj, 'AriaWaveform3D');
       if (waveformObj) {
-        const instancedBars = waveformObj.getObjectByName('AriaWaveformInstancedBars');
+        const instancedBars = this.childByName(waveformObj, 'AriaWaveformInstancedBars');
         if (instancedBars instanceof InstancedMesh) {
           for (let i = 0; i < 20; i++) {
             const baseH = 0.016 + 0.052 * Math.sin((i / 19) * Math.PI);
@@ -1655,7 +1684,7 @@ export class MissionControlSystem extends createSystem({
           instancedBars.instanceMatrix.needsUpdate = true;
         } else {
           for (let i = 0; i < 18; i++) {
-            const bar = waveformObj.getObjectByName(`AriaWaveBar_${i}`);
+            const bar = this.childByName(waveformObj, `AriaWaveBar_${i}`);
             if (bar) {
               const wave = metrics.isSpeaking
                 ? 0.4 + 0.6 * Math.abs(Math.sin(this.elapsedTime * 14 + i * 0.85)) * metrics.intensity
@@ -1679,11 +1708,9 @@ export class MissionControlSystem extends createSystem({
         }
       } else if (this.globeAngularVelocity.lengthSq() > 0.000001) {
         this.globeAngularVelocity.multiplyScalar(0.92);
-        const qYaw = new Quaternion().setFromAxisAngle(this.worldUp, this.globeAngularVelocity.x);
-        const rightAxis = new Vector3(1, 0, 0);
-        const qPitch = new Quaternion().setFromAxisAngle(rightAxis, this.globeAngularVelocity.y);
-        const qDelta = new Quaternion().multiplyQuaternions(qYaw, qPitch);
-        globe.quaternion.premultiply(qDelta);
+        const qYaw = this.tempQuatA.setFromAxisAngle(this.worldUp, this.globeAngularVelocity.x);
+        const qPitch = this.tempQuatB.setFromAxisAngle(MissionControlSystem.RIGHT_AXIS, this.globeAngularVelocity.y);
+        globe.quaternion.premultiply(qYaw.multiply(qPitch));
       }
 
       // Phase 1: Smooth Focal Zoom Distance Interpolation
@@ -1693,44 +1720,32 @@ export class MissionControlSystem extends createSystem({
       }
 
       // VR-BUG-02 Fix: Keep all 6 interactive sector beacons (sector-a..f) locked to Earth Globe rotation & zoom
-      globe.updateMatrixWorld(true);
-      for (const sectorEntity of this.queries.sectors.entities) {
-        const sObj = sectorEntity.object3D;
-        if (!sObj || !isVisible(sObj)) continue;
-        const sId = (sectorEntity.getValue(OrbitSectorNode, 'sectorId') || 'B') as SectorId;
-        const sDef = SECTOR_GEO_DEFINITIONS[sId];
-        if (!sDef) continue;
-        const localPos = latLonToGlobePoint(sDef.centerLatLon[0], sDef.centerLatLon[1], GLOBE_RADIUS * 1.002);
-        const worldPos = localPos.clone().applyMatrix4(globe.matrixWorld);
-        sObj.position.copy(worldPos);
-        const worldNormal = localPos.clone().normalize().applyQuaternion(globe.quaternion).normalize();
-        sObj.quaternion.setFromUnitVectors(this.worldUp, worldNormal);
-      }
-      const cloudSphere = globe.getObjectByName('GlobeCloudSphere');
+      this.syncGlobeSectorBeaconPositions();
+      const cloudSphere = this.childByName(globe, 'GlobeCloudSphere');
       if (cloudSphere) {
         cloudSphere.rotation.y += (reducedMotion ? 0 : delta) * 0.018;
       }
-      const ring = globe.getObjectByName('EquatorTelemetryRing');
+      const ring = this.childByName(globe, 'EquatorTelemetryRing');
       if (ring) {
         ring.rotation.z += (reducedMotion ? 0 : delta) * 0.14;
       }
-      const outerBand = globe.getObjectByName('OuterAzimuthRingGroup');
+      const outerBand = this.childByName(globe, 'OuterAzimuthRingGroup');
       if (outerBand) {
         outerBand.rotation.z -= (reducedMotion ? 0 : delta) * 0.09;
       }
       // Glowing atmosphere rim halo pulse
-      const atmoRim = globe.getObjectByName('GlobeAtmosphereRim');
+      const atmoRim = this.childByName(globe, 'GlobeAtmosphereRim');
       if (atmoRim instanceof Mesh && atmoRim.material instanceof MeshBasicMaterial) {
         atmoRim.material.opacity = 0.20 + 0.08 * Math.sin(this.elapsedTime * 2.2);
       }
-      const horizonHalo = globe.getObjectByName('GlobeHorizonHalo');
+      const horizonHalo = this.childByName(globe, 'GlobeHorizonHalo');
       if (horizonHalo instanceof Mesh && horizonHalo.material instanceof MeshBasicMaterial) {
         horizonHalo.material.opacity = 0.28 + 0.06 * Math.sin(this.elapsedTime * 1.8);
       }
 
       // Dynamic breathing pulse on active target sector ribbon
       const selectedId = this.engine.getState().selectedSectorId;
-      const selectedRibbon = globe.getObjectByName(`SectorPoly_${selectedId}`);
+      const selectedRibbon = this.childByName(globe, `SectorPoly_${selectedId}`);
       if (
         selectedRibbon instanceof Mesh &&
         selectedRibbon.material instanceof MeshStandardMaterial
@@ -1740,7 +1755,7 @@ export class MissionControlSystem extends createSystem({
       }
 
       // Update & animate cinematic targeting reticle on globe surface (Concept Image 2)
-      const activeReticle = globe.getObjectByName('ActiveSectorReticleGroup');
+      const activeReticle = this.childByName(globe, 'ActiveSectorReticleGroup');
       if (activeReticle) {
         const hasSelected = this.desktopControls?.hasSelectedSector() ?? true;
         activeReticle.visible = hasSelected;
@@ -1751,10 +1766,11 @@ export class MissionControlSystem extends createSystem({
               sectorDef.centerLatLon[0],
               sectorDef.centerLatLon[1],
               GLOBE_RADIUS * 1.018,
+              this.tempVecB,
             );
             activeReticle.position.copy(reticlePos);
-            const normal = reticlePos.clone().normalize();
-            activeReticle.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), normal);
+            const normal = reticlePos.normalize();
+            activeReticle.quaternion.setFromUnitVectors(MissionControlSystem.RETICLE_AXIS, normal);
             const pulseScale = 1.0 + 0.06 * Math.sin(this.elapsedTime * 4.0);
             activeReticle.scale.set(pulseScale, pulseScale, pulseScale);
           }
@@ -1762,7 +1778,7 @@ export class MissionControlSystem extends createSystem({
       }
 
       // Animate Sub-Satellite Nadir Pip gliding along ground track over the Indus Basin
-      const nadirPip = globe.getObjectByName('SubSatelliteNadirPip');
+      const nadirPip = this.childByName(globe, 'SubSatelliteNadirPip');
       if (nadirPip) {
         const cycleProgress = (this.elapsedTime * 0.045) % 1.0;
         const currentPhase = this.engine.getState().phase;
@@ -1804,7 +1820,7 @@ export class MissionControlSystem extends createSystem({
       }
 
       // Dynamic 3D Volumetric Orbital Observation Swath Cone (pulses from CubeSat down to target sector)
-      const swathCone = globe.getObjectByName('OrbitalScanSwathCone');
+      const swathCone = this.childByName(globe, 'OrbitalScanSwathCone');
       if (
         swathCone instanceof Mesh &&
         swathCone.material instanceof MeshBasicMaterial
@@ -1813,14 +1829,14 @@ export class MissionControlSystem extends createSystem({
         const activeSectorId = this.scanBeamPulseTimer > 0 ? this.scanBeamSectorId : this.engine.getState().selectedSectorId;
         const sectorDef = SECTOR_GEO_DEFINITIONS[activeSectorId];
 
-        if (cubesat && sectorDef) {
-          const satWorld = new Vector3();
-          cubesat.getWorldPosition(satWorld);
-          const pSatLocal = globe.worldToLocal(satWorld);
+        // The cone is only drawn during the 0.85 s scan pulse, so it is only aimed then.
+        if (cubesat && sectorDef && this.scanBeamPulseTimer > 0) {
+          const pSatLocal = globe.worldToLocal(cubesat.getWorldPosition(this.tempVecB));
           const pSectorLocal = latLonToGlobePoint(
             sectorDef.centerLatLon[0],
             sectorDef.centerLatLon[1],
             GLOBE_RADIUS,
+            this.tempVecC,
           );
           const len = alignSpan(swathCone, pSatLocal, pSectorLocal);
           swathCone.scale.set(1, len, 1);
@@ -1855,11 +1871,11 @@ export class MissionControlSystem extends createSystem({
       this.initSpacecraftTelemetryLEDs(cubesat);
 
       // Spacecraft Avionics Bus Telemetry Indicators
-      const attitudeLock = cubesat.getObjectByName('AdcsAttitudeLockLED');
+      const attitudeLock = this.childByName(cubesat, 'AdcsAttitudeLockLED');
       if (attitudeLock instanceof Mesh && attitudeLock.material instanceof MeshStandardMaterial) {
         attitudeLock.material.emissiveIntensity = 0.8 + 0.2 * Math.sin(this.elapsedTime * 2.0);
       }
-      const epsHeartbeat = cubesat.getObjectByName('PowerTelemetryHeartbeatLED');
+      const epsHeartbeat = this.childByName(cubesat, 'PowerTelemetryHeartbeatLED');
       if (epsHeartbeat instanceof Mesh && epsHeartbeat.material instanceof MeshStandardMaterial) {
         const isLowPower = this.frameSnapshot.power < 15;
         epsHeartbeat.material.color.setHex(isLowPower ? 0xf59e0b : 0x38bdf8);
@@ -1893,7 +1909,7 @@ export class MissionControlSystem extends createSystem({
       const currentPhase = this.frameSnapshot.phase;
       const scannerEntity = this.scannerEntity ??= [...this.queries.controls.entities].find((e) => e.getValue(ConsoleControlNode, 'action') === 'SCAN');
       const isGrabbed = currentPhase === 'OPERATIONS' && (scannerEntity?.hasComponent(Grabbed) ?? false);
-      const aimLaser = scannerObj.getObjectByName('ScannerAimLaser');
+      const aimLaser = this.childByName(scannerObj, 'ScannerAimLaser');
       if (
         aimLaser instanceof Mesh &&
         aimLaser.material instanceof MeshBasicMaterial
@@ -1940,10 +1956,10 @@ export class MissionControlSystem extends createSystem({
       this.cradlePulseTimer = Math.max(0, this.cradlePulseTimer - delta);
       const consoleObj = this.sceneObject('orbital-console');
       if (consoleObj) {
-        const clampLeft = consoleObj.getObjectByName('CradleClampLeft');
-        const clampRight = consoleObj.getObjectByName('CradleClampRight');
-        const cradleCore = consoleObj.getObjectByName('ProcessingCradleCore');
-        const ring = consoleObj.getObjectByName('CradleInductionRing');
+        const clampLeft = this.childByName(consoleObj, 'CradleClampLeft');
+        const clampRight = this.childByName(consoleObj, 'CradleClampRight');
+        const cradleCore = this.childByName(consoleObj, 'ProcessingCradleCore');
+        const ring = this.childByName(consoleObj, 'CradleInductionRing');
         const progress = 1.0 - this.cradlePulseTimer / 0.65;
         const squeeze = reducedMotion ? 0 : Math.sin(progress * Math.PI); // 0 -> 1 -> 0
 
@@ -2082,7 +2098,7 @@ export class MissionControlSystem extends createSystem({
     // Live S-Band Microwave Uplink Beam, Traveling Data Pulse Rings & Transmitting Cube Levitation
     const consoleObj = this.sceneObject('orbital-console');
     if (consoleObj) {
-      const uplinkBeam = consoleObj.getObjectByName('DownlinkUplinkBeam');
+      const uplinkBeam = this.childByName(consoleObj, 'DownlinkUplinkBeam');
       if (
         uplinkBeam instanceof Mesh &&
         uplinkBeam.material instanceof MeshBasicMaterial
@@ -2094,7 +2110,7 @@ export class MissionControlSystem extends createSystem({
           const pA = this.beamStart;
           const pB = this.beamEnd;
           for (let i = 0; i < 3; i++) {
-            const ring = consoleObj.getObjectByName(`DownlinkPulseRing_${i + 1}`);
+            const ring = this.childByName(consoleObj, `DownlinkPulseRing_${i + 1}`);
             if (
               ring instanceof Mesh &&
               ring.material instanceof MeshBasicMaterial
@@ -2122,7 +2138,7 @@ export class MissionControlSystem extends createSystem({
               if (basePos) {
                 setWorldPosition(obj, basePos.add(new Vector3(0, reducedMotion ? 0 : 0.018, 0)));
                 obj.rotation.y += reducedMotion ? 0 : delta * 3.5;
-                const particles = obj.getObjectByName('CubeAssemblyParticles');
+                const particles = this.childByName(obj, 'CubeAssemblyParticles');
                 if (particles instanceof Points && particles.material instanceof PointsMaterial) {
                   particles.visible = !reducedMotion;
                   particles.rotation.y += delta * 4.0;
@@ -2137,16 +2153,15 @@ export class MissionControlSystem extends createSystem({
           const globe = this.sceneObject('earth-globe');
           const cubesat = this.sceneObject('cubesat-spacecraft');
           if (globe && cubesat) {
-            const downlinkLaserGroup = globe.getObjectByName('DownlinkLaserBeamGroup');
-            const karachiTerminal = globe.getObjectByName('KarachiGroundStation');
+            const downlinkLaserGroup = this.childByName(globe, 'DownlinkLaserBeamGroup');
+            const karachiTerminal = this.childByName(globe, 'KarachiGroundStation');
             if (downlinkLaserGroup && karachiTerminal) {
               downlinkLaserGroup.visible = true;
-              const satWorld = cubesat.getWorldPosition(new Vector3());
-              const pSatLocal = globe.worldToLocal(satWorld);
+              const pSatLocal = globe.worldToLocal(cubesat.getWorldPosition(this.tempVecB));
               const pKarachiLocal = karachiTerminal.position;
 
-              const laserCore = downlinkLaserGroup.getObjectByName('DownlinkLaserCore');
-              const laserSheath = downlinkLaserGroup.getObjectByName('DownlinkLaserSheath');
+              const laserCore = this.childByName(downlinkLaserGroup, 'DownlinkLaserCore');
+              const laserSheath = this.childByName(downlinkLaserGroup, 'DownlinkLaserSheath');
 
               if (laserCore instanceof Mesh && laserCore.material instanceof MeshBasicMaterial) {
                 laserCore.visible = true;
@@ -2166,7 +2181,7 @@ export class MissionControlSystem extends createSystem({
               cubesat.lookAt(karachiWorld);
 
               // Pulsing Karachi demodulation footprint shockwave
-              const shockwave = karachiTerminal.getObjectByName('KarachiDishShockwave');
+              const shockwave = this.childByName(karachiTerminal, 'KarachiDishShockwave');
               if (shockwave instanceof Mesh && shockwave.material instanceof MeshBasicMaterial) {
                 shockwave.visible = true;
                 const swT = (this.elapsedTime * 3.2) % 1.0;
@@ -2184,7 +2199,7 @@ export class MissionControlSystem extends createSystem({
           uplinkBeam.visible = false;
           uplinkBeam.material.opacity = 0.0;
           for (let i = 0; i < 3; i++) {
-            const ring = consoleObj.getObjectByName(`DownlinkPulseRing_${i + 1}`);
+            const ring = this.childByName(consoleObj, `DownlinkPulseRing_${i + 1}`);
             if (
               ring instanceof Mesh &&
               ring.material instanceof MeshBasicMaterial
@@ -2195,16 +2210,16 @@ export class MissionControlSystem extends createSystem({
           }
           const globe = this.sceneObject('earth-globe');
           if (globe) {
-            const downlinkLaserGroup = globe.getObjectByName('DownlinkLaserBeamGroup');
+            const downlinkLaserGroup = this.childByName(globe, 'DownlinkLaserBeamGroup');
             if (downlinkLaserGroup) {
               downlinkLaserGroup.visible = false;
-              const laserCore = downlinkLaserGroup.getObjectByName('DownlinkLaserCore');
+              const laserCore = this.childByName(downlinkLaserGroup, 'DownlinkLaserCore');
               if (laserCore) laserCore.visible = false;
-              const laserSheath = downlinkLaserGroup.getObjectByName('DownlinkLaserSheath');
+              const laserSheath = this.childByName(downlinkLaserGroup, 'DownlinkLaserSheath');
               if (laserSheath) laserSheath.visible = false;
             }
-            const karachiTerminal = globe.getObjectByName('KarachiGroundStation');
-            const shockwave = karachiTerminal?.getObjectByName('KarachiDishShockwave');
+            const karachiTerminal = this.childByName(globe, 'KarachiGroundStation');
+            const shockwave = this.childByName(karachiTerminal, 'KarachiDishShockwave');
             if (shockwave) shockwave.visible = false;
           }
         }
@@ -2675,28 +2690,28 @@ export class MissionControlSystem extends createSystem({
     ];
   }
 
+  /**
+   * Pins the six sector beacons to their lat/lon on the globe. It ran up to three times a frame (frame
+   * update plus once per hand), each time forcing a matrix update of the whole globe subtree. The beacons
+   * only move when the globe's world matrix moves (desktop spin, focal zoom), so it now places them only
+   * then. Only the globe and its ancestors are updated for the check, not its children.
+   */
   private syncGlobeSectorBeaconPositions(): void {
     const globe = this.sceneObject('earth-globe');
     if (!globe) return;
-    globe.updateMatrixWorld(true);
+    globe.updateWorldMatrix(true, false);
+    if (this.beaconsPlaced === globe && globe.matrixWorld.equals(this.beaconGlobeMatrix)) return;
+    this.beaconGlobeMatrix.copy(globe.matrixWorld);
+    this.beaconsPlaced = globe;
     for (const sectorEntity of this.queries.sectors.entities) {
       const sObj = sectorEntity.object3D;
-      if (!sObj || !isVisible(sObj)) continue;
+      if (!sObj) continue;
       const sId = (sectorEntity.getValue(OrbitSectorNode, 'sectorId') || 'B') as SectorId;
       const sDef = SECTOR_GEO_DEFINITIONS[sId];
       if (!sDef) continue;
-      const localPos = latLonToGlobePoint(
-        sDef.centerLatLon[0],
-        sDef.centerLatLon[1],
-        GLOBE_RADIUS * 1.002,
-      );
-      const worldPos = localPos.clone().applyMatrix4(globe.matrixWorld);
-      sObj.position.copy(worldPos);
-      const worldNormal = localPos
-        .clone()
-        .normalize()
-        .applyQuaternion(globe.quaternion)
-        .normalize();
+      const localPos = latLonToGlobePoint(sDef.centerLatLon[0], sDef.centerLatLon[1], GLOBE_RADIUS * 1.002, this.tempVecB);
+      sObj.position.copy(this.tempVecC.copy(localPos).applyMatrix4(globe.matrixWorld));
+      const worldNormal = localPos.normalize().applyQuaternion(globe.quaternion).normalize();
       sObj.quaternion.setFromUnitVectors(this.worldUp, worldNormal);
       sObj.updateMatrixWorld(true);
     }
@@ -2912,7 +2927,21 @@ export class MissionControlSystem extends createSystem({
       { panelId: 'mission-hud', buttonId: 'Btn_HudNext' },
       { panelId: 'telemetry-hud', buttonId: 'Btn_RelaxedClock' },
     ];
+    // Every button lookup forces a matrix update of its whole UIKit panel. This runs for both hands every
+    // frame, and a seated player's hands are about a metre from the panels, so a panel is skipped unless the
+    // hand is within PANEL_TOUCH_SCAN_RADIUS_M of its centre (larger than any panel's half-diagonal + 14 cm).
+    const panelInReach = new Map<string, boolean>();
+    const reachRadius = MissionControlSystem.PANEL_TOUCH_SCAN_RADIUS_M;
     for (const pb of panelButtons) {
+      let inReach = panelInReach.get(pb.panelId);
+      if (inReach === undefined) {
+        const panel = this.sceneObject(pb.panelId);
+        const centre = panel && panel.visible ? panel.getWorldPosition(this.tempVecB) : null;
+        inReach = Boolean(centre) &&
+          Math.min(sample.indexTip.distanceTo(centre!), sample.graspPoint.distanceTo(centre!)) <= reachRadius;
+        panelInReach.set(pb.panelId, inReach);
+      }
+      if (!inReach) continue;
       const btnPos = this.getSpatialButtonWorldPosition(pb.panelId, pb.buttonId);
       if (!btnPos) continue;
       const effectiveDist = Math.min(
@@ -3662,19 +3691,35 @@ export class MissionControlSystem extends createSystem({
       // side panel is the cube inspector (with pause and settings), and only while cubes are being worked on.
       // Card, live window and result own the view on their own; the briefing panel duplicates the HUD.
       const playing = phase === 'OPERATIONS' && this.missionHudMode() === 'play';
-      if (this.briefingPanel) this.briefingPanel.visible = false;
-      if (this.telemetryPanel) this.telemetryPanel.visible = playing;
-      if (this.debriefPanel) this.debriefPanel.visible = false;
+      this.setPanelShown(this.briefingPanel, false);
+      this.setPanelShown(this.telemetryPanel, playing);
+      this.setPanelShown(this.debriefPanel, false);
     } else {
-      if (this.briefingPanel) this.briefingPanel.visible = show && !isDebrief;
-      if (this.telemetryPanel) this.telemetryPanel.visible = show && !isDebrief;
-      if (this.debriefPanel) this.debriefPanel.visible = isDebrief;
+      this.setPanelShown(this.briefingPanel, show && !isDebrief);
+      this.setPanelShown(this.telemetryPanel, show && !isDebrief);
+      this.setPanelShown(this.debriefPanel, isDebrief);
     }
     // The forward Mission HUD exists only in a live immersive session; on flat screens the DOM HUD
     // shows the same content (shared models in src/ui/hudText.ts).
-    if (this.missionHud) {
-      this.missionHud.visible = Boolean(this.world.renderer.xr.isPresenting);
-    }
+    this.setPanelShown(this.missionHud, Boolean(this.world.renderer.xr.isPresenting));
+  }
+
+  /**
+   * Shows or hides a spatial panel. A hidden panel also leaves pointer hit-testing: @pmndrs/pointer-events
+   * tests invisible objects too, so a hidden panel cost ray and sphere tests for every hand pointer every
+   * frame and could catch a laser aimed through the empty space where it sits.
+   */
+  private setPanelShown(panel: Object3D | null | undefined, shown: boolean): void {
+    if (!panel) return;
+    panel.visible = shown;
+    (panel as Object3D & { intersectChildren?: boolean }).intersectChildren = shown ? undefined : false;
+  }
+
+  /** Pointer hit-tests of `root` visit only the named mesh (see the note where it is called). */
+  private limitPointerHitTest(root: Object3D | null | undefined, meshName: string): void {
+    const target = root?.getObjectByName(meshName);
+    if (!root || !(target instanceof Mesh)) return;
+    (root as Object3D & { interactableDescendants?: Object3D[] }).interactableDescendants = [target];
   }
 
   /** Which mode the forward headset HUD is in for the current state. */

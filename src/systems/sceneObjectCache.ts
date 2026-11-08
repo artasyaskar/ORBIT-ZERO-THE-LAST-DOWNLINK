@@ -69,3 +69,42 @@ export class SceneObjectCache {
     return attached && (this.options.isCurrent ? this.options.isCurrent(id, object) : true);
   }
 }
+
+/**
+ * Memoizes `root.getObjectByName(name)` for lookups made every frame (each one is a depth-first search
+ * of the subtree). A hit is returned only while the cached child is still a descendant of `root` and
+ * still carries `name`; otherwise it is re-resolved. Misses are never cached, so a child that is added
+ * later (for example LEDs attached after a static merge) is found on the next call.
+ */
+export class NamedChildCache {
+  private readonly byRoot = new WeakMap<Object3D, Map<string, Object3D>>();
+  public readonly stats = { hits: 0, resolved: 0, notFound: 0, invalidated: 0 };
+
+  get<T extends Object3D = Object3D>(root: Object3D | null | undefined, name: string): T | undefined {
+    if (!root) return undefined;
+    let entries = this.byRoot.get(root);
+    const cached = entries?.get(name);
+    if (cached) {
+      if (cached.name === name && isDescendantOf(cached, root)) {
+        this.stats.hits++;
+        return cached as T;
+      }
+      entries!.delete(name);
+      this.stats.invalidated++;
+    }
+    const found = root.getObjectByName(name);
+    if (!found) {
+      this.stats.notFound++;
+      return undefined;
+    }
+    if (!entries) this.byRoot.set(root, (entries = new Map()));
+    entries.set(name, found);
+    this.stats.resolved++;
+    return found as T;
+  }
+}
+
+function isDescendantOf(object: Object3D, root: Object3D): boolean {
+  for (let p: Object3D | null = object; p; p = p.parent) if (p === root) return true;
+  return false;
+}

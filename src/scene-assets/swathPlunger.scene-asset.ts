@@ -7,7 +7,7 @@
  * - Heavy-duty safety guard ring (PlungerGuardRing) preventing accidental triggers
  * - Spring-loaded cylindrical plunger cap (PadIlluminatedCap) with -12mm physical stroke
  * - Damped mechanical oscillation and micro-switch click audio
- * - Full WebXR PokeInteractable and desktop RayInteractable support (Zero Keyboard Needed)
+ * - Hand laser (IWSDK RayInteractable) and near pinch in WebXR, mouse on desktop (zero keyboard needed)
  */
 
 import {

@@ -129,20 +129,28 @@ export function alignSpan(
   object: Object3D,
   a: Vector3,
   b: Vector3,
-  upHint = new Vector3(0, 0, 1),
+  upHint: Vector3 = SPAN_DEFAULT_UP,
 ): number {
-  const dir = b.clone().sub(a);
+  // Scratch objects instead of clones: the downlink beams re-aim with this every frame of the live window.
+  const dir = SPAN_DIR.copy(b).sub(a);
   const length = dir.length();
   if (length < 1e-6) { return 0; }
-  const y = dir.clone().normalize();
-  const hint =
-    Math.abs(upHint.dot(y)) > 0.98 ? new Vector3(1, 0, 0) : upHint.clone();
-  const x = hint.clone().cross(y).normalize();
-  const z = x.clone().cross(y).normalize();
-  object.quaternion.setFromRotationMatrix(new Matrix4().makeBasis(x, y, z));
+  const y = SPAN_Y.copy(dir).normalize();
+  const hint = Math.abs(upHint.dot(y)) > 0.98 ? SPAN_FALLBACK_UP : upHint;
+  const x = SPAN_X.copy(hint).cross(y).normalize();
+  const z = SPAN_Z.copy(x).cross(y).normalize();
+  object.quaternion.setFromRotationMatrix(SPAN_BASIS.makeBasis(x, y, z));
   object.position.copy(a).addScaledVector(dir, 0.5);
   return length;
 }
+
+const SPAN_DEFAULT_UP = new Vector3(0, 0, 1);
+const SPAN_FALLBACK_UP = new Vector3(1, 0, 0);
+const SPAN_DIR = new Vector3();
+const SPAN_X = new Vector3();
+const SPAN_Y = new Vector3();
+const SPAN_Z = new Vector3();
+const SPAN_BASIS = new Matrix4();
 
 /* ------------------------------------------------------------------ *
  * Winding / mirroring

@@ -5,7 +5,7 @@ import { getRecommendedSensor } from '../src/mission/missionConfig';
 import { getMissionBenchmark, solveMission } from '../src/mission/missionPlanner';
 import { SolverMemo, solverCacheKey } from '../src/mission/solverMemo';
 import { generateProceduralCrisis } from '../src/mission/proceduralCrisis';
-import { SceneObjectCache } from '../src/systems/sceneObjectCache';
+import { NamedChildCache, SceneObjectCache } from '../src/systems/sceneObjectCache';
 import type { MissionScenarioId } from '../src/mission/types';
 
 /** Builds a tiny scene whose nodes carry IWSDK-style ids, plus a resolver that walks it. */
@@ -122,6 +122,62 @@ describe('SceneObjectCache correctness', () => {
     const cache = new SceneObjectCache({ root: () => undefined, resolve: () => new Object3D() });
     const first = cache.get('x');
     expect(cache.get('x')).not.toBe(first);
+  });
+});
+
+describe('NamedChildCache correctness (per-frame child lookups)', () => {
+  const tree = () => {
+    const root = new Group();
+    const mid = new Group();
+    const leaf = new Object3D();
+    leaf.name = 'SweepBlade';
+    mid.add(leaf);
+    root.add(mid);
+    return { root, mid, leaf };
+  };
+
+  it('returns what getObjectByName returns, and serves repeats from the cache', () => {
+    const { root, leaf } = tree();
+    const cache = new NamedChildCache();
+    expect(cache.get(root, 'SweepBlade')).toBe(leaf);
+    expect(cache.get(root, 'SweepBlade')).toBe(leaf);
+    expect(cache.stats).toMatchObject({ resolved: 1, hits: 1 });
+  });
+
+  it('drops a child that was removed from the subtree or renamed', () => {
+    const { root, mid, leaf } = tree();
+    const cache = new NamedChildCache();
+    cache.get(root, 'SweepBlade');
+    mid.remove(leaf);
+    expect(cache.get(root, 'SweepBlade')).toBeUndefined();
+    mid.add(leaf);
+    expect(cache.get(root, 'SweepBlade')).toBe(leaf);
+    leaf.name = 'Renamed';
+    expect(cache.get(root, 'SweepBlade')).toBeUndefined();
+  });
+
+  it('follows a replacement child with the same name', () => {
+    const { root, mid, leaf } = tree();
+    const cache = new NamedChildCache();
+    cache.get(root, 'SweepBlade');
+    mid.remove(leaf);
+    const replacement = new Object3D();
+    replacement.name = 'SweepBlade';
+    root.add(replacement);
+    expect(cache.get(root, 'SweepBlade')).toBe(replacement);
+  });
+
+  it('never caches misses (children attached later are found) and keeps roots apart', () => {
+    const { root } = tree();
+    const other = new Group();
+    const cache = new NamedChildCache();
+    expect(cache.get(root, 'Late')).toBeUndefined();
+    const late = new Object3D();
+    late.name = 'Late';
+    root.add(late);
+    expect(cache.get(root, 'Late')).toBe(late);
+    expect(cache.get(other, 'Late')).toBeUndefined();
+    expect(cache.get(undefined, 'Late')).toBeUndefined();
   });
 });
 

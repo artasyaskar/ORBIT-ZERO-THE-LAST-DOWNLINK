@@ -53,7 +53,9 @@ export async function launchApp({ skipLanding = false, viewport = { width: 1440,
     });
   });
   const url = `https://localhost:${port}/`;
-  const preview = spawn(process.execPath, [vite, 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
+  // ORBIT_PREVIEW_OUTDIR serves another build (e.g. an unminified profiling build) instead of dist/.
+  const outDirArgs = process.env.ORBIT_PREVIEW_OUTDIR ? ['--outDir', process.env.ORBIT_PREVIEW_OUTDIR] : [];
+  const preview = spawn(process.execPath, [vite, 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort', ...outDirArgs], {
     cwd: root,
     stdio: 'pipe',
   });

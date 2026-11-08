@@ -727,8 +727,7 @@
         "scale": 0.098
       },
       "components": {
-        "RayInteractable": {},
-        "PokeInteractable": {}
+        "RayInteractable": {}
       }
     },
     {
@@ -752,8 +751,7 @@
         "scale": 0.100
       },
       "components": {
-        "RayInteractable": {},
-        "PokeInteractable": {}
+        "RayInteractable": {}
       }
     },
     {
@@ -777,8 +775,7 @@
         "scale": 0.098
       },
       "components": {
-        "RayInteractable": {},
-        "PokeInteractable": {}
+        "RayInteractable": {}
       }
     },
     {
@@ -802,8 +799,7 @@
         "scale": 0.105
       },
       "components": {
-        "RayInteractable": {},
-        "PokeInteractable": {}
+        "RayInteractable": {}
       }
     }
   ]
