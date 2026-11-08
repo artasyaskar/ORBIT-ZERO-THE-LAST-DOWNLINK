@@ -103,7 +103,7 @@ export function getNextStep(state: MissionState, custom?: MissionScenarioConfig 
   }
 
   if (state.paused) {
-    return { title: 'PAUSED', body: 'The pass clock is held. Resume when ready.', tone: 'info', desktop: 'Esc = resume', hands: 'Poke PAUSE again to resume' };
+    return { title: 'PAUSED', body: 'The pass clock is held. Resume when ready.', tone: 'info', desktop: 'Esc = resume', hands: 'Point at RESUME PASS below and pinch' };
   }
 
   if (state.phase === 'DOWNLINK') {

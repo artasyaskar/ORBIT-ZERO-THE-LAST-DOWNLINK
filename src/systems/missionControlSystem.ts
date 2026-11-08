@@ -20,6 +20,7 @@ import {
   GrabSystem,
   InputSystem,
   InstancedMesh,
+  Light,
   Line,
   Mesh,
   MeshBasicMaterial,
@@ -70,7 +71,7 @@ import { SolverMemo } from '../mission/solverMemo';
 import { coveredRequestIds, formatClock, getNextStep, isPassStalled } from '../mission/guidance';
 import { SceneObjectCache } from './sceneObjectCache';
 import { clipText, retryGuidanceFor } from '../ui/debriefText';
-import { isStrayScannerGrab, pressOwner } from './scannerArbitration';
+import { SCANNER_TARGET_ID, isStrayScannerGrab, pressOwner } from './scannerArbitration';
 import { GLOBE_CARD_SCALE, IMMERSIVE_PANEL_POSES, MISSION_HUD_POSES, type PanelPose } from '../ui/spatialLayout';
 import { animateWeather, applyWeather, createWeatherFx } from './sectorWeatherFx';
 import { paintSensorView } from '../ui/sensorViewPainter';
@@ -104,6 +105,24 @@ const DOWNLINK_BAY_POSITIONS: [number, number, number][] = [
 const STANDBY_CUBE_COLORS = [0x38bdf8, 0x38bdf8, 0xf59e0b];
 
 const SCANNER_HOME_POSITION = new Vector3(-0.44, 0.80, -0.30);
+/**
+ * Longest simulation step per frame. A stalled frame (headset off, GC pause, tab sleep) must not
+ * eat the pass clock or the live downlink window in one jump.
+ */
+const MAX_SIMULATION_STEP_SEC = 0.1;
+/** A second click on the same UIKit element inside this window is the other input path of the same pinch. */
+const UI_CLICK_SAME_PINCH_MS = 1500;
+/** Both the custom hand path and IWSDK's pointer can select a sector on one pinch; select once. */
+const SECTOR_SELECT_DEDUPE_MS = 600;
+/** Object3D as seen by IWSDK's pointer events (@pmndrs/pointer-events dispatches on scene objects). */
+interface PointerEventTarget {
+  addEventListener(type: 'pointerdown', listener: (event: { pointerType?: string }) => void): void;
+  removeEventListener(type: 'pointerdown', listener: (event: { pointerType?: string }) => void): void;
+}
+/** Scanner sensor aperture in the tool's local frame (see createScannerToolAsset). */
+const SCANNER_APERTURE_LOCAL = new Vector3(0, 0.092, -0.075);
+/** A released scanner retargets only when its aperture is this close to a beacon. */
+const SCANNER_SECTOR_SNAP_M = 0.06;
 /** Debrief panel elements that only matter before downlink; hidden once results are shown. */
 /** Second-pinch window for in-world paid hints (see handleAriaDelegate). */
 const HINT_CONFIRM_WINDOW_MS = 3000;
@@ -215,6 +234,14 @@ export class MissionControlSystem extends createSystem({
   private caption = '';
   /** performance.now() deadline for the second pinch that confirms a paid in-world hint (0 = not armed). */
   private hintArmedUntilMs = 0;
+  /** UIKit element the custom hand path clicked on the current pinch (IWSDK's duplicate click is dropped). */
+  private customUiClick: { id: string; until: number } | null = null;
+  /** Last sector selection, so one pinch seen by two input paths selects (and announces) once. */
+  private lastSectorSelect: { id: SectorId | null; at: number } = { id: null, at: -Infinity };
+  /** XR presentation state the desk pads were last synced for (null = never). */
+  private deskPadsPresenting: boolean | null = null;
+  private moodLightCache: Light[] | null = null;
+  private baseEnvironmentIntensity?: number;
   /**
    * `world.getSceneObject(id)` walks the whole level tree on every call, and the per-frame update
    * and hand-interaction paths call it dozens of times. Lookups go through a revalidating cache:
@@ -443,9 +470,27 @@ export class MissionControlSystem extends createSystem({
       const src = this.world.renderer.xr.isPresenting ? 'xr-hand' : 'desktop';
       this.withInputSource(src, () => {
         this.tutorial.notifySectorPointed(sectorId, src);
-        this.handleSelectSector(sectorId);
+        this.selectSectorOnce(sectorId);
       });
     });
+
+    // 2b. With tracked hands, the visible IWSDK hand ray (point at a beacon, pinch) also selects a sector.
+    // Ray only: a fingertip brushing a beacon (IWSDK's touch pointer) must never retarget the next scan.
+    // selectSectorOnce() drops the duplicate when the custom joint path selects the same sector on this pinch.
+    for (const sectorEntity of this.queries.sectors.entities) {
+      const beacon = sectorEntity.object3D as unknown as PointerEventTarget | undefined;
+      if (!beacon) continue;
+      const sectorId = (sectorEntity.getValue(OrbitSectorNode, 'sectorId') || 'B') as SectorId;
+      const onRayDown = (event: { pointerType?: string }) => {
+        if (event.pointerType !== 'ray' || !this.isLiveXRHandActive() || this.isAnyObjectGrabbed()) return;
+        this.withInputSource('xr-hand', () => {
+          this.tutorial.notifySectorPointed(sectorId, 'xr-hand');
+          this.selectSectorOnce(sectorId);
+        });
+      };
+      beacon.addEventListener('pointerdown', onRayDown);
+      this.cleanupFuncs.push(() => beacon.removeEventListener('pointerdown', onRayDown));
+    }
 
     // 3. Subscribe to 3D Evidence Cube activations (poke/click selects cube)
     this.queries.cubeActivated.subscribe('qualify', (entity) => {
@@ -1096,12 +1141,16 @@ export class MissionControlSystem extends createSystem({
       this.hintArmedUntilMs = 0; // armed hint expired unspent: restore the HUD label
       this.syncMissionHud();
     }
-    this.syncDeskPadsForXR(this.world.renderer.xr.isPresenting);
+    const presenting = this.world.renderer.xr.isPresenting;
+    if (presenting !== this.deskPadsPresenting) {
+      this.deskPadsPresenting = presenting;
+      this.syncDeskPadsForXR(presenting);
+    }
     this.updateXRHandInteractions(delta);
     this.updateMissionHudPose(Math.min(Math.max(0, delta), 0.1));
     this.frameSnapshot = this.engine.getState();
     if (this.frameSnapshot.paused) return;
-    const simulationDelta = Math.max(0, delta);
+    const simulationDelta = Math.min(Math.max(0, delta), MAX_SIMULATION_STEP_SEC);
     if (this.frameSnapshot.phase !== 'DEBRIEF') this.missionElapsedTime += simulationDelta;
     delta = Math.min(simulationDelta, 0.1);
     const reducedMotion = this.profile.preferences.reducedMotion;
@@ -1133,8 +1182,9 @@ export class MissionControlSystem extends createSystem({
       }
     }
 
-    // Phase 5: In-Engine VR Hand & Ergonomic Simulator
-    if (this.frameSnapshot && this.frameSnapshot.phase === 'OPERATIONS') {
+    // Phase 5: In-Engine VR Hand & Ergonomic Simulator (desktop demo aid). The solver call below serializes
+    // the whole mission state, so it only runs while the simulator is switched on.
+    if (this.vrHandSimulator.isActive() && this.frameSnapshot.phase === 'OPERATIONS') {
       const solution = this.getSolution(this.frameSnapshot);
       const next = getNextPlanAction(this.frameSnapshot, solution);
       if (next) {
@@ -1290,24 +1340,7 @@ export class MissionControlSystem extends createSystem({
       if (cubeEntity?.object3D) {
         const cubeRoot = cubeEntity.object3D;
 
-        // Update cube internal glow based on confidence state
-        let cubeGlowColor = 0xffffff;
-        if (pkt.confidence === 'CONFIRMED') {
-          cubeGlowColor = 0x00ff66; // Emerald glow
-        } else if (pkt.confidence === 'PROBABLE') {
-          cubeGlowColor = pkt.sensorMode === 'RADAR' ? 0xffb800 : 0xff2a54; // Amber/crimson glitch
-        } else if (pkt.confidence === 'UNVERIFIED') {
-          cubeGlowColor = 0xc0c0c0; // Dimmed gray
-        }
-
-        const glowCore = cubeRoot.getObjectByName('CubeGlowCore');
-        if (glowCore && glowCore instanceof Mesh && glowCore.material instanceof MeshStandardMaterial) {
-          glowCore.material.emissive.setHex(cubeGlowColor);
-          glowCore.material.emissiveIntensity = pkt.confidence === 'PROBABLE' ?
-            0.8 + 0.4 * Math.sin(this.elapsedTime * 6) : 1.2; // Pulsing for PROBABLE
-        }
-
-        // Animate 30% compression shrink when processed in cradle (4.5s â†’ 1.8s transmission)
+        // Animate 30% compression shrink when processed in cradle (4.5s -> 1.8s transmission)
         if (!this.cubeInteractions.isHeld(cubeRoot)) {
           if (pkt.processed && !pkt.queued) {
             const compressionProgress = Math.min(1, this.elapsedTime * 1.8);
@@ -1411,10 +1444,6 @@ export class MissionControlSystem extends createSystem({
 
     const orbitalConsole = this.sceneObject('orbital-console');
     if (orbitalConsole) {
-      const skyDome = orbitalConsole.getObjectByName('MilkyWayCosmicDome');
-      if (skyDome) {
-        skyDome.rotation.y += (reducedMotion ? 0 : delta) * 0.0018;
-      }
       // Phase 1: 2,500 Starfield Scintillation & Cosmic Drift
       const starfield = orbitalConsole.getObjectByName('CupolaStarfieldDome');
       if (starfield instanceof Points && starfield.material instanceof PointsMaterial) {
@@ -1439,9 +1468,6 @@ export class MissionControlSystem extends createSystem({
     if (avatarObj && this.voiceCommander) {
       const metrics = this.voiceCommander.getAvatarMetrics(delta);
       const core = avatarObj.getObjectByName('AriaCore');
-      const ring1 = avatarObj.getObjectByName('AriaRing1');
-      const ring2 = avatarObj.getObjectByName('AriaRing2');
-      const ring3 = avatarObj.getObjectByName('AriaRing3');
       const emitter = avatarObj.getObjectByName('AriaEmitter');
 
       if (core) {
@@ -1449,22 +1475,6 @@ export class MissionControlSystem extends createSystem({
         core.rotation.x += (reducedMotion ? 0 : delta) * (metrics.isSpeaking ? 1.2 : 0.25);
         const s = metrics.coreScale;
         core.scale.set(s, s, s);
-      }
-
-      const ringMult = metrics.ringSpeedMultiplier;
-      const exp = 1.0 + metrics.ringExpansion;
-
-      if (ring1) {
-        ring1.rotation.z += (reducedMotion ? 0 : delta) * 0.85 * ringMult;
-        ring1.scale.set(exp, exp, exp);
-      }
-      if (ring2) {
-        ring2.rotation.y += (reducedMotion ? 0 : delta) * 1.15 * ringMult;
-        ring2.scale.set(exp, exp, exp);
-      }
-      if (ring3) {
-        ring3.rotation.x += (reducedMotion ? 0 : delta) * 0.95 * ringMult;
-        ring3.scale.set(exp, exp, exp);
       }
       if (emitter instanceof Mesh && emitter.material instanceof MeshStandardMaterial) {
         emitter.material.emissiveIntensity = 0.9 + (metrics.isSpeaking ? 0.8 * metrics.intensity : 0.12 * Math.sin(this.elapsedTime * 3));
@@ -1815,13 +1825,19 @@ export class MissionControlSystem extends createSystem({
     }
 
     // Live-window mood: the cockpit dims during the downlink so the beam and the countdown own the scene.
+    // It dims the key and fill lights that light every surface (the holo-table point light is off in XR).
+    // Intensity is a uniform, so this never recompiles shaders.
     const mood = this.frameSnapshot.phase === 'DOWNLINK' ? 0.45 : 1;
-    const holoLight = this.sceneObject('orbital-console')?.getObjectByName('HoloTableProjectorLight') as (Object3D & { intensity?: number }) | undefined;
-    if (holoLight && typeof holoLight.intensity === 'number') {
-      holoLight.userData.baseIntensity ??= holoLight.intensity;
-      const targetI = (holoLight.userData.baseIntensity as number) * mood;
-      holoLight.intensity += (targetI - holoLight.intensity) * Math.min(1, delta * 4);
+    const moodStep = Math.min(1, delta * 4);
+    for (const light of this.moodLights()) {
+      light.userData.baseIntensity ??= light.intensity;
+      const targetI = (light.userData.baseIntensity as number) * mood;
+      light.intensity += (targetI - light.intensity) * moodStep;
     }
+    // Most cockpit surfaces are lit by the IWSDK image-based environment, not by the analytic lights.
+    this.baseEnvironmentIntensity ??= this.scene.environmentIntensity;
+    const targetEnv = this.baseEnvironmentIntensity * (mood < 1 ? 0.25 : 1);
+    this.scene.environmentIntensity += (targetEnv - this.scene.environmentIntensity) * moodStep;
 
     // Orbital pass clock: runs during OPERATIONS after the first scan; at zero the window opens itself.
     if (
@@ -2087,15 +2103,10 @@ export class MissionControlSystem extends createSystem({
     const normalTex = AssetManager.getTexture('earth-normal-tex');
     const specTex = AssetManager.getTexture('earth-specular-tex');
     const cloudsTex = AssetManager.getTexture('earth-clouds-tex');
-    const nightTex = AssetManager.getTexture('earth-night-tex');
 
     if (albedoTex) {
       albedoTex.colorSpace = SRGBColorSpace;
       albedoTex.needsUpdate = true;
-    }
-    if (nightTex) {
-      nightTex.colorSpace = SRGBColorSpace;
-      nightTex.needsUpdate = true;
     }
     if (cloudsTex) {
       cloudsTex.colorSpace = SRGBColorSpace;
@@ -2146,19 +2157,6 @@ export class MissionControlSystem extends createSystem({
   private bindCosmicEnvironmentAndTextures(): void {
     const consoleObj = this.sceneObject('orbital-console');
     if (!consoleObj) return;
-
-    const milkyWayTex = AssetManager.getTexture('milky-way-tex');
-    const skyDome = consoleObj.getObjectByName('MilkyWayCosmicDome');
-    if (skyDome instanceof Mesh && skyDome.material instanceof MeshBasicMaterial) {
-      if (milkyWayTex) {
-        milkyWayTex.colorSpace = SRGBColorSpace;
-        milkyWayTex.needsUpdate = true;
-        skyDome.material.map = milkyWayTex;
-        skyDome.material.color.setHex(0x223555);
-        skyDome.material.opacity = 0.42;
-        skyDome.material.needsUpdate = true;
-      }
-    }
 
     const earthAlbedoTex = AssetManager.getTexture('earth-albedo-tex');
     const earthNormalTex = AssetManager.getTexture('earth-normal-tex');
@@ -2868,16 +2866,25 @@ export class MissionControlSystem extends createSystem({
       this.boundXRSession = null;
       this.syncAll();
     };
+    // Quest system menu (visible-blurred) or headset taken off (hidden): hand input stops, so hold the pass
+    // clock and the live window instead of letting them run out unseen. The player resumes from the HUD.
+    // This is an event, not a per-frame check: a hidden session delivers no XR frames.
+    const onVisibilityChange = () => {
+      const state = this.engine.getState();
+      if (session.visibilityState !== 'visible' && !state.paused && state.phase !== 'DEBRIEF') this.togglePause();
+    };
 
     session.addEventListener('selectstart', onSelectStart);
     session.addEventListener('selectend', onSelectEnd);
     session.addEventListener('inputsourceschange', onInputSourcesChange);
     session.addEventListener('end', onEnd);
+    session.addEventListener('visibilitychange', onVisibilityChange);
     this.cleanupFuncs.push(() => {
       session.removeEventListener('selectstart', onSelectStart);
       session.removeEventListener('selectend', onSelectEnd);
       session.removeEventListener('inputsourceschange', onInputSourcesChange);
       session.removeEventListener('end', onEnd);
+      session.removeEventListener('visibilitychange', onVisibilityChange);
     });
   }
 
@@ -2911,8 +2918,12 @@ export class MissionControlSystem extends createSystem({
     const scannerAtPress = this.sceneObject('scanner-tool');
     const scannerPos = scannerAtPress?.getWorldPosition(this.tempVec);
     const distanceToScanner = scannerPos ? Math.min(sample.graspPoint.distanceTo(scannerPos), sample.indexTip.distanceTo(scannerPos)) : null;
-    this.pressResolvedTarget.set(sample.handedness, pressOwner(resolved?.targetId, distanceToScanner));
+    const owner = pressOwner(resolved?.targetId, distanceToScanner);
+    this.pressResolvedTarget.set(sample.handedness, owner);
     if (!resolved) return;
+    // A pinch on the scanner belongs to IWSDK's OneHandGrabbable (its release fires the scan). It must never
+    // also fire the nearest pad or sector. Only a cube that is closer than the scanner can still be grabbed.
+    if (owner === SCANNER_TARGET_ID && !(resolved.targetType === 'DATA_CUBE' && resolved.distance < (distanceToScanner ?? Infinity))) return;
 
     this.withInputSource('xr-hand', () => {
       if (
@@ -2971,7 +2982,7 @@ export class MissionControlSystem extends createSystem({
       if (resolved.targetType === 'SECTOR' && resolved.sectorId) {
         if (this.isAnyObjectGrabbed()) return;
         this.tutorial.notifySectorPointed(resolved.sectorId, 'xr-hand');
-        this.handleSelectSector(resolved.sectorId);
+        this.selectSectorOnce(resolved.sectorId);
         return;
       }
 
@@ -3001,6 +3012,8 @@ export class MissionControlSystem extends createSystem({
         const panel = this.sceneObject<UIKitMLAsset>(resolved.panelId);
         const element = panel?.getElementById(resolved.buttonId);
         if (element) {
+          // IWSDK's own ray/poke pointer may click the same element when this pinch releases; drop that one.
+          this.customUiClick = { id: resolved.buttonId, until: performance.now() + UI_CLICK_SAME_PINCH_MS };
           element.dispatchEvent({ type: 'click' } as never);
         }
       }
@@ -3210,9 +3223,10 @@ export class MissionControlSystem extends createSystem({
         }
         activeGrab.lastGraspPos.copy(sample.graspPoint);
       } else {
-        // 3. Check 3D Globe Gimbal touch / rotation & Point Hover when not holding a cube
+        // 3. Check 3D Globe Gimbal touch / rotation & Point Hover when not holding a cube.
+        // A hand carrying the scanner (an IWSDK grab) must not spin the globe away from the sector it aims at.
         const distToGlobe = sample.indexTip.distanceTo(GLOBE_CENTER_WORLD);
-        if (distToGlobe <= 0.30) {
+        if (distToGlobe <= 0.30 && !this.isScannerHeldBy(side)) {
           const prevTouch = this.lastHandGlobeTouchPos.get(side);
           if (!prevTouch) {
             this.lastHandGlobeTouchPos.set(side, sample.indexTip.clone());
@@ -3301,6 +3315,12 @@ export class MissionControlSystem extends createSystem({
     }
   }
 
+  private isScannerHeldBy(side: 'left' | 'right'): boolean {
+    const scanner = (this.scannerEntity ??= [...this.queries.controls.entities].find((e) => e.getValue(ConsoleControlNode, 'action') === 'SCAN'));
+    if (!scanner?.hasComponent(Grabbed)) return false;
+    return this.world.getSystem(GrabSystem)?.getHolderHand(scanner) === side;
+  }
+
   private isLiveXRHandActive(): boolean {
     if (!this.world.renderer?.xr?.isPresenting) return false;
     return Boolean(this.lastHandConnected.left || this.lastHandConnected.right);
@@ -3387,6 +3407,11 @@ export class MissionControlSystem extends createSystem({
       el.name = id;
       const onClick = (event?: any) => {
         if (event && typeof event.pointerId === 'number') {
+          // One pinch, one click: the custom hand path already fired this element for this pinch.
+          if (this.customUiClick?.id === id && performance.now() <= this.customUiClick.until) {
+            this.customUiClick = null;
+            return;
+          }
           setTimeout(() => handler(), 0);
         } else {
           handler();
@@ -3478,6 +3503,8 @@ export class MissionControlSystem extends createSystem({
     for (const key of Object.keys(preferenceIds) as (keyof typeof preferenceIds)[]) {
       bindClick(this.telemetryPanel, `Btn_${preferenceIds[key]}`, () => this.cyclePreference(key));
     }
+    // The scanner always rests in the left holster now, so the scanner-hand toggle no longer does anything.
+    this.telemetryPanel?.getElementById('Btn_DominantHand')?.setProperties({ display: 'none' });
     this.applyAccessibility();
 
     // Debrief Panel controls
@@ -3522,13 +3549,17 @@ export class MissionControlSystem extends createSystem({
   public syncSpatialPanelsVisibility(): void {
     const isXRorIWER = Boolean((window as any).__ORBIT_IWER__) || this.world.renderer.xr.isPresenting;
     const show = isXRorIWER || this.spatialHudVisible;
-    const isDebrief = this.engine.getState().phase === 'DEBRIEF';
+    const phase = this.engine.getState().phase;
+    const isDebrief = phase === 'DEBRIEF';
+    // Headset climax: during the live window the beam, the globe, the bay and the forward countdown own the
+    // view. Everything the player can still do (dock a tray cube, close the link) is on the desk or the HUD.
+    const liveWindowInXR = phase === 'DOWNLINK' && Boolean(this.world.renderer.xr.isPresenting);
 
     if (this.briefingPanel) {
-      this.briefingPanel.visible = show && !isDebrief;
+      this.briefingPanel.visible = show && !isDebrief && !liveWindowInXR;
     }
     if (this.telemetryPanel) {
-      this.telemetryPanel.visible = show && !isDebrief;
+      this.telemetryPanel.visible = show && !isDebrief && !liveWindowInXR;
     }
     if (this.debriefPanel) {
       this.debriefPanel.visible = isDebrief;
@@ -3643,7 +3674,7 @@ export class MissionControlSystem extends createSystem({
     this.setText(hud, 'ResourceLine', `BATTERY ${state.power}/${state.maxPower} Wh  |  MEMORY ${state.storageUsed}/${state.maxStorage}  |  SEND ${state.downlinkCommittedSec.toFixed(1)}/${state.downlinkWindowSec.toFixed(1)}s`);
     this.setText(hud, 'TrackerLine', trackerText(state, custom));
     const stalled = isPassStalled(state, custom);
-    this.setText(hud, 'Lbl_HudTransmit', state.phase === 'DOWNLINK' ? 'CLOSE LINK' : stalled ? 'ABORT PASS' : `TRANSMIT (${state.queuePacketIds.length}/${this.engine.getActiveScenario().budget.maxQueueSlots} LOADED)`);
+    this.setText(hud, 'Lbl_HudTransmit', state.paused ? 'RESUME PASS' : state.phase === 'DOWNLINK' ? 'CLOSE LINK' : stalled ? 'ABORT PASS' : `TRANSMIT (${state.queuePacketIds.length}/${this.engine.getActiveScenario().budget.maxQueueSlots} LOADED)`);
     this.setText(hud, 'Lbl_HudHint', this.isHintArmed() ? `PINCH AGAIN: -${SCORING.hintPenalty} pts` : `ASK ARIA (-${SCORING.hintPenalty} pts)`);
   }
 
@@ -3726,6 +3757,29 @@ export class MissionControlSystem extends createSystem({
     this.globeTargetQuaternion.setFromUnitVectors(localSectorNormal, targetWorldDir);
     this.isSlerpingToSector = true;
     this.slerpProgress = 0.0;
+  }
+
+  /** Lights dimmed by the live-window mood, found once (key light, fill light, holo-table light). */
+  private moodLights(): Light[] {
+    if (this.moodLightCache) return this.moodLightCache;
+    const found: Light[] = [];
+    for (const id of ['key-light', 'fill-light']) {
+      this.sceneObject(id)?.traverse((object) => {
+        if (object instanceof Light) found.push(object);
+      });
+    }
+    const holo = this.sceneObject('orbital-console')?.getObjectByName('HoloTableProjectorLight');
+    if (holo instanceof Light) found.push(holo);
+    if (found.length) this.moodLightCache = found;
+    return found;
+  }
+
+  /** Hand and pointer entry point for sector selection: the custom joint path and IWSDK's ray can both see one pinch. */
+  private selectSectorOnce(sectorId: SectorId): void {
+    const now = performance.now();
+    if (this.lastSectorSelect.id === sectorId && now - this.lastSectorSelect.at < SECTOR_SELECT_DEDUPE_MS) return;
+    this.lastSectorSelect = { id: sectorId, at: now };
+    this.handleSelectSector(sectorId);
   }
 
   private handleSelectSector(sectorId: SectorId): void {
@@ -3991,6 +4045,12 @@ export class MissionControlSystem extends createSystem({
   private handleCommitDownlinkButton(): void {
     const state = this.engine.getState();
     const phase = state.phase;
+    // While paused (including the automatic pause from the Quest system menu) this is the RESUME button,
+    // so the player never has to find PAUSE on a side panel.
+    if (state.paused) {
+      this.togglePause();
+      return;
+    }
     if (phase === 'OPERATIONS') {
       if (isPassStalled(state, this.engine.getActiveCustomScenario())) {
         this.handleAbortPass();
@@ -4018,10 +4078,14 @@ export class MissionControlSystem extends createSystem({
       (this.world.renderer.xr as unknown as { setFoveation?: (v: number) => void }).setFoveation?.(immersive ? 1 : 0);
     } catch { /* foveation is optional */ }
     const consoleObj = this.sceneObject('orbital-console');
-    for (const name of ['CradleAmberLight', 'DownlinkBayBlueLight']) {
+    // All three decorative point lights: every lit fragment pays for every visible light.
+    for (const name of ['CradleAmberLight', 'DownlinkBayBlueLight', 'HoloTableProjectorLight']) {
       const light = consoleObj?.getObjectByName(name);
       if (light) light.visible = !immersive;
     }
+    // 2.88 m x 1.35 m double-sided tint at 2.4% opacity: two full-view blended layers per eye for no visible gain.
+    const canopyGlass = consoleObj?.getObjectByName('CanopyGlassGlare');
+    if (canopyGlass) canopyGlass.visible = !immersive;
   }
 
   /** Single entry point for loading an operation from any menu (desktop campaign, landing, panels). */
@@ -4173,11 +4237,9 @@ export class MissionControlSystem extends createSystem({
       });
     }
     const scanner = this.sceneObject('scanner-tool');
-    SCANNER_HOME_POSITION.x = preferences.dominantHand === 'LEFT' ? -0.44 : 0.44;
-    SCANNER_HOME_POSITION.y = 0.80;
-    SCANNER_HOME_POSITION.z = -0.30;
-    const holster = this.sceneObject('orbital-console')?.getObjectByName('ScannerHolster');
-    if (holster) holster.position.x = SCANNER_HOME_POSITION.x;
+    // The console has one scanner holster, on the left. x = +0.44 is the discard chute: a scanner parked
+    // there turned every scanner pinch into DISCARD of the selected cube.
+    SCANNER_HOME_POSITION.set(-0.44, 0.80, -0.30);
     if (scanner && !this.isAnyObjectGrabbed()) scanner.position.copy(SCANNER_HOME_POSITION);
     this.applyTabletopMode();
   }
@@ -4535,21 +4597,31 @@ export class MissionControlSystem extends createSystem({
   }
 
   private handleScannerToolReleased(entity: Entity): void {
-    if (this.suppressReleaseActions || this.engine.getState().phase !== 'OPERATIONS' || this.engine.getState().paused) return;
     const obj = entity.object3D;
     if (!obj) return;
+    const returnHome = () => {
+      obj.position.copy(SCANNER_HOME_POSITION);
+      obj.rotation.set(0, 0, 0);
+    };
+    // Released while paused, during the downlink or after the pass: no scan, but never leave the tool floating.
+    if (this.suppressReleaseActions || this.engine.getState().phase !== 'OPERATIONS' || this.engine.getState().paused) {
+      returnHome();
+      return;
+    }
 
+    // Aim from the sensor aperture (local 0, 0.092, -0.075), not the pommel origin about 10 cm back.
     obj.updateWorldMatrix(true, false);
-    this.tempVec.setFromMatrixPosition(obj.matrixWorld);
+    this.tempVec.copy(SCANNER_APERTURE_LOCAL).applyMatrix4(obj.matrixWorld);
 
+    // The six beacons sit a few centimetres apart over South Asia, so only an aperture held right on a
+    // beacon retargets. Otherwise a release over the globe fires at the target the HUD already shows.
     let closestSector: SectorId | null = null;
-    let bestDist = 0.28;
+    let bestDist = SCANNER_SECTOR_SNAP_M;
     for (const sectorEntity of this.queries.sectors.entities) {
       const sObj = sectorEntity.object3D;
       if (!sObj || !isVisible(sObj)) continue;
       sObj.updateWorldMatrix(true, false);
-      const pos = new Vector3().setFromMatrixPosition(sObj.matrixWorld);
-      const dist = this.tempVec.distanceTo(pos);
+      const dist = this.tempVec.distanceTo(this.tempTarget.setFromMatrixPosition(sObj.matrixWorld));
       if (dist < bestDist) {
         bestDist = dist;
         closestSector = (sectorEntity.getValue(OrbitSectorNode, 'sectorId') ||
@@ -4563,9 +4635,7 @@ export class MissionControlSystem extends createSystem({
     } else if (this.tempVec.distanceTo(GLOBE_CENTER_WORLD) < 0.34) {
       this.handleScan();
     }
-
-    obj.position.copy(SCANNER_HOME_POSITION);
-    obj.rotation.set(0, 0, 0);
+    returnHome();
   }
 
   private getCubeDropTargets(): CubeDropTarget[] {
@@ -4994,7 +5064,9 @@ export class MissionControlSystem extends createSystem({
     this.syncDebriefPanel();
     this.syncSpatialPanelsVisibility();
     this.syncSettings();
-    this.desktopControls?.updateHud();
+    // The desktop DOM HUD is display:none in a headset; rebuilding its innerHTML there is pure waste.
+    // syncAll() runs again on XR exit, so the DOM HUD is current when it reappears.
+    if (!this.world.renderer.xr.isPresenting) this.desktopControls?.updateHud();
   }
 
   private animateCubeTransitions(delta: number): void {

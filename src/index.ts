@@ -7,7 +7,7 @@
  * 2. Core Game Engine (Meta Immersive Web SDK 1.0.1, MissionControlSystem, spatial interactions)
  */
 
-import { GrabSystem, World } from '@iwsdk/core';
+import { GrabSystem, VisibilityState, World } from '@iwsdk/core';
 import projectOptions from 'virtual:iwsdk-project';
 import type { MissionScenarioId } from './mission/types';
 import { MissionControlSystem } from './systems/missionControlSystem';
@@ -57,15 +57,40 @@ export async function initOrbitZeroGame(
   world.registerSystem(MissionControlSystem);
 
   if (config.launchXR) {
-    try {
-      await world.launchXR();
-    } catch (err) {
-      console.warn('[ORBIT ZERO] WebXR launch failed or not supported in this session:', err);
-      showLaunchNotice('Immersive mode could not start (permission denied or unsupported). Continuing in desktop mode - hand controls need an XR session.');
-    }
+    // requestSession() needs a live user gesture. World.create() above loads every critical asset first,
+    // which can outlast Chromium's ~5 s activation window on a cold Quest cache. IWSDK's launchXR() also
+    // swallows the async rejection, so a try/catch here never fires. Ask only while the gesture is live,
+    // and offer a fresh tap target whenever no session exists shortly afterwards.
+    const activation = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation;
+    const gestureLive = activation ? activation.isActive : true;
+    if (gestureLive) world.launchXR();
+    window.setTimeout(() => {
+      if (!world.session) showEnterVrButton(world);
+    }, gestureLive ? 2500 : 0);
   }
 
   return world;
+}
+
+/** Full-width DOM button whose own click starts the immersive session (a fresh, valid user gesture). */
+function showEnterVrButton(world: World): void {
+  if (typeof document === 'undefined' || document.getElementById('oz-enter-vr-fallback')) return;
+  const button = document.createElement('button');
+  button.id = 'oz-enter-vr-fallback';
+  button.type = 'button';
+  button.textContent = 'TAP TO ENTER VR';
+  button.style.cssText = 'position:fixed;left:50%;bottom:48px;transform:translateX(-50%);z-index:99999;min-width:320px;padding:22px 36px;background:#064e3b;color:#ecfeff;border:2px solid #34d399;border-radius:14px;font:800 22px/1 system-ui,sans-serif;letter-spacing:1px;cursor:pointer;';
+  button.addEventListener('click', () => world.launchXR());
+  document.body.appendChild(button);
+  let unsubscribe: (() => void) | undefined;
+  let done = false;
+  unsubscribe = world.visibilityState.subscribe((state) => {
+    if (state === VisibilityState.NonImmersive || done) return;
+    done = true;
+    button.remove();
+    unsubscribe?.();
+  });
+  if (done) unsubscribe();
 }
 
 function showLaunchNotice(message: string): void {

@@ -37,12 +37,6 @@ export default defineAssets({
     priority: 'critical',
     name: 'NASA AcrimSAT Spacecraft',
   },
-  'milky-way-tex': {
-    url: publicAssetUrl('assets/textures/milky_way_skybox_4096.jpg'),
-    type: AssetType.Texture,
-    priority: 'critical',
-    name: 'Milky Way Deep Space Cosmic Skybox',
-  },
   'earth-albedo-tex': {
     url: publicAssetUrl('assets/textures/earth_atmos_2048.jpg'),
     type: AssetType.Texture,
@@ -66,12 +60,6 @@ export default defineAssets({
     type: AssetType.Texture,
     priority: 'critical',
     name: 'NASA Earth Cloud Cover 1K',
-  },
-  'earth-night-tex': {
-    url: publicAssetUrl('assets/textures/earth_lights_2048.png'),
-    type: AssetType.Texture,
-    priority: 'critical',
-    name: 'NASA Earth Night Lights 2K',
   },
   'sector-beacon-clear': createSectorMarkerAsset(false, 0x38bdf8),
   'sector-beacon-cloudy': createSectorMarkerAsset(true, 0xf59e0b),
