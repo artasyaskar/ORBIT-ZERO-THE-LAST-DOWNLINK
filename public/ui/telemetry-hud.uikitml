@@ -148,10 +148,10 @@
 
   <div id="TelemetryHeaderCard" class="telemetry-header">
     <div id="ResourceReadout" class="resource-row">
-      POWER: 52 / 52 Wh  |  STORAGE: 0 / 9 STR (18 MB/UNIT)
+      BATTERY -- | MEMORY --
     </div>
     <div id="WindowReadout" class="window-row">
-      DOWNLINK QUEUE: 0.0s / 10.0s (10.0 MB/s)  |  KARACHI PASS: STANDBY
+      DOWNLINK: STANDBY
     </div>
   </div>
 
@@ -164,12 +164,12 @@
     </div>
     <div id="InspectorCost" class="inspector-science" style="color: #94a3b8; font-weight: 700;">-</div>
     <div id="InspectorScience" class="inspector-science" style="height: 78px; overflow: hidden;">
-      Onboard Processing (6 Wh) compresses CONFIRMED/PROBABLE cubes: 3 STR (40-45 MB) -&gt; 1 STR (18 MB / 1.8s Tx).
+      Compress any cube with evidence to make it smaller. It cannot rescue a blocked [X] scan.
     </div>
   </div>
 
   <Button id="Btn_ProcessCube" class="action-btn">
-    <ButtonLabel id="Lbl_ProcessCube" style="color: #f59e0b; font-size: 14px; font-weight: 700;">PROCESS SELECTED CUBE (-6 Wh -&gt; 1 STR / 18 MB / 1.8s Tx)</ButtonLabel>
+    <ButtonLabel id="Lbl_ProcessCube" style="color: #f59e0b; font-size: 14px; font-weight: 700;">COMPRESS SELECTED CUBE</ButtonLabel>
   </Button>
 
   <Button id="Btn_QueueCube" class="action-btn">

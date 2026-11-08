@@ -632,7 +632,7 @@ export const MISSION_SCENARIOS: Record<MissionScenarioId, MissionScenarioConfig>
     operationCode: 'OP 02B: SUPERCELL SURGE',
     name: 'Monsoon Supercell Penetration',
     subtitle: 'Severe convective cloud wall spanning Sectors B, C, and E [SIMULATED].',
-    briefing: '[SIMULATED SCENARIO TELEMETRY] Damage-limitation mission: 54 Wh Power, 9 STR Buffer, 9.0s Downlink (10.0 MB/s). Radar sees through all three storm targets, but bridge glare prevents full certainty. Preserve the strongest evidence; 100/100 is not achievable on this pass.',
+    briefing: '[SIMULATED SCENARIO TELEMETRY] Damage-limitation mission. Radar sees through all three storm targets, but bridge glare prevents full certainty. Preserve the strongest evidence; 100/100 is not achievable on this pass.',
     budget: {
       ...MISSION_BUDGET,
       initialPower: 54,
@@ -690,7 +690,7 @@ export const MISSION_SCENARIOS: Record<MissionScenarioId, MissionScenarioConfig>
     operationCode: 'OP 02C: ECLIPSE BROWNOUT',
     name: 'Eclipse Orbit Solar Brownout',
     subtitle: 'Battery drain & degraded solid-state storage partition [SIMULATED].',
-    briefing: '[SIMULATED SCENARIO TELEMETRY] Sequence puzzle: 50 Wh Power, 6 STR Partition, 8.0s Downlink (10.0 MB/s). Tight 6-unit storage partition requires mid-pass cradle compression between scans to avoid memory exhaustion. Razor-thin 2 Wh margin. Evidence order matters as much as downlink order.',
+    briefing: '[SIMULATED SCENARIO TELEMETRY] Sequence puzzle: a tight storage partition requires mid-pass cradle compression between scans to avoid memory exhaustion. Razor-thin 2 Wh margin. Evidence order matters as much as downlink order.',
     budget: {
       ...MISSION_BUDGET,
       initialPower: 50,
@@ -1188,7 +1188,7 @@ export const MISSION_SCENARIOS: Record<MissionScenarioId, MissionScenarioConfig>
     operationCode: 'OP 03: AFTERSHOCK',
     name: 'Operation 03: Aftershock (Seismic Archive)',
     subtitle: 'Quetta Fault Seismic Crisis — Multi-Sensor Change Detection & 6-STR Buffer [SIMULATED]',
-    briefing: '[SIMULATED SCENARIO TELEMETRY] Humanitarian seismic change-detection pass: 50 Wh Power, 6 STR Partition, 9.0s Downlink.',
+    briefing: '[SIMULATED SCENARIO TELEMETRY] Humanitarian seismic change-detection pass.',
     budget: {
       ...MISSION_BUDGET,
       initialPower: 50,

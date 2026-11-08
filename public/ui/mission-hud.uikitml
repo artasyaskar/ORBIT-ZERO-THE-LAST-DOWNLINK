@@ -105,7 +105,7 @@
     <div id="StepTitle" class="hud-title">PICK A TARGET SECTOR</div>
     <div id="StepBody" class="hud-body">Point at a glowing sector and pinch.</div>
     <div id="StepHands" class="hud-hands">HANDS: point at a sector beacon and pinch</div>
-    <div id="ResourceLine" class="resource">BATTERY 52/52 Wh | MEMORY 0/9 | SEND 0.0/10.0s</div>
+    <div id="ResourceLine" class="resource">BATTERY -- | MEMORY -- | SEND --</div>
     <div id="TrackerLine" class="tracker">B NEEDED | C NEEDED | E NEEDED</div>
     <div class="row">
       <Button id="Btn_HudHint" class="big-btn" style="border-color: #a78bfa;">

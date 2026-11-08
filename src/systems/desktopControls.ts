@@ -28,7 +28,7 @@ import {
 import type { MissionEngine } from '../mission/missionEngine';
 import { CubeInteractions, cubeStationTargets, nearestCubeStation, setWorldPosition, type CubeDropTarget } from './cubeInteractions';
 import type { MissionState, SectorId, SensorMode } from '../mission/types';
-import { describeWeather, getScenarioRequests, getScenarioSector, requestValue, SCORING, SENSOR_PLAIN_GUIDE } from '../mission/missionConfig';
+import { describeWeather, DOWNLINK_THROUGHPUT_MBPS, getScenarioRequests, getScenarioSector, requestValue, SCORING, SENSOR_PLAIN_GUIDE, STORAGE_UNIT_MB } from '../mission/missionConfig';
 import { formatClock, getNextStep, isPassStalled } from '../mission/guidance';
 import { actionBarHtml, campaignHtml, debriefScoreLine, helpHtml, missionCardHtml, nextStepBannerHtml } from '../ui/desktopHudViews';
 
@@ -2352,7 +2352,7 @@ export class DesktopControlsManager {
           ${txPackets.length === 0 ? '<div style="color: #ef4444; font-style: italic;">Zero telemetry packets transmitted!</div>' : txPackets.map((p) => `
             <div style="display: flex; justify-content: space-between; color: #cbd5e1; font-size: 9px; margin-bottom: 1px;">
               <span>✓ Sector ${p.sectorId} (${p.sensorMode})</span>
-              <span style="color: #34d399;">${p.payloadMb ?? Math.round(p.transmitSec * 10)} MB (${p.storageCost} STR | ${p.transmitSec.toFixed(1)}s TX) [${p.confidence}]</span>
+              <span style="color: #34d399;">${p.payloadMb ?? Math.round(p.transmitSec * (p.throughputMbps ?? DOWNLINK_THROUGHPUT_MBPS))} MB (${p.storageCost} STR | ${p.transmitSec.toFixed(1)}s TX) [${p.confidence}]</span>
             </div>
           `).join('')}
         </div>
@@ -2361,7 +2361,7 @@ export class DesktopControlsManager {
           <div style="background: rgba(15, 23, 42, 0.85); border-left: 3px solid #ef4444; border-radius: 0 6px 6px 0; padding: 6px 8px; margin-bottom: 6px; font-size: 10px;">
             <div style="font-weight: 700; color: #ef4444; margin-bottom: 2px;">DROPPED (HORIZON CUTOFF) (${dropPackets.length}):</div>
             ${dropPackets.map((p) => `
-              <div style="color: #ef4444; font-size: 9px;">❌ Sector ${p.sectorId}: Exceeded 10.0s window cutoff!</div>
+              <div style="color: #ef4444; font-size: 9px;">❌ Sector ${p.sectorId}: Exceeded ${state.downlinkWindowSec.toFixed(1)}s window cutoff!</div>
             `).join('')}
           </div>
         ` : ''}
@@ -2574,7 +2574,7 @@ export class DesktopControlsManager {
         ${sel.headline}
       </div>
       <div style="font-size: 10px; color: #94a3b8; margin-bottom: 6px;">
-        ${sel.sectorName} | ${sel.sensorMode} | Res: ${sel.resolutionMeters}m | SNR: ${sel.snrDb} dB | Cert: <b style="color: #38bdf8;">${sel.observationConfidencePct ?? 90}%</b> | Payload: <b style="color: #34d399;">${sel.payloadMb ?? Math.round(sel.transmitSec * 10)} MB</b> (${sel.storageCost} STR, ${sel.transmitSec.toFixed(1)}s @ 10 MB/s)
+        ${sel.sectorName} | ${sel.sensorMode} | Res: ${sel.resolutionMeters}m | SNR: ${sel.snrDb} dB | Cert: <b style="color: #38bdf8;">${sel.observationConfidencePct ?? 90}%</b> | Payload: <b style="color: #34d399;">${sel.payloadMb ?? Math.round(sel.transmitSec * (sel.throughputMbps ?? DOWNLINK_THROUGHPUT_MBPS))} MB</b> (${sel.storageCost} STR, ${sel.transmitSec.toFixed(1)}s @ ${sel.throughputMbps ?? DOWNLINK_THROUGHPUT_MBPS} MB/s)
       </div>
 
       <div style="background: rgba(15, 23, 42, 0.85); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 10px;">
@@ -2639,7 +2639,7 @@ export class DesktopControlsManager {
       <div style="background: rgba(15, 23, 42, 0.85); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px;">
         <div style="display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 2px;">
           <span>Data Volume:</span>
-          <b>${sel.payloadMb ?? Math.round(sel.transmitSec * 10)} MB (${sel.storageCost} STR | ${sel.transmitSec.toFixed(1)}s TX) ${sel.processingState === 'PROCESSED' ? '<span style="color:#10b981">[COMPRESSED]</span>' : '<span style="color:#f59e0b">[RAW]</span>'}</b>
+          <b>${sel.payloadMb ?? Math.round(sel.transmitSec * (sel.throughputMbps ?? DOWNLINK_THROUGHPUT_MBPS))} MB (${sel.storageCost} STR | ${sel.transmitSec.toFixed(1)}s TX) ${sel.processingState === 'PROCESSED' ? '<span style="color:#10b981">[COMPRESSED]</span>' : '<span style="color:#f59e0b">[RAW]</span>'}</b>
         </div>
         <div style="display: flex; justify-content: space-between; font-size: 10px;">
           <span>Downlink Window:</span>
@@ -2647,7 +2647,7 @@ export class DesktopControlsManager {
         </div>
       </div>
 
-      ${isOverflow ? `<div style="font-size: 10px; color: #ef4444; font-weight: 700; margin-bottom: 4px;">⚠️ HORIZON CUTOFF: Packets beyond 10.0s will be lost! Compress in cradle [P] or unqueue to tray [U].</div>` : ''}
+      ${isOverflow ? `<div style="font-size: 10px; color: #ef4444; font-weight: 700; margin-bottom: 4px;">⚠️ HORIZON CUTOFF: Packets beyond ${state.downlinkWindowSec.toFixed(1)}s will be lost! Compress in cradle [P] or unqueue to tray [U].</div>` : ''}
 
       <div style="display: flex; justify-content: space-between; align-items: center; font-size: 9px; color: #94a3b8; margin-bottom: 4px;">
         <span>Select Telemetry Cube:</span>
@@ -2675,6 +2675,7 @@ export class DesktopControlsManager {
       const debrief = state.debrief;
       if (!debrief) return;
 
+      const reqTotal = debrief.requestsVerifiedCount + debrief.requestsPartialCount + debrief.requestsUnverifiedCount;
       const telemetryCard = `
 ORBIT ZERO — TACTICAL OPERATOR DEBRIEF
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2683,10 +2684,10 @@ ORBIT ZERO — TACTICAL OPERATOR DEBRIEF
 🛰️ OUTCOME: ${debrief.outcome ?? 'VERIFIED'} (${debrief.certification ?? 'NONE'} CERTIFICATION) [SIMULATED SCENARIO TELEMETRY]
 ⏱️ WINDOW EFFICIENCY: ${debrief.downlinkUsedSec.toFixed(1)}s / ${state.downlinkWindowSec.toFixed(1)}s (${debrief.efficiencyGrade === 'S' ? 'PERFECT' : 'MARGIN: ' + debrief.windowMarginSec.toFixed(1) + 's'})
 🔋 BATTERY USED: ${debrief.powerUsed} Wh
-📦 PACKETS: ${debrief.transmittedPacketIds.length}/3 Transmitted
-✅ VERIFIED: ${debrief.requestsVerifiedCount}/3 Ground Requests
-⚠️ PARTIAL: ${debrief.requestsPartialCount}/3 Ground Requests
-❌ MISSED: ${debrief.requestsUnverifiedCount}/3 Ground Requests
+📦 PACKETS: ${debrief.transmittedPacketIds.length}/${state.packets.length} Transmitted
+✅ VERIFIED: ${debrief.requestsVerifiedCount}/${reqTotal} Ground Requests
+⚠️ PARTIAL: ${debrief.requestsPartialCount}/${reqTotal} Ground Requests
+❌ MISSED: ${debrief.requestsUnverifiedCount}/${reqTotal} Ground Requests
 🕐 TIMESTAMP: ${new Date().toISOString()}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 `;
@@ -2724,7 +2725,7 @@ ORBIT ZERO — TACTICAL OPERATOR DEBRIEF
       </div>
       <div>Phase: <b style="color: #f8fafc">${state.phase}</b> (Paused: ${state.paused})</div>
       <div>Power: <b style="color: #38bdf8">${state.power}</b> / ${state.maxPower} PWR</div>
-      <div>Storage: <b style="color: #f59e0b">${state.storageUsed}</b> / ${state.maxStorage} STR (18 MB/STR)</div>
+      <div>Storage: <b style="color: #f59e0b">${state.storageUsed}</b> / ${state.maxStorage} STR (${STORAGE_UNIT_MB} MB/STR)</div>
       <div>Downlink: <b style="color: #34d399">${queuedSec}s</b> / ${state.downlinkWindowSec}s (Margin: ${marginSec}s)</div>
       <div style="margin: 4px 0; border-top: 1px solid #1e293b;"></div>
       <div>Target Sector: <b style="color: #38bdf8">${state.selectedSectorId}</b></div>

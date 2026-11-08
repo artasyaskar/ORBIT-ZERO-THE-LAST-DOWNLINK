@@ -114,37 +114,37 @@
   <div id="BriefingHeader" class="header-banner">
     <div id="BriefingTitle" class="title-text">ORBIT ZERO: THE LAST DOWNLINK</div>
     <div id="BriefingSubtitle" class="subtitle-text">
-      OP 01: FIRELINE (BOLAN) | 10.0s @ 10 MB/s | 18 MB/STR | 52 Wh
+      LOADING OPERATION
     </div>
   </div>
 
   <div id="Req1Card" class="req-card">
-    <div id="Req1Title" class="req-title">REQ 1: CANYON FIRELINE [CONFIRMED]</div>
+    <div id="Req1Title" class="req-title">REQ 1</div>
     <div id="Req1Status" class="req-detail" style="height: 58px; overflow: hidden;">
-      Dense Smoke over Bolan Canyon Highway -&gt; Scan SEC-B with THERMAL
+      Awaiting scan
     </div>
   </div>
 
   <div id="Req2Card" class="req-card">
-    <div id="Req2Title" class="req-title">REQ 2: VIADUCT FIREBREAK [CONFIRMED]</div>
+    <div id="Req2Title" class="req-title">REQ 2</div>
     <div id="Req2Status" class="req-detail" style="height: 58px; overflow: hidden;">
-      Clear Sky over Bolan Viaduct -&gt; Scan SEC-C with OPTICAL
+      Awaiting scan
     </div>
   </div>
 
   <div id="Req3Card" class="req-card">
-    <div id="Req3Title" class="req-title">REQ 3: RIDGE DEPOT [CONFIRMED]</div>
+    <div id="Req3Title" class="req-title">REQ 3</div>
     <div id="Req3Status" class="req-detail" style="height: 58px; overflow: hidden;">
-      Moderate Smoke over Juniper Ridge Depot -&gt; Scan SEC-E with THERMAL
+      Awaiting scan
     </div>
   </div>
 
   <div id="SelectedSectorCard" class="sector-box">
     <div id="SelectedSectorTitle" class="sector-title">
-      TARGET: SEC-B Bolan Canyon Highway (DENSE SMOKE)
+      TARGET: NONE
     </div>
     <div id="SelectedSectorDesc" class="sector-desc" style="height: 58px; overflow: hidden;">
-      Sensor: THERMAL (11 Wh, 3 STR, 42 MB / 4.2s Tx) | Penetrates biomass smoke
+      Point at a sector on the globe.
     </div>
   </div>
 
@@ -153,11 +153,11 @@
   </Button>
 
   <Button id="Btn_ToggleSensor" class="action-btn">
-    <ButtonLabel id="Lbl_ToggleSensor" style="color: #e0f2fe; font-size: 14px; font-weight: 700;">Active Sensor: RADAR (Switch OPTICAL / THERMAL / RADAR)</ButtonLabel>
+    <ButtonLabel id="Lbl_ToggleSensor" style="color: #e0f2fe; font-size: 14px; font-weight: 700;">SWITCH SENSOR</ButtonLabel>
   </Button>
 
   <Button id="Btn_ScanSector" class="action-btn">
-    <ButtonLabel id="Lbl_ScanSector" style="color: #38bdf8; font-size: 14px; font-weight: 700;">SCAN SEC-B WITH RADAR (-14 Wh)</ButtonLabel>
+    <ButtonLabel id="Lbl_ScanSector" style="color: #38bdf8; font-size: 14px; font-weight: 700;">SCAN SELECTED SECTOR</ButtonLabel>
   </Button>
 
   <div style="flex-direction: row; gap: 6px; width: 100%;">

@@ -76,6 +76,7 @@ import { animateWeather, applyWeather, createWeatherFx } from './sectorWeatherFx
 import { paintSensorView } from '../ui/sensorViewPainter';
 import { missionCardModel, resultModel, trackerText } from '../ui/hudText';
 import { SCORING } from '../mission/missionConfig';
+import { compressedSizeLine, fmtRate, processCostLine, rateOf, rawStorageUnits } from '../mission/budgetText';
 import type { DataPacket, MissionScenarioId, MissionState, SectorId, SensorMode } from '../mission/types';
 import {
   GLOBE_RADIUS,
@@ -104,6 +105,8 @@ const STANDBY_CUBE_COLORS = [0x38bdf8, 0x38bdf8, 0xf59e0b];
 
 const SCANNER_HOME_POSITION = new Vector3(-0.44, 0.80, -0.30);
 /** Debrief panel elements that only matter before downlink; hidden once results are shown. */
+/** Second-pinch window for in-world paid hints (see handleAriaDelegate). */
+const HINT_CONFIRM_WINDOW_MS = 3000;
 const DEBRIEF_PANEL_OPERATIONS_ONLY = ['Slot1Card', 'Slot2Card', 'Slot3Card', 'Btn_ReorderQueue', 'Btn_CommitDownlink'] as const;
 
 const GLOBE_CENTER_WORLD = new Vector3(0, 0.98, -0.48);
@@ -210,6 +213,8 @@ export class MissionControlSystem extends createSystem({
   private dailyDate: string | null = null;
   private replayIndex = -1;
   private caption = '';
+  /** performance.now() deadline for the second pinch that confirms a paid in-world hint (0 = not armed). */
+  private hintArmedUntilMs = 0;
   /**
    * `world.getSceneObject(id)` walks the whole level tree on every call, and the per-frame update
    * and hand-interaction paths call it dozens of times. Lookups go through a revalidating cache:
@@ -757,7 +762,7 @@ export class MissionControlSystem extends createSystem({
         setRelaxedMode: (enabled: boolean) => this.setRelaxedMode(enabled),
         getNextStep: () => getNextStep(this.engine.getState(), this.engine.getActiveCustomScenario()),
         startProceduralCrisis: (seed?: string | number) => this.startProceduralPass(seed),
-        executeCoPilotDelegation: () => this.handleAriaDelegate(),
+        executeCoPilotDelegation: () => this.requestAriaHint(),
         getCoPilotIntervention: () => this.coPilot.getActiveIntervention(),
         getTotalDelegations: () => this.coPilot.getTotalDelegations(),
         handleMasterIgnition: () => this.handleMasterIgnition(),
@@ -1046,15 +1051,12 @@ export class MissionControlSystem extends createSystem({
   private announceActiveScenarioPassStart(): void {
     const st = this.engine.getState();
     const sc = this.engine.getActiveScenario();
-    if (st.scenarioId === 'STANDARD_INDUS_PASS') {
-      this.voiceCommander?.trigger('PASS_START');
-    } else {
-      this.voiceCommander?.speakDirect(
-        `Orbit Zero online. ${sc.operationCode ?? sc.name} active. ${st.power} Watt-hours and ${st.maxStorage} Storage Units ready. Select a priority sector on the globe.`,
-        `[ARIA-7] ${sc.operationCode ?? sc.name} [SIMULATED]. ${st.power} Wh / ${st.maxStorage} STR online. Select sector on globe.`,
-        'HIGH',
-      );
-    }
+    // One config-driven line for every operation, so the spoken numbers always match the budget.
+    this.voiceCommander?.speakDirect(
+      `Orbit Zero online. ${sc.operationCode ?? sc.name} active. ${st.power} Watt-hours and ${st.maxStorage} Storage Units ready. Select a priority sector on the globe.`,
+      `[ARIA-7] ${sc.operationCode ?? sc.name} [SIMULATED]. ${st.power} Wh / ${st.maxStorage} STR online. Select sector on globe.`,
+      'HIGH',
+    );
   }
 
   private syncDeskPadsForXR(isImmersive: boolean): void {
@@ -1090,6 +1092,10 @@ export class MissionControlSystem extends createSystem({
   }
 
   update(delta: number): void {
+    if (this.hintArmedUntilMs > 0 && performance.now() > this.hintArmedUntilMs) {
+      this.hintArmedUntilMs = 0; // armed hint expired unspent: restore the HUD label
+      this.syncMissionHud();
+    }
     this.syncDeskPadsForXR(this.world.renderer.xr.isPresenting);
     this.updateXRHandInteractions(delta);
     this.updateMissionHudPose(Math.min(Math.max(0, delta), 0.1));
@@ -1325,15 +1331,17 @@ export class MissionControlSystem extends createSystem({
 
       // 1. Battery Gauge (10 segments into 1 InstancedMesh)
       const battInst = deskGauges.getObjectByName('BatteryGaugeInstanced');
-      const litBattSegs = Math.max(0, Math.min(10, Math.ceil((state.power / 55) * 10)));
+      // Gauges are scaled to this scenario's budget (battery, memory, window), not to fixed numbers.
+      const battFrac = state.power / Math.max(1, state.maxPower);
+      const litBattSegs = Math.max(0, Math.min(10, Math.ceil(battFrac * 10)));
       if (battInst instanceof InstancedMesh) {
-        const battColor = state.power > 44 ? cCyan : state.power >= 20 ? cAmber : cRed;
+        const battColor = battFrac > 0.8 ? cCyan : battFrac >= 0.36 ? cAmber : cRed;
         for (let i = 0; i < 10; i++) {
           battInst.setColorAt(i, i < litBattSegs ? battColor : cUnlit);
         }
         if (battInst.instanceColor) battInst.instanceColor.needsUpdate = true;
       } else if (mats) {
-        const battMat = state.power > 44 ? mats.cyan : state.power >= 20 ? mats.amber : mats.red;
+        const battMat = battFrac > 0.8 ? mats.cyan : battFrac >= 0.36 ? mats.amber : mats.red;
         for (let i = 0; i < 10; i++) {
           const seg = deskGauges.getObjectByName(`GaugeBattSeg_${i}`);
           if (seg instanceof Mesh) seg.material = i < litBattSegs ? battMat : mats.unlit;
@@ -1342,7 +1350,7 @@ export class MissionControlSystem extends createSystem({
 
       // 2. Solid-State Storage Buffer Gauge (9 segments into 1 InstancedMesh)
       const storageInst = deskGauges.getObjectByName('StorageGaugeInstanced');
-      const litStorageSegs = Math.max(0, Math.min(9, Math.ceil(state.storageUsed)));
+      const litStorageSegs = Math.max(0, Math.min(9, Math.ceil((state.storageUsed / Math.max(1, state.maxStorage)) * 9)));
       if (storageInst instanceof InstancedMesh) {
         for (let i = 0; i < 9; i++) {
           storageInst.setColorAt(i, i < litStorageSegs ? cAmber : cUnlit);
@@ -1360,16 +1368,16 @@ export class MissionControlSystem extends createSystem({
       const queuedPackets = state.packets.filter((p) => state.queuePacketIds.includes(p.id));
       const totalTxSec = queuedPackets.reduce((acc, p) => acc + p.transmitSec, 0);
       const isOverflow = totalTxSec > state.downlinkWindowSec;
-      const litWinSegs = Math.max(0, Math.min(10, Math.ceil(totalTxSec)));
+      const litWinSegs = Math.max(0, Math.min(10, Math.ceil((totalTxSec / Math.max(0.1, state.downlinkWindowSec)) * 10)));
       const flashRed = isOverflow && Math.sin(this.elapsedTime * 14) > 0;
       if (windowInst instanceof InstancedMesh) {
-        const winColor = flashRed ? cRed : totalTxSec <= 8 ? cCyan : cAmber;
+        const winColor = flashRed ? cRed : totalTxSec <= 0.8 * state.downlinkWindowSec ? cCyan : cAmber;
         for (let i = 0; i < 10; i++) {
           windowInst.setColorAt(i, i < litWinSegs ? winColor : cUnlit);
         }
         if (windowInst.instanceColor) windowInst.instanceColor.needsUpdate = true;
       } else if (mats) {
-        const winMat = flashRed ? mats.red : totalTxSec <= 8 ? mats.cyan : mats.amber;
+        const winMat = flashRed ? mats.red : totalTxSec <= 0.8 * state.downlinkWindowSec ? mats.cyan : mats.amber;
         for (let i = 0; i < 10; i++) {
           const seg = deskGauges.getObjectByName(`GaugeWindowSeg_${i}`);
           if (seg instanceof Mesh) seg.material = i < litWinSegs ? winMat : mats.unlit;
@@ -3495,7 +3503,7 @@ export class MissionControlSystem extends createSystem({
       this.xrCardOpen = false;
       this.launchScenario('ORBITAL_ACADEMY');
     });
-    bindClick(this.missionHud, 'Btn_HudHint', () => this.requestAriaHint());
+    bindClick(this.missionHud, 'Btn_HudHint', () => this.handleAriaDelegate());
     bindClick(this.missionHud, 'Btn_HudTransmit', () => this.handleCommitDownlinkButton());
     bindClick(this.missionHud, 'Btn_HudRetry', () => this.handleRestartMission());
     bindClick(this.missionHud, 'Btn_HudNext', () => this.nextMission());
@@ -3635,8 +3643,8 @@ export class MissionControlSystem extends createSystem({
     this.setText(hud, 'ResourceLine', `BATTERY ${state.power}/${state.maxPower} Wh  |  MEMORY ${state.storageUsed}/${state.maxStorage}  |  SEND ${state.downlinkCommittedSec.toFixed(1)}/${state.downlinkWindowSec.toFixed(1)}s`);
     this.setText(hud, 'TrackerLine', trackerText(state, custom));
     const stalled = isPassStalled(state, custom);
-    this.setText(hud, 'Lbl_HudTransmit', state.phase === 'DOWNLINK' ? 'CLOSE LINK' : stalled ? 'ABORT PASS' : `TRANSMIT (${state.queuePacketIds.length}/3 LOADED)`);
-    this.setText(hud, 'Lbl_HudHint', `ASK ARIA (-${SCORING.hintPenalty} pts)`);
+    this.setText(hud, 'Lbl_HudTransmit', state.phase === 'DOWNLINK' ? 'CLOSE LINK' : stalled ? 'ABORT PASS' : `TRANSMIT (${state.queuePacketIds.length}/${this.engine.getActiveScenario().budget.maxQueueSlots} LOADED)`);
+    this.setText(hud, 'Lbl_HudHint', this.isHintArmed() ? `PINCH AGAIN: -${SCORING.hintPenalty} pts` : `ASK ARIA (-${SCORING.hintPenalty} pts)`);
   }
 
   /** Moves the forward HUD between the eye-level card pose and the strip above the globe, and
@@ -4108,7 +4116,7 @@ export class MissionControlSystem extends createSystem({
     const captions: Partial<Record<OrbitalSoundCue, string>> = {
       SCAN_OPTICAL: 'OPTICAL APERTURE: Visible-band reflectance frame acquired.',
       SCAN_RADAR: 'SAR BACKSCATTER: Active microwave return acquired through cloud layer.',
-      PROCESS_SUCCESS: 'PROCESSING COMPLETE: Onboard feature vectorization compressed packet to 1 STR.',
+      PROCESS_SUCCESS: `PROCESSING COMPLETE: Onboard feature vectorization compressed packet to ${this.engine.getActiveScenario().budget.onboardProcess.compressedStorageCost} STR.`,
       DOWNLINK_COMMIT: 'CARRIER ACQUIRED: S-Band phased array live downlink active.',
       PACKET_RECEIVED: 'GROUND ACKNOWLEDGEMENT: Evidence telemetry verified at regional depot.',
       LINK_CUTOFF: 'LOSS OF SIGNAL: Orbital horizon cutoff reached.',
@@ -4418,13 +4426,34 @@ export class MissionControlSystem extends createSystem({
   public handleMasterIgnition(): void {
     this.audio.playMechanicalSwitchClick(true);
     this.playCue('SELECT_SECTOR');
-    this.voiceCommander?.trigger('PASS_START');
+    this.announceActiveScenarioPassStart();
     this.syncAll();
   }
 
-  /** Poking / pinching ARIA asks for a paid hint (never an autonomous move). */
+  /**
+   * Poking / pinching ARIA (pad, hologram or HUD button) asks for a paid hint, never an autonomous move.
+   * In-world triggers sit near the Cradle -> Bay carry path, so the first pinch only arms the hint and a
+   * second pinch within HINT_CONFIRM_WINDOW_MS spends the points. A stray pinch never costs score.
+   */
   public handleAriaDelegate(): void {
-    this.requestAriaHint();
+    const now = performance.now();
+    if (now <= this.hintArmedUntilMs) {
+      this.hintArmedUntilMs = 0;
+      this.requestAriaHint();
+      return;
+    }
+    if (this.engine.getState().phase !== 'OPERATIONS') {
+      this.requestAriaHint(); // lets the co-pilot explain why no hint is available, at no cost
+      return;
+    }
+    this.hintArmedUntilMs = now + HINT_CONFIRM_WINDOW_MS;
+    this.caption = `ARIA: pinch again within ${HINT_CONFIRM_WINDOW_MS / 1000} s to buy a hint (-${SCORING.hintPenalty} pts).`;
+    this.audio.playMechanicalSwitchClick(false);
+    this.syncAll();
+  }
+
+  private isHintArmed(): boolean {
+    return this.hintArmedUntilMs > 0 && performance.now() <= this.hintArmedUntilMs;
   }
 
   public startProceduralPass(seedInput?: string | number): void {
@@ -5259,7 +5288,7 @@ export class MissionControlSystem extends createSystem({
 
       ctx.fillStyle = '#64748b';
       ctx.font = 'bold 20px monospace';
-      ctx.fillText('STORAGE CAPACITY: 3 STR', 120, 395);
+      ctx.fillText(`STORAGE CAPACITY: ${rawStorageUnits(this.engine.getActiveScenario().budget)} STR`, 120, 395);
 
       ctx.fillStyle = '#e2e8f0';
       ctx.font = 'bold 24px monospace';
@@ -5324,8 +5353,8 @@ export class MissionControlSystem extends createSystem({
                   ? 'SAR-ENC'
                   : 'OPT-ENC';
       const procStr = pkt.processed
-        ? `1 STR (${compLabel})`
-        : '3 STR (RAW)';
+        ? `${pkt.storageCost} STR (${compLabel})`
+        : `${pkt.rawStorageCost} STR (RAW)`;
       ctx.fillStyle = pkt.processed ? '#10b981' : '#f59e0b';
       ctx.font = 'bold 16px monospace';
       ctx.fillText(`ONBOARD: ${procStr}`, 274, 214);
@@ -5541,7 +5570,7 @@ export class MissionControlSystem extends createSystem({
     }
     if (state.paused) return 'PAUSED: pass clock held. Use RESUME when ready.';
     if (state.phase === 'DEBRIEF') return 'PASS COMPLETE: review mission decisions or launch next operation.';
-    if (state.phase === 'DOWNLINK') return `TRANSMITTING: ${state.downlinkRemainingSec.toFixed(1)}s left (@ 10.0 MB/s). Evidence streaming to ground.`;
+    if (state.phase === 'DOWNLINK') return `TRANSMITTING: ${state.downlinkRemainingSec.toFixed(1)}s left (@ ${fmtRate(this.engine.getActiveScenario().budget)}). Evidence streaming to ground.`;
     const solution = this.getSolution(state);
     const benchmark = getMissionBenchmark(state.scenarioId, this.engine.getActiveCustomScenario());
     if (this.profile.preferences.guidance === 'EXPERT') return `EXPERT MODE | ${state.packets.length}/3 CUBES | ${state.downlinkCommittedSec.toFixed(1)}s QUEUE | TARGET ${benchmark.score}/100`;
@@ -5558,7 +5587,7 @@ export class MissionControlSystem extends createSystem({
     }
     const packet = state.packets.find((p) => p.id === next.packetId);
     if (packet && state.selectedPacketId !== packet.id) return `${ceiling}> STEP 4: Grab or select Evidence Cube ${packet.id} (SEC-${packet.sectorId}).`;
-    if (next.type === 'PROCESS') return `${ceiling}> STEP 4: Drop cube into the Amber Cradle to compress payload (-6 Wh).`;
+    if (next.type === 'PROCESS') return `${ceiling}> STEP 4: Drop cube into the Amber Cradle to compress payload (-${this.engine.getActiveScenario().budget.onboardProcess.powerCost} Wh).`;
     if (next.type === 'DISCARD') return `${ceiling}> DIRECTIVE: Drop unnecessary SEC-${next.sectorId} cube into discard chute.`;
     if (next.type === 'UNQUEUE') return `${ceiling}> DIRECTIVE: Remove SEC-${next.sectorId} from the bay to fit higher-value evidence.`;
     return `${ceiling}> STEP 5: Place compressed cube into Downlink Bay slot.`;
@@ -5737,10 +5766,10 @@ export class MissionControlSystem extends createSystem({
         this.telemetryPanel,
         'Lbl_ProcessCube',
         selectedPkt.processed
-          ? `${selectedPkt.id} ALREADY PROCESSED (1 STR / 18 MB / 1.8s Tx)`
+          ? `${selectedPkt.id} ALREADY PROCESSED (${compressedSizeLine(scenario.budget)})`
           : selectedPkt.confidence === 'UNVERIFIED'
             ? `CANNOT PROCESS [X] UNVERIFIED CUBE (DISCARD INSTEAD)`
-            : `PROCESS ${selectedPkt.id} (-6 Wh -> 1 STR / 18 MB / 1.8s Tx)`,
+            : `PROCESS ${selectedPkt.id} (${processCostLine(scenario.budget)})`,
       );
 
       this.setText(
@@ -5821,7 +5850,17 @@ export class MissionControlSystem extends createSystem({
         'DebriefRankTitle',
         state.phase === 'DOWNLINK'
           ? `TRANSMITTING DOWNLINK (${state.downlinkRemainingSec.toFixed(1)}s WINDOW LEFT)`
-          : `DOWNLINK BAY (${state.queuePacketIds.length}/3 SLOTS | ${state.downlinkCommittedSec.toFixed(1)}s / ${state.downlinkWindowSec.toFixed(1)}s)`,
+          : `DOWNLINK BAY (${state.queuePacketIds.length}/${this.engine.getActiveScenario().budget.maxQueueSlots} SLOTS | ${state.downlinkCommittedSec.toFixed(1)}s / ${state.downlinkWindowSec.toFixed(1)}s)`,
+      );
+      // The lever label must describe what pressing it does right now (see handleCommitDownlinkButton).
+      this.setText(
+        this.debriefPanel,
+        'Lbl_CommitDownlink',
+        state.phase === 'DOWNLINK'
+          ? 'CLOSE LINK NOW (END PASS)'
+          : isPassStalled(state, this.engine.getActiveCustomScenario())
+            ? 'ABORT PASS (NOTHING LEFT TO SEND)'
+            : `OPEN DOWNLINK (${state.downlinkWindowSec.toFixed(1)}s WINDOW)`,
       );
       this.setText(
         this.debriefPanel,
@@ -5855,6 +5894,7 @@ export class MissionControlSystem extends createSystem({
       for (const id of DEBRIEF_PANEL_OPERATIONS_ONLY) this.setDisplay(this.debriefPanel, id, 'flex');
     } else {
       const d = state.debrief;
+      const debriefRate = d.downlinkThroughputMbps ?? rateOf(this.engine.getActiveScenario().budget);
       const isAcademyPass =
         state.scenarioId === 'ORBITAL_ACADEMY' && d.outcome === 'SUCCESS';
       const outcomeLabel = isAcademyPass
@@ -5875,8 +5915,8 @@ export class MissionControlSystem extends createSystem({
         this.debriefPanel,
         'DebriefScoreSubtitle',
         isAcademyPass
-          ? `1/1 Training Target Verified | ${d.transmittedPayloadMb ?? 0} MB (${d.downlinkUsedSec.toFixed(1)}s/${d.downlinkWindowSec.toFixed(1)}s @ 10 MB/s) | ${d.powerRemaining} Wh Left | Ready for OP 01: FIRELINE`
-          : `${d.requestsVerifiedCount}/3 Verified | ${d.transmittedPayloadMb ?? 0} MB (${d.downlinkUsedSec.toFixed(1)}s/${d.downlinkWindowSec.toFixed(1)}s @ 10 MB/s) | ${d.powerRemaining} Wh Left`,
+          ? `1/1 Training Target Verified | ${d.transmittedPayloadMb ?? 0} MB (${d.downlinkUsedSec.toFixed(1)}s/${d.downlinkWindowSec.toFixed(1)}s @ ${debriefRate} MB/s) | ${d.powerRemaining} Wh Left | Ready for OP 01: FIRELINE`
+          : `${d.requestsVerifiedCount}/${Object.keys(getScenarioRequests(state.scenarioId, this.engine.getActiveScenario())).length} Verified | ${d.transmittedPayloadMb ?? 0} MB (${d.downlinkUsedSec.toFixed(1)}s/${d.downlinkWindowSec.toFixed(1)}s @ ${debriefRate} MB/s) | ${d.powerRemaining} Wh Left`,
       );
       const bannerColor =
         d.outcome === 'SUCCESS'

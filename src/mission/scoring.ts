@@ -14,6 +14,7 @@ import {
   verificationBonus,
 } from './missionConfig';
 import { describeMissionPlan, getMissionBenchmark } from './missionPlanner';
+import { compressedPayloadMb, scanPayloadMb } from './budgetText';
 import type {
   ConfidenceLevel, DataPacket, DebriefReport, FailureReasonCode, GroundRequest,
   MissionCertification, MissionOutcome, MissionScenarioConfig,
@@ -162,6 +163,13 @@ export function buildDebriefReport(params: {
   } = params;
   const benchmark = getMissionBenchmark(scenarioId, customScenario);
   const requests = getScenarioRequests(scenarioId, customScenario);
+  const requestCount = GROUND_REQUEST_ORDER.length;
+  const budget = (customScenario ?? MISSION_SCENARIOS[scenarioId])?.budget ?? MISSION_BUDGET;
+  const throughput = budget.downlinkThroughputMbps ?? DOWNLINK_THROUGHPUT_MBPS;
+  const proc = budget.onboardProcess;
+  const thermalMb = scanPayloadMb(budget, 'THERMAL');
+  const thermalExtraMb = thermalMb - scanPayloadMb(budget, 'OPTICAL');
+  const thermalExtraSec = thermalExtraMb / throughput;
   const weighted = isWeightedScenario(requests);
   const { successScore, partialScore } = getScenarioThresholds(scenarioId, customScenario);
   const evaluations = GROUND_REQUEST_ORDER.map((id) => evaluateRequestWithPackets(requests[id], transmittedPackets, { allPackets, scenarioId, customScenario }));
@@ -226,20 +234,20 @@ export function buildDebriefReport(params: {
           transmittedPackets.filter((p) => p.processed && p.sensorMode === 'THERMAL').length === 2;
         if (isThermalPairDominant) {
           advice.push(
-            `Best evidence and strictly dominant 2-compression Pareto execution (B+E Thermal cubes compressed to ${transmittedPayloadMb} MB / ${downlinkUsedSec.toFixed(1)}s: +${powerRemaining} Wh battery reserve, +${windowMargin.toFixed(1)}s S-Band link safety margin — dominates B+C and C+E by +2.0 MB / +0.2s for identical 12 Wh processing energy). Try the next orbital pass.`,
+            `Best evidence and strictly dominant 2-compression Pareto execution (B+E Thermal cubes compressed to ${transmittedPayloadMb} MB / ${downlinkUsedSec.toFixed(1)}s: +${powerRemaining} Wh battery reserve, +${windowMargin.toFixed(1)}s S-Band link safety margin — dominates B+C and C+E by +${thermalExtraMb.toFixed(1)} MB / +${thermalExtraSec.toFixed(1)}s for identical ${2 * proc.powerCost} Wh processing energy). Try the next orbital pass.`,
           );
         } else if (scenarioId === 'FIRELINE_PASS') {
           advice.push(
-            `Best evidence and Grade S GOLD execution (2/3 packets compressed to ${transmittedPayloadMb} MB / ${downlinkUsedSec.toFixed(1)}s: +${powerRemaining} Wh battery reserve, +${windowMargin.toFixed(1)}s S-Band link safety margin; note that compressing both 42 MB Thermal cubes B+E saves an extra 2.0 MB / 0.2s for the same 12 Wh energy). Try the next orbital pass.`,
+            `Best evidence and Grade S GOLD execution (2/${transmittedPackets.length} packets compressed to ${transmittedPayloadMb} MB / ${downlinkUsedSec.toFixed(1)}s: +${powerRemaining} Wh battery reserve, +${windowMargin.toFixed(1)}s S-Band link safety margin; note that compressing both ${thermalMb} MB Thermal cubes B+E saves an extra ${thermalExtraMb.toFixed(1)} MB / ${thermalExtraSec.toFixed(1)}s for the same ${2 * proc.powerCost} Wh energy). Try the next orbital pass.`,
           );
         } else {
           advice.push(
-            `Best evidence and balanced Pareto execution (2/3 packets compressed: +${powerRemaining} Wh battery reserve vs +${windowMargin.toFixed(1)}s S-Band link safety margin). Try the next orbital pass.`,
+            `Best evidence and balanced Pareto execution (2/${transmittedPackets.length} packets compressed: +${powerRemaining} Wh battery reserve vs +${windowMargin.toFixed(1)}s S-Band link safety margin). Try the next orbital pass.`,
           );
         }
       } else if (processedTxCount >= 3) {
         advice.push(
-          `Best evidence and Grade S GOLD execution (3/3 packets compressed to ${transmittedPayloadMb} MB / ${downlinkUsedSec.toFixed(1)}s: +${windowMargin.toFixed(1)}s S-Band link safety margin, ${powerRemaining} Wh deep-discharge battery reserve; in a deterministic ${downlinkWindowSec.toFixed(1)}s window, compressing the 3rd cube spends 6 Wh for unused link capacity beyond the 2-cube optimum). Try the next orbital pass.`,
+          `Best evidence and Grade S GOLD execution (3/3 packets compressed to ${transmittedPayloadMb} MB / ${downlinkUsedSec.toFixed(1)}s: +${windowMargin.toFixed(1)}s S-Band link safety margin, ${powerRemaining} Wh deep-discharge battery reserve; in a deterministic ${downlinkWindowSec.toFixed(1)}s window, compressing the 3rd cube spends ${proc.powerCost} Wh for unused link capacity beyond the 2-cube optimum). Try the next orbital pass.`,
         );
       } else {
         advice.push(
@@ -325,15 +333,15 @@ export function buildDebriefReport(params: {
         evaluations: trainingEvaluations,
         evidenceProvenance,
         summaryHeadline:
-          'TRAINING COMPLETE: ALL 9 ORBITAL WORKSTATION GESTURES & TRIAGE STEPS QUALIFIED.',
+          'TRAINING COMPLETE: ALL ORBITAL WORKSTATION GESTURES & TRIAGE STEPS QUALIFIED.',
         deterministicRecommendation:
-          'TRAINING COMPLETE: You have qualified on globe sector targeting, Thermal IR smoke penetration, 3D Data Cube inspection, Processing Cradle compression (42 MB -> 18 MB / 3 STR -> 1 STR), Downlink Bay staging, and S-Band transmission. Proceed to Campaign Selection or launch Operation 01: Fireline.',
+          `TRAINING COMPLETE: You have qualified on globe sector targeting, Thermal IR smoke penetration, 3D Data Cube inspection, Processing Cradle compression (${thermalMb} MB -> ${compressedPayloadMb(budget)} MB / ${budget.thermalScan?.storageCost ?? budget.opticalScan.storageCost} STR -> ${proc.compressedStorageCost} STR), Downlink Bay staging, and S-Band transmission. Proceed to Campaign Selection or launch Operation 01: Fireline.`,
         counterfactualComparison:
-          `ACADEMY QUALIFICATION BENCHMARK (100/100 TRAINING PASS): 1 verified compressed observation (${transmittedPayloadMb} MB / ${downlinkUsedSec.toFixed(1)}s @ ${DOWNLINK_THROUGHPUT_MBPS.toFixed(1)} MB/s, ${powerRemaining} Wh remaining). Ready for Operation 01: Fireline.`,
+          `ACADEMY QUALIFICATION BENCHMARK (100/100 TRAINING PASS): 1 verified compressed observation (${transmittedPayloadMb} MB / ${downlinkUsedSec.toFixed(1)}s @ ${throughput.toFixed(1)} MB/s, ${powerRemaining} Wh remaining). Ready for Operation 01: Fireline.`,
         achievableScore: 100,
         windowMarginSec: Math.max(0, Number((downlinkWindowSec - downlinkUsedSec).toFixed(6))),
-        benchmarkPowerUsed: 17,
-        benchmarkDownlinkSec: 1.8,
+        benchmarkPowerUsed: (budget.thermalScan?.powerCost ?? budget.opticalScan.powerCost) + proc.powerCost,
+        benchmarkDownlinkSec: proc.compressedTransmitSec,
       };
     }
   }
@@ -342,10 +350,6 @@ export function buildDebriefReport(params: {
   const hasUnverifiedScanned = allPackets.some((p) => p.confidence === 'UNVERIFIED');
   let failureReasonCode: FailureReasonCode = 'NONE';
   let failureExplanation = 'All emergency ground requests met operational verification thresholds within the downlink window.';
-
-  const budget = (customScenario ?? MISSION_SCENARIOS[scenarioId])?.budget ?? MISSION_BUDGET;
-  const throughput = budget.downlinkThroughputMbps ?? DOWNLINK_THROUGHPUT_MBPS;
-  const proc = budget.onboardProcess;
 
   if (outcome !== 'SUCCESS') {
     if (endReason === 'ABORTED') {
@@ -374,7 +378,7 @@ export function buildDebriefReport(params: {
       failureExplanation =
         weighted
           ? `NOT ENOUGH VALUE DELIVERED: ${totalScore} pts reached the ground; this pass needs ${successScore} pts to succeed. Spend power on the highest-value requests first.`
-          : `INCOMPLETE TRIAGE COVERAGE: Only ${requestsVerifiedCount}/3 ground requests were verified (${requestsPartialCount} partial, ${requestsUnverifiedCount} unverified). Scan and queue evidence for every priority target sector (${GROUND_REQUEST_ORDER.map((id) => requests[id].targetSectorId).join(', ')}) before committing downlink.`;
+          : `INCOMPLETE TRIAGE COVERAGE: Only ${requestsVerifiedCount}/${requestCount} ground requests were verified (${requestsPartialCount} partial, ${requestsUnverifiedCount} unverified). Scan and queue evidence for every priority target sector (${GROUND_REQUEST_ORDER.map((id) => requests[id].targetSectorId).join(', ')}) before committing downlink.`;
     }
   }
 
@@ -396,7 +400,7 @@ export function buildDebriefReport(params: {
         : weighted
           ? `BEST POSSIBLE TRIAGE: ${totalScore}/${benchmark.score} ACHIEVABLE POINTS. NOT EVERY REQUEST COULD BE ANSWERED THIS PASS, AND YOU SAVED THE MOST VALUABLE ONES.`
           : `SCENARIO MASTERY: ${totalScore}/${benchmark.score} POSSIBLE POINTS EARNED (GRADE ${efficiencyGrade}). THE CONVECTIVE STORM LIMITS CERTAINTY, NOT YOUR TRIAGE SKILL.`
-      : `${requestsVerifiedCount}/3 VERIFIED - REVIEW THE EVIDENCE THAT DID NOT REACH EARTH.`,
+      : `${requestsVerifiedCount}/${requestCount} VERIFIED - REVIEW THE EVIDENCE THAT DID NOT REACH EARTH.`,
     deterministicRecommendation: advice.join(' '),
     counterfactualComparison: `SCENARIO CEILING (${benchmark.score}/100 RAW): ${describeMissionPlan(benchmark)}. ${benchmark.powerUsed} Wh power units, ${benchmark.transmitSec.toFixed(1)}s transmission @ ${throughput.toFixed(1)} MB/s.`,
     achievableScore: benchmark.score,

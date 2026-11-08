@@ -16,11 +16,13 @@ import {
   getScenarioSector,
   getScenarioThresholds,
   GROUND_REQUEST_ORDER,
+  DOWNLINK_THROUGHPUT_MBPS,
   MISSION_SCENARIOS,
   requestValue,
   SENSOR_PLAIN_GUIDE,
 } from '../mission/missionConfig';
 import { formatClock } from '../mission/guidance';
+import { TUTORIAL_STEPS } from '../mission/tutorialEngine';
 import { loadMissionProfile, starsFor, starString } from '../systems/missionProfile';
 
 export interface CampaignCardSpec {
@@ -44,12 +46,11 @@ const RAW_CAMPAIGN_CARDS: readonly CampaignCardSpec[] = [
     opCode: 'OP 00: ORBITAL ACADEMY',
     title: 'Hand Gesture & Triage Training',
     region: 'Bolan Fireline Emergency Zone — Guided 9-Step Spatial Certification [SIMULATED]',
-    budgetLine: '52 Wh Power • 9 STR Buffer (18 MB/STR) • 10.0s Window @ 10.0 MB/s',
+    budgetLine: '', // derived from the scenario budget in deriveCard
     sensorsLine: 'Teaches: Point, Pinch, Grab, Place & Release, Tracking Recovery',
-    briefing:
-      'Interactive 9-step onboarding for Meta Quest hand tracking and desktop controls. Learn how to point at globe sectors, pinch to scan Sector B (Bolan Canyon Highway) with Thermal IR, grab 3D Data Cubes, release inside the 15 cm Processing Cradle (3 STR -> 1 STR, 42 MB -> 18 MB) & 18 cm Downlink Bay snap zones, and recover smoothly if hand tracking drops.',
+    briefing: '', // derived from storyLine in deriveCard
     requestsSummary:
-      'STEP 1-3: Point & Pinch Scan • STEP 4-6: Grab, Inspect & Cradle Compress (42 MB -> 18 MB) • STEP 7-9: Dock & Transmit',
+      'STEP 1-3: Point & Pinch Scan • STEP 4-6: Grab, Inspect & Cradle Compress • STEP 7-9: Dock & Transmit',
   },
   {
     id: 'FIRELINE_PASS',
@@ -58,12 +59,10 @@ const RAW_CAMPAIGN_CARDS: readonly CampaignCardSpec[] = [
     opCode: 'OP 01: FIRELINE',
     title: 'Bolan Fireline Emergency Zone',
     region: 'Bolan Canyon & Juniper Ridge — Smoke Penetration Triage [SIMULATED]',
-    budgetLine: '52 Wh Power • 9 STR Buffer (18 MB/STR) • 10.0s Window @ 10.0 MB/s',
-    sensorsLine: 'Sensors: Thermal IR (11 Wh, 42 MB) • Optical (8 Wh, 40 MB) • SAR (14 Wh, 45 MB)',
-    briefing:
-      'Dense biomass smoke plumes obscure Sector B (Bolan Canyon Highway) and Sector E (Juniper Ridge Fuel Depot), blocking passive Optical cameras via Mie scattering. Use Mid-Wave Thermal IR (3.9 um) to penetrate smoke and locate 860 K flame fronts, and use 0.75m GSD Optical on clear-sky Sector C (Bolan Viaduct & Firebreak). Pre-scan clue: a thermal anomaly is also reported in Sector D (Sibi Basalt & Kiln Flats), where industrial surface heating is a possible alternative explanation to active vegetation combustion.',
-    requestsSummary:
-      'REQ 1: Sector B Active Flame Front ([OK] CONFIRMED) • REQ 2: Sector C Viaduct Firebreak ([OK] CONFIRMED) • REQ 3: Sector E Fuel Depot Perimeter ([OK] CONFIRMED)',
+    budgetLine: '', // derived from the scenario budget in deriveCard
+    sensorsLine: '', // derived from availableSensors in deriveCard
+    briefing: '', // derived from storyLine in deriveCard
+    requestsSummary: '', // derived from the scenario requests in deriveCard
   },
   {
     id: 'STANDARD_INDUS_PASS',
@@ -72,12 +71,10 @@ const RAW_CAMPAIGN_CARDS: readonly CampaignCardSpec[] = [
     opCode: 'OP 02: MONSOON SHIELD',
     title: 'Indus Basin Flood Response',
     region: 'Sukkur & Guddu Barrage — Storm Cloud SAR Triage [SIMULATED]',
-    budgetLine: '55 Wh Power • 9 STR Buffer (18 MB/STR) • 10.0s Window @ 10.0 MB/s',
-    sensorsLine: 'Sensors: SAR Radar (14 Wh, 45 MB) • Optical (8 Wh, 40 MB)',
-    briefing:
-      'Opaque monsoon storm clouds cover Sector B (Levee Breach) and Sector E (Relief Staging), blocking Optical reflectance. Use 5.4 GHz SAR Radar to penetrate cloud decks (smooth open water appears dark; flooded vegetation shows bright double-bounce returns), and use clear-sky Optical on Sector C to avoid steel bridge multipath glare.',
-    requestsSummary:
-      'REQ 1: Sector B Levee Breach ([OK] CONFIRMED) • REQ 2: Sector C Evacuation Bridge ([OK] CONFIRMED) • REQ 3: Sector E Relief Access ([?] PROBABLE+)',
+    budgetLine: '', // derived from the scenario budget in deriveCard
+    sensorsLine: '', // derived from availableSensors in deriveCard
+    briefing: '', // derived from storyLine in deriveCard
+    requestsSummary: '', // derived from the scenario requests in deriveCard
   },
   {
     id: 'AFTERSHOCK_PASS',
@@ -86,12 +83,10 @@ const RAW_CAMPAIGN_CARDS: readonly CampaignCardSpec[] = [
     opCode: 'OP 03: AFTERSHOCK',
     title: 'Quetta Fault Seismic Crisis',
     region: 'Hanna Valley & Chaman Fault — Multi-Temporal Change Detection [SIMULATED]',
-    budgetLine: '50 Wh Power • Tight 6 STR Partition (18 MB/STR) • 9.0s Window @ 10.0 MB/s',
-    sensorsLine: 'Sensors: SAR + Cradle Pre/Post Baseline • Optical • Thermal IR',
-    briefing:
-      'Post-earthquake silicate dust plumes shroud Sector B (Hanna Valley Gorge) and Sector E (Chaman Fault Substation), while degraded solid-state memory restricts storage to 6 Storage Units (STR). Compress cubes mid-pass in the Processing Cradle (3 STR -> 1 STR, 18 MB / 1.8s) to run Pre/Post-Event Multi-Temporal SAR Backscatter Comparison and upgrade [?] PROBABLE SAR scans to [OK] CONFIRMED potential surface-change evidence.',
-    requestsSummary:
-      'REQ 1: Sector B Landslide Dam ([OK] CONFIRMED) • REQ 2: Sector C Hospital Viaduct ([OK] CONFIRMED) • REQ 3: Sector E Fault Substation ([OK] CONFIRMED)',
+    budgetLine: '', // derived from the scenario budget in deriveCard
+    sensorsLine: '', // derived from availableSensors in deriveCard
+    briefing: '', // derived from storyLine in deriveCard
+    requestsSummary: '', // derived from the scenario requests in deriveCard
   },
 ] as const;
 
@@ -233,7 +228,7 @@ export class LandingUI {
 
         <div class="oz-hero-footer">
           <div class="oz-system-indicator">
-            <span class="oz-badge-chip">GROUND STATION: KARACHI (10.0 MB/s)</span>
+            <span class="oz-badge-chip">GROUND STATION: KARACHI (${DOWNLINK_THROUGHPUT_MBPS} MB/s)</span>
             <span class="oz-badge-chip">3 CAMPAIGN OPERATIONS + ACADEMY</span>
             <span class="oz-badge-chip">META VR START 2026</span>
           </div>
@@ -270,17 +265,17 @@ export class LandingUI {
             <button type="button" role="radio" id="card-op-fireline" class="oz-op-card oz-op-card-active" data-op-id="FIRELINE_PASS">
               <span class="oz-op-code">OP 01: FIRELINE</span>
               <strong class="oz-op-title">Bolan Fireline Zone</strong>
-              <span class="oz-op-meta">52 Wh • 9 STR (18 MB/STR) • Thermal IR</span>
+              <span class="oz-op-meta"></span>
             </button>
             <button type="button" role="radio" id="card-op-monsoon" class="oz-op-card" data-op-id="STANDARD_INDUS_PASS">
               <span class="oz-op-code">OP 02: MONSOON SHIELD</span>
               <strong class="oz-op-title">Indus Basin Flood</strong>
-              <span class="oz-op-meta">55 Wh • 9 STR (18 MB/STR) • SAR Cloud</span>
+              <span class="oz-op-meta"></span>
             </button>
             <button type="button" role="radio" id="card-op-aftershock" class="oz-op-card" data-op-id="AFTERSHOCK_PASS">
               <span class="oz-op-code">OP 03: AFTERSHOCK</span>
               <strong class="oz-op-title">Quetta Fault Crisis</strong>
-              <span class="oz-op-meta">50 Wh • 6 STR (18 MB/STR) • Change Det.</span>
+              <span class="oz-op-meta"></span>
             </button>
           </div>
 
@@ -291,14 +286,11 @@ export class LandingUI {
                 <span id="oz-briefing-opcode" class="oz-briefing-opcode">OP 01: FIRELINE</span>
                 <h3 id="oz-briefing-title" class="oz-briefing-title">Bolan Fireline Emergency Zone — Bolan Canyon & Juniper Ridge [SIMULATED]</h3>
               </div>
-              <span id="oz-briefing-budget" class="oz-briefing-budget">52 Wh Power • 9 STR Buffer (18 MB/STR) • 10.0s Window @ 10.0 MB/s</span>
+              <span id="oz-briefing-budget" class="oz-briefing-budget"></span>
             </div>
-            <p id="oz-briefing-text" class="oz-briefing-text">
-              Dense biomass smoke plumes obscure Sector B (Bolan Canyon Highway) and Sector E (Juniper Ridge Fuel Depot), blocking passive Optical cameras via Mie scattering. Use Mid-Wave Thermal IR (3.9 um) to penetrate smoke and locate 860 K flame fronts, and use 0.75m GSD Optical on clear-sky Sector C (Bolan Viaduct & Firebreak). Pre-scan clue: a thermal anomaly is also reported in Sector D (Sibi Basalt & Kiln Flats), where industrial surface heating is a possible alternative explanation to active vegetation combustion.
-            </p>
-            <div id="oz-briefing-requests" class="oz-briefing-requests">
-              REQ 1: Sector B Active Flame Front ([OK] CONFIRMED) • REQ 2: Sector C Viaduct Firebreak ([OK] CONFIRMED) • REQ 3: Sector E Fuel Depot Perimeter ([OK] CONFIRMED)
-            </div>
+            <!-- Filled by refreshCardsFromConfig() from the scenario config. -->
+            <p id="oz-briefing-text" class="oz-briefing-text"></p>
+            <div id="oz-briefing-requests" class="oz-briefing-requests"></div>
           </div>
 
           <div class="oz-cards-grid">
@@ -382,7 +374,7 @@ export class LandingUI {
       const record = profile.mastery[card.scenarioId];
       const stars = card.startTutorial ? '' : ` • ${starString(starsFor(record, getScenarioThresholds(card.scenarioId).successScore))}`;
       metaFor[card.id] = card.startTutorial
-        ? `No clock • learn the 5 moves in 90s${profile.tutorialComplete ? ' • DONE' : ''}`
+        ? `No clock • ${TUTORIAL_STEPS.length} guided steps${profile.tutorialComplete ? ' • DONE' : ''}`
         : `${s.budget.initialPower} Wh • ${s.budget.downlinkDurationSec.toFixed(1)}s window • ${s.passDurationSec ? formatClock(s.passDurationSec) : 'no'} clock${stars}`;
     }
     this.rootEl.querySelectorAll<HTMLButtonElement>('.oz-op-card').forEach((btn) => {

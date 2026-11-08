@@ -82,6 +82,26 @@ async function grabCarryRelease(hand, cubeId, dropId) {
   }, { hand, cubeId, dropId });
 }
 
+/**
+ * Waits until a compressed cube has left the Cradle (> 10 cm away) and stopped moving
+ * (< 2 mm over 150 ms), max 4 s. It pauses in the Cradle while it shrinks, then glides home.
+ */
+async function waitForCubeAtRest(cubeId) {
+  const read = () => page.evaluate((id) => ({
+    cube: window.__ORBIT_ZERO__.get3DTargetWorldPosition(id),
+    cradle: window.__ORBIT_ZERO__.get3DTargetWorldPosition('PROCESS_CRADLE'),
+  }), cubeId);
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+  let prev = (await read()).cube;
+  for (let i = 0; i < 27; i++) {
+    await page.waitForTimeout(150);
+    const { cube, cradle } = await read();
+    if (prev && cube && cradle && dist(cube, cradle) > 0.1 && dist(cube, prev) < 0.002) return cube;
+    prev = cube;
+  }
+  return prev;
+}
+
 async function setSensorByHand(mode) {
   for (let i = 0; i < 5; i++) {
     if ((await state()).activeSensorMode === mode) return true;
@@ -166,6 +186,14 @@ try {
   check(stripPos && stripPos.y > 1.4, 'Next Step strip moved above the globe', stripPos ? `y=${stripPos.y.toFixed(2)}` : 'missing');
   await shot('hmd-02-next-step');
 
+  // 3b. A single stray pinch on the ARIA pad (it sits on the Cradle -> Bay carry path) must not cost points.
+  await pointAndPinch('hand-left', 'pad-aria-delegate');
+  s = await state();
+  const armedLabel = await hudText('Lbl_HudHint');
+  check(s.hintsUsed === 0 && /PINCH AGAIN/.test(armedLabel ?? ''), 'one stray pinch on ARIA only arms the hint (no -5)', `hintsUsed=${s.hintsUsed} label="${armedLabel}"`);
+  await page.waitForTimeout(3300);
+  check(/ASK ARIA/.test((await hudText('Lbl_HudHint')) ?? ''), 'armed hint expires unspent after 3 s');
+
   // 4. Sector B: thermal through smoke, by hand.
   await pointAndPinch('hand-right', 'sector-b');
   check((await state()).selectedSectorId === 'B', 'point + pinch selects Sector B');
@@ -180,8 +208,11 @@ try {
   const comp = await grabCarryRelease('hand-left', 'evidence-cube-1', 'PROCESS_CRADLE');
   s = await state();
   check(comp.grabbed === 1 && s.packets[0].processed, 'grab cube -> drop in Cradle compresses it');
-  await grabCarryRelease('hand-left', 'evidence-cube-1', 'DOWNLINK_SLOT_1');
-  check((await state()).queuePacketIds.length === 1, 'cube docked in bay slot 1 by hand');
+  // A compressed cube glides from the Cradle back to its tray slot; a person reaches for it after it lands.
+  await waitForCubeAtRest('evidence-cube-1');
+  const dock1 = await grabCarryRelease('hand-left', 'evidence-cube-1', 'DOWNLINK_SLOT_1');
+  s = await state();
+  check(s.queuePacketIds.length === 1, 'cube docked in bay slot 1 by hand', s.queuePacketIds.length === 1 ? '' : `grabbed=${dock1.grabbed} status="${s.lastStatusMessage}"`);
 
   // 5. Sector C optical, Sector E thermal.
   await pointAndPinch('hand-right', 'sector-c');
@@ -221,6 +252,12 @@ try {
   await page.waitForTimeout(600);
   s = await state();
   check(s.phase === 'OPERATIONS' && s.packets.length === 0 && /Fireline/i.test((await hudText('CardTitle')) ?? ''), 'RETRY by hand restarts at the Mission Card');
+
+  // 8. A deliberate double pinch on ARIA buys exactly one paid hint.
+  await pointAndPinch('hand-left', 'pad-aria-delegate');
+  await pointAndPinch('hand-left', 'pad-aria-delegate');
+  s = await state();
+  check(s.hintsUsed === 1 && s.packets.length === 0, 'double pinch on ARIA buys one hint and plays no move', `hintsUsed=${s.hintsUsed}`);
 } catch (err) {
   check(false, 'run completed without exceptions', String(err?.stack ?? err));
   await shot('hmd-error').catch(() => {});

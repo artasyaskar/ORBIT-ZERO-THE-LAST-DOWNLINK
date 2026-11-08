@@ -126,10 +126,10 @@
 <Panel id="DebriefRoot" class="panel-root">
   <div id="DebriefBannerCard" class="debrief-banner">
     <div id="DebriefRankTitle" class="banner-title">
-      DOWNLINK BAY (0/3 SLOTS | 0.0s / 10.0s)
+      DOWNLINK BAY
     </div>
     <div id="DebriefScoreSubtitle" class="banner-sub">
-      Compress &amp; queue verified cubes so total Tx &lt;= 10.0s cutoff.
+      Dock cubes so the total send time fits the window.
     </div>
   </div>
 
@@ -175,7 +175,7 @@
   </Button>
 
   <Button id="Btn_CommitDownlink" class="action-btn">
-    <ButtonLabel id="Lbl_CommitDownlink" style="color: #34d399; font-size: 14px; font-weight: 700;">TRANSMIT DOWNLINK QUEUE (10.0s WINDOW)</ButtonLabel>
+    <ButtonLabel id="Lbl_CommitDownlink" style="color: #34d399; font-size: 14px; font-weight: 700;">OPEN DOWNLINK</ButtonLabel>
   </Button>
 
   <Button id="Btn_RestartMission" class="action-btn">

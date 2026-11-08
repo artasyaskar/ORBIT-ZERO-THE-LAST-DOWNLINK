@@ -4,7 +4,9 @@
  * (Zero Three.js / WebXR imports)
  */
 
-import type { MissionState, SectorId, SensorMode } from './types';
+import type { MissionState, ResourceBudgetConfig, SectorId, SensorMode } from './types';
+import { MISSION_SCENARIOS } from './missionConfig';
+import { compressedSizeLine, fmtRate, rawPayloadRange, rawStorageUnits, scanCostLine } from './budgetText';
 
 export type TutorialStepId =
   | 'STEP_1_ENVIRONMENT'
@@ -37,14 +39,27 @@ export interface TutorialStepSpec {
     | 'DEBRIEF_PANEL';
 }
 
-export const TUTORIAL_STEPS: readonly TutorialStepSpec[] = [
+/**
+ * Builds the 9 Academy steps. Every resource number in the text is read from the budget,
+ * so retuning the Academy scenario can never leave stale numbers in the tutorial.
+ */
+export function buildTutorialSteps(
+  budget: ResourceBudgetConfig = MISSION_SCENARIOS.ORBITAL_ACADEMY.budget,
+  slots: number = budget.maxQueueSlots,
+): readonly TutorialStepSpec[] {
+  const rate = fmtRate(budget);
+  const proc = budget.onboardProcess;
+  const rawStr = rawStorageUnits(budget);
+  const rawRange = rawPayloadRange(budget, ['OPTICAL', 'THERMAL', 'RADAR']);
+  const slotOrder = Array.from({ length: slots }, (_, i) => String(i + 1)).join(' -> ');
+  return [
   {
     index: 1,
     id: 'STEP_1_ENVIRONMENT',
     title: 'STEP 1/9: SEATED ENVELOPE & HAND TRACKING RECOVERY',
     vrInstruction: 'Hold both hands 35-60 cm in front of your headset inside the console arc and touch the Globe Gimbal Ring. If hand tracking ever loses your pinch, bring your hand back to chest height — dropped cubes automatically snap back to their tray slot.',
     desktopInstruction: 'Drag the 3D Earth Globe or click any Sector Beacon to orient the orbital console (dropped cubes auto-return to their slot).',
-    scientificNote: 'ORBIT ZERO flies a sun-synchronous low-Earth orbit. Every pass over Karachi Ground Station has a finite S-Band horizon window (10.0 MB/s).',
+    scientificNote: `ORBIT ZERO flies a sun-synchronous low-Earth orbit. Every pass over Karachi Ground Station has a finite S-Band horizon window (${rate}).`,
     ghostHandTarget: 'GLOBE_GIMBAL',
   },
   {
@@ -62,7 +77,7 @@ export const TUTORIAL_STEPS: readonly TutorialStepSpec[] = [
     title: 'STEP 3/9: HOW TO PINCH (SENSOR TOGGLE & FIRE SWATH)',
     vrInstruction: 'HOW TO PINCH: Bring your thumb and index finger together (or poke directly with your index fingertip) on the Sensor Mode button to match Sector B weather, then pinch/press FIRE SWATH.',
     desktopInstruction: 'Select the optimal sensor mode for Sector B and click FIRE SWATH (or press [Space]) to materialize a 3D Data Cube.',
-    scientificNote: 'Optical (8 Wh, 40 MB / 4.0s) needs clear skies; Thermal IR (11 Wh, 42 MB / 4.2s) pierces thin smoke; SAR Radar (14 Wh, 45 MB / 4.5s) pierces storm clouds.',
+    scientificNote: `${scanCostLine(budget, 'OPTICAL')} needs clear skies; ${scanCostLine(budget, 'THERMAL')} pierces thin smoke; ${scanCostLine(budget, 'RADAR')} pierces storm clouds.`,
     ghostHandTarget: 'SENSOR_AND_SCAN',
   },
   {
@@ -71,7 +86,7 @@ export const TUTORIAL_STEPS: readonly TutorialStepSpec[] = [
     title: 'STEP 4/9: HOW TO GRAB A 3D DATA CUBE',
     vrInstruction: 'HOW TO GRAB: Reach to the left Evidence Tray (within 45 cm), close your thumb and index/middle fingers around the glowing 3D Data Cube, and hold the pinch to lift it.',
     desktopInstruction: 'Click or drag-hold the glowing 3D Data Cube in the left Evidence Tray.',
-    scientificNote: 'Each raw scan occupies 1 of 3 physical tray slots and 3 STR (40-45 MB) of onboard solid-state memory.',
+    scientificNote: `Each raw scan occupies 1 of ${slots} physical tray slots and ${rawStr} STR (${rawRange}) of onboard solid-state memory.`,
     ghostHandTarget: 'EVIDENCE_CUBE',
   },
   {
@@ -87,9 +102,9 @@ export const TUTORIAL_STEPS: readonly TutorialStepSpec[] = [
     index: 6,
     id: 'STEP_6_PROCESS',
     title: 'STEP 6/9: HOW TO PLACE & RELEASE IN THE CRADLE',
-    vrInstruction: 'HOW TO PLACE & RELEASE: Carry the valid Data Cube into the center amber Processing Cradle (15 cm magnetic snap ring). When the ring flares gold, open your thumb and fingers to release and compress (45 MB -> 18 MB / 1.8s, -6 Wh).',
-    desktopInstruction: 'Drag and release the Data Cube into the center Processing Cradle (or click PROCESS / press [P]) to compress 3 STR -> 1 STR (-6 Wh).',
-    scientificNote: 'Onboard feature extraction strips redundant background pixels, cutting payload to 18 MB (1.8s @ 10.0 MB/s) at a 6 Wh compute cost.',
+    vrInstruction: `HOW TO PLACE & RELEASE: Carry the valid Data Cube into the center amber Processing Cradle (15 cm magnetic snap ring). When the ring flares gold, open your thumb and fingers to release and compress (${rawStr} STR -> ${compressedSizeLine(budget)}, -${proc.powerCost} Wh).`,
+    desktopInstruction: `Drag and release the Data Cube into the center Processing Cradle (or click PROCESS / press [P]) to compress ${rawStr} STR -> ${proc.compressedStorageCost} STR (-${proc.powerCost} Wh).`,
+    scientificNote: `Onboard feature extraction strips redundant background pixels, cutting payload to ${proc.compressedPayloadMb} MB (${proc.compressedTransmitSec.toFixed(1)}s @ ${rate}) at a ${proc.powerCost} Wh compute cost.`,
     ghostHandTarget: 'PROCESSING_CRADLE',
   },
   {
@@ -98,7 +113,7 @@ export const TUTORIAL_STEPS: readonly TutorialStepSpec[] = [
     title: 'STEP 7/9: HOW TO DOCK IN THE DOWNLINK BAY',
     vrInstruction: 'HOW TO DOCK: Grab the compressed gold Data Cube, move it into Slot #1 of the right-hand Downlink Bay (18 cm magnetic capture zone), and open your fingers to release. If tracking drops mid-carry, the cube safely returns to its slot.',
     desktopInstruction: 'Drag and release the compressed Data Cube into Slot #1 of the right-hand Downlink Bay (or click QUEUE / press [Q]).',
-    scientificNote: 'Packets transmit sequentially in Slot 1 -> 2 -> 3 order at 10.0 MB/s. Any packet exceeding the pass horizon cutoff is dropped.',
+    scientificNote: `Packets transmit sequentially in Slot ${slotOrder} order at ${rate}. Any packet exceeding the pass horizon cutoff is dropped.`,
     ghostHandTarget: 'DOWNLINK_BAY',
   },
   {
@@ -106,7 +121,7 @@ export const TUTORIAL_STEPS: readonly TutorialStepSpec[] = [
     id: 'STEP_8_TRANSMIT',
     title: 'STEP 8/9: COMMIT LIVE S-BAND DOWNLINK',
     vrInstruction: 'Point or reach to the green COMMIT DOWNLINK lever on the right console and pinch/press to stream your queued evidence to Karachi Ground Station.',
-    desktopInstruction: 'Click COMMIT DOWNLINK (or press [T]) to initiate the live 10.0 MB/s S-Band transmission.',
+    desktopInstruction: `Click COMMIT DOWNLINK (or press [T]) to initiate the live ${rate} S-Band transmission.`,
     scientificNote: 'Once S-Band transmission begins, orbital sensors lock and queued packets stream to the ground dish in real time.',
     ghostHandTarget: 'COMMIT_LEVER',
   },
@@ -119,7 +134,10 @@ export const TUTORIAL_STEPS: readonly TutorialStepSpec[] = [
     scientificNote: 'Orbital Academy gesture certification complete. You are cleared for Operation 01: Fireline.',
     ghostHandTarget: 'DEBRIEF_PANEL',
   },
-] as const;
+  ];
+}
+
+export const TUTORIAL_STEPS: readonly TutorialStepSpec[] = buildTutorialSteps();
 
 export type TutorialInputSource = 'xr-hand' | 'desktop';
 

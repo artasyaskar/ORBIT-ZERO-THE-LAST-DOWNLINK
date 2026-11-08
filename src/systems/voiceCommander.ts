@@ -44,8 +44,8 @@ export const DIALOGUE_CATALOG: Record<VoiceDialogueId, DialogueLine> = {
   PASS_START: {
     id: 'PASS_START',
     spoken:
-      'Orbit Zero online. Simulated telemetry alert: Category 4 monsoon breached Indus levees. 55 Watt-hours remaining. Select a sector on the globe to begin.',
-    subtitle: '[ARIA-7] Indus levees breached [SIMULATED]. 55 Wh online. Select target sector on globe.',
+      'Orbit Zero online. Simulated telemetry alert: Category 4 monsoon breached Indus levees. Select a sector on the globe to begin.',
+    subtitle: '[ARIA-7] Indus levees breached [SIMULATED]. Select target sector on globe.',
     priority: 'HIGH',
     cooldownSec: 8,
   },
