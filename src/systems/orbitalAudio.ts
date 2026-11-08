@@ -40,6 +40,7 @@ export class OrbitalAudioController {
   private master: GainNode | null = null;
   private volume = 0.65;
   private isDucked = false;
+  private held = false;
 
   public setVolume(value: number): void {
     this.volume = Math.max(0, Math.min(1, value));
@@ -49,6 +50,22 @@ export class OrbitalAudioController {
   public setDucked(ducked: boolean): void {
     this.isDucked = ducked;
     this.applyMasterGain(0.08);
+  }
+
+  /**
+   * Silence everything while the pass is paused (Quest menu, headset off, tab hidden). The context is
+   * suspended and no cue is scheduled meanwhile; cues queued on a frozen clock would all fire on resume.
+   */
+  public setHeld(held: boolean): void {
+    if (this.held === held) return;
+    this.held = held;
+    if (!this.ctx) return;
+    if (held) void this.ctx.suspend().catch(() => {});
+    else void this.ctx.resume().catch(() => {});
+  }
+
+  public getState(): { held: boolean; context: AudioContextState | 'none' } {
+    return { held: this.held, context: this.ctx?.state ?? 'none' };
   }
 
   private applyMasterGain(rampTime = 0.03): void {
@@ -68,7 +85,7 @@ export class OrbitalAudioController {
   }
 
   private ensureContext(): AudioContext | null {
-    if (typeof window === 'undefined') return null;
+    if (typeof window === 'undefined' || this.held) return null;
     const AudioCtx =
       window.AudioContext ||
       (window as unknown as { webkitAudioContext?: typeof AudioContext })

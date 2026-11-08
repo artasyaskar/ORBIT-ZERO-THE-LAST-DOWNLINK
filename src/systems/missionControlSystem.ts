@@ -166,8 +166,14 @@ const SCANNER_BEAM_LENGTH_M = 0.28;
 const SCANNER_BEAM_LOCK_RADIUS_M = 0.03;
 /** A lock moves to another beacon only when that beacon is this much nearer the beam (no flicker between neighbours). */
 const SCANNER_BEAM_SWITCH_MARGIN_M = 0.01;
-/** A release this soon after the beam lost its lock still scans the last locked sector (pinch-release jitter). */
-const SCANNER_RELEASE_GRACE_MS = 300;
+/**
+ * Pinch-release jitter: a release this soon after the beam slipped off a beacon still scans it, but only if the
+ * beam had rested on it for SCANNER_LOCK_DWELL_MS (deliberate aim). Sweeping across a beacon never counts.
+ */
+const SCANNER_RELEASE_GRACE_MS = 200;
+const SCANNER_LOCK_DWELL_MS = 250;
+/** A scanner let go within this distance of the globe's surface with no lock gets the "no scan" feedback. */
+const SCANNER_NEAR_GLOBE_M = 0.15;
 /** Second-pinch window for in-world paid hints (see handleAriaDelegate). */
 const HINT_CONFIRM_WINDOW_MS = 3000;
 /** Second-pinch window for discarding from the pad or panel button in a headset (see handleDiscardSelected). */
@@ -286,9 +292,11 @@ export class MissionControlSystem extends createSystem({
   private discardArmedPacketId: string | null = null;
   /** Sector the held scanner's beam is locked on right now (null = beam on no beacon). */
   private scannerBeamLock: SectorId | null = null;
-  /** Last beam lock and when it was last held, so release jitter does not lose an aimed scan. */
+  /** When the current lock began; and the last lock that ended: which beacon, when, and for how long it held. */
+  private scannerBeamLockSince = -Infinity;
   private scannerBeamLastLockId: SectorId | null = null;
   private scannerBeamLastLockAt = -Infinity;
+  private scannerBeamLastLockHeldMs = 0;
   /** Distance along the beam from the aperture to the locked beacon (sizes the visible beam). */
   private scannerBeamAlong = SCANNER_BEAM_LENGTH_M;
   private readonly beamOrigin = new Vector3();
@@ -306,6 +314,10 @@ export class MissionControlSystem extends createSystem({
   private lastPadPress: { id: string; at: number } = { id: '', at: -Infinity };
   /** The last 40 sound cues (newest last), read by the e2e connection checks. */
   private readonly cueLog: Array<{ cue: OrbitalSoundCue; at: number }> = [];
+  /** The player is away: XR session not visible, page hidden, or flat-page window blurred. */
+  private interrupted = false;
+  /** Voice and sound currently held (see syncMediaHold). */
+  private mediaHeld = false;
   /** XR presentation state the desk pads were last synced for (null = never). */
   private deskPadsPresenting: boolean | null = null;
   private moodLightCache: Light[] | null = null;
@@ -480,11 +492,19 @@ export class MissionControlSystem extends createSystem({
         this.isArSupported = false;
       });
     }
-    const pauseWhenHidden = () => {
-      if (document.hidden && !this.engine.getState().paused) this.togglePause();
-    };
-    document.addEventListener('visibilitychange', pauseWhenHidden);
-    this.cleanupFuncs.push(() => document.removeEventListener('visibilitychange', pauseWhenHidden));
+    // Leaving the page (tab hidden) or, on the flat page, switching away (window blur) holds the media and
+    // pauses a running pass. In a headset the session's own visibility events do this (bindXRSessionHandEvents).
+    const onPageVisibility = () => this.setInterrupted(document.hidden, true);
+    const onWindowBlur = () => { if (!this.world.renderer.xr.isPresenting) this.setInterrupted(true, true); };
+    const onWindowFocus = () => { if (!this.world.renderer.xr.isPresenting && !document.hidden) this.setInterrupted(false, false); };
+    document.addEventListener('visibilitychange', onPageVisibility);
+    window.addEventListener('blur', onWindowBlur);
+    window.addEventListener('focus', onWindowFocus);
+    this.cleanupFuncs.push(() => {
+      document.removeEventListener('visibilitychange', onPageVisibility);
+      window.removeEventListener('blur', onWindowBlur);
+      window.removeEventListener('focus', onWindowFocus);
+    });
     // 1. Bind NASA Blue Marble 4K textures onto the 3D Earth Globe & Cloud Layer
     this.bindEarthPlanetTextures();
 
@@ -839,6 +859,13 @@ export class MissionControlSystem extends createSystem({
         }),
         get3DTargetWorldPosition: (targetId: string) => this.get3DTargetWorldPosition(targetId),
         getCueLog: () => this.cueLog.slice(),
+        getMediaState: () => ({
+          interrupted: this.interrupted,
+          held: this.mediaHeld,
+          audio: this.audio.getState(),
+          voiceHeld: this.voiceCommander?.getIsHeld() ?? null,
+          voiceSpeaking: this.voiceCommander?.getIsSpeaking() ?? null,
+        }),
         /** IWSDK's per-hand pointer arbitration: which sub-pointer is active and what the hand ray (the laser) hits. */
         getHandPointerState: (hand: 'left' | 'right') => {
           const multi = (this.input as unknown as { xr?: { multiPointers?: Record<string, any> } }).xr?.multiPointers?.[hand];
@@ -1246,6 +1273,7 @@ export class MissionControlSystem extends createSystem({
     this.updateXRHandInteractions(delta);
     this.updateMissionHudPose(Math.min(Math.max(0, delta), 0.1));
     this.frameSnapshot = this.engine.getState();
+    this.syncMediaHold(this.frameSnapshot.paused);
     if (this.frameSnapshot.paused) return;
     const simulationDelta = Math.min(Math.max(0, delta), MAX_SIMULATION_STEP_SEC);
     if (this.frameSnapshot.phase !== 'DEBRIEF') this.missionElapsedTime += simulationDelta;
@@ -1848,11 +1876,16 @@ export class MissionControlSystem extends createSystem({
           // One aim rule for the live highlight and for the scan on release (see scannerBeamTarget).
           const previousLock = this.scannerBeamLock;
           const lock = this.scannerBeamTarget(scannerObj, previousLock);
-          this.scannerBeamLock = lock;
-          if (lock) {
-            this.scannerBeamLastLockId = lock;
-            this.scannerBeamLastLockAt = performance.now();
+          if (lock !== previousLock) {
+            const now = performance.now();
+            if (previousLock) {
+              this.scannerBeamLastLockId = previousLock;
+              this.scannerBeamLastLockAt = now;
+              this.scannerBeamLastLockHeldMs = now - this.scannerBeamLockSince;
+            }
+            this.scannerBeamLockSince = now;
           }
+          this.scannerBeamLock = lock;
           // A locked beam stops at its beacon and brightens, so the player sees exactly what a release scans.
           const beamLen = lock ? Math.min(SCANNER_BEAM_LENGTH_M, Math.max(0.02, this.scannerBeamAlong)) : SCANNER_BEAM_LENGTH_M;
           aimLaser.scale.set(1, beamLen / SCANNER_BEAM_LENGTH_M, 1);
@@ -2895,15 +2928,15 @@ export class MissionControlSystem extends createSystem({
       this.nativeHands.reset();
       this.boundXRSession = null;
       this.laserHover.clear(); // hand rays end with the session and may not send pointerleave
+      // Leaving VR mid-pass (Quest menu > Exit, or the session ended) holds the clock; resume from the page or in VR.
+      this.setInterrupted(true, true);
+      this.setInterrupted(false, false);
       this.syncAll();
     };
     // Quest system menu (visible-blurred) or headset taken off (hidden): hand input stops, so hold the pass
-    // clock and the live window instead of letting them run out unseen. The player resumes from the HUD.
-    // This is an event, not a per-frame check: a hidden session delivers no XR frames.
-    const onVisibilityChange = () => {
-      const state = this.engine.getState();
-      if (session.visibilityState !== 'visible' && !state.paused && state.phase !== 'DEBRIEF') this.togglePause();
-    };
+    // clock, the live window, voice and sound instead of letting them run out unseen. The player resumes
+    // from the HUD. This is an event, not a per-frame check: a hidden session delivers no XR frames.
+    const onVisibilityChange = () => this.setInterrupted(session.visibilityState !== 'visible', true);
 
     session.addEventListener('selectstart', onSelectStart);
     session.addEventListener('selectend', onSelectEnd);
@@ -4329,7 +4362,30 @@ export class MissionControlSystem extends createSystem({
     if (state.phase === 'DEBRIEF') return;
     this.applyAction({ type: state.paused ? 'RESUME' : 'PAUSE' });
     if (!state.paused) this.forceReleaseAllGrabs();
+    this.syncMediaHold();
     this.syncAll();
+  }
+
+  /**
+   * The player left (Quest menu, headset off, tab hidden, flat-page window blur) or came back. While away,
+   * voice and sound are held. With `pausePass`, a running pass (clock started, or the live window) also
+   * pauses; it resumes only from the HUD/pause control, never by itself. Before the first scan nothing runs.
+   */
+  private setInterrupted(away: boolean, pausePass: boolean): void {
+    this.interrupted = away;
+    const state = this.engine.getState();
+    const running = (state.phase === 'OPERATIONS' && state.passStarted) || state.phase === 'DOWNLINK';
+    if (away && pausePass && running && !state.paused) this.togglePause();
+    this.syncMediaHold();
+  }
+
+  /** Voice and sound stop while the pass is paused or the player is away, and come back together. */
+  private syncMediaHold(paused = this.engine.getState().paused): void {
+    const held = paused || this.interrupted;
+    if (held === this.mediaHeld) return;
+    this.mediaHeld = held;
+    this.voiceCommander?.setHeld(held);
+    this.audio.setHeld(held);
   }
 
   private cyclePreference(key: keyof MissionPreferences): void {
@@ -4738,22 +4794,34 @@ export class MissionControlSystem extends createSystem({
     }
 
     // A scan costs power, so it fires only at the beacon the visible beam is locked on (the same rule as the
-    // live highlight), or was locked on a moment ago (the hand shifts as the pinch opens).
-    const lock = this.scannerBeamTarget(obj, this.scannerBeamLock)
-      ?? (performance.now() - this.scannerBeamLastLockAt <= SCANNER_RELEASE_GRACE_MS ? this.scannerBeamLastLockId : null);
+    // live highlight), or rested on until a moment ago (the hand shifts as the pinch opens).
+    const graceLock = performance.now() - this.scannerBeamLastLockAt <= SCANNER_RELEASE_GRACE_MS
+      && this.scannerBeamLastLockHeldMs >= SCANNER_LOCK_DWELL_MS ? this.scannerBeamLastLockId : null;
+    const lock = this.scannerBeamTarget(obj, this.scannerBeamLock) ?? graceLock;
     this.scannerBeamLock = null;
+    this.scannerBeamLockSince = -Infinity;
     this.scannerBeamLastLockId = null;
     this.scannerBeamLastLockAt = -Infinity;
+    this.scannerBeamLastLockHeldMs = 0;
     if (lock) {
       if (lock !== this.engine.getState().selectedSectorId) this.applyAction({ type: 'SELECT_SECTOR', sectorId: lock });
       this.handleScan();
-    } else if (this.beamOrigin.distanceTo(GLOBE_CENTER_WORLD) < 0.34) {
+    } else if (this.isNearGlobeSurface(this.beamOrigin, SCANNER_NEAR_GLOBE_M)) {
       // Let go at the globe with the beam on no beacon: nothing is spent, and the player is told why.
       this.playCue('ERROR_REJECT');
       this.caption = 'No scan: point the scanner beam at a sector until the beacon glows, then let go.';
       this.syncAll();
     }
     returnHome();
+  }
+
+  /** True when the point is within `margin` metres of the Earth globe's surface (its real centre and scale). */
+  private isNearGlobeSurface(point: Vector3, margin: number): boolean {
+    const globe = this.sceneObject('earth-globe');
+    if (!globe) return false;
+    globe.getWorldPosition(this.beamGlobeCenter);
+    const radius = GLOBE_RADIUS * globe.getWorldScale(this.beamPoint).x;
+    return point.distanceTo(this.beamGlobeCenter) <= radius + margin;
   }
 
   /**

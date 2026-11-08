@@ -171,7 +171,19 @@ await page.addInitScript(() => {
         scanner.updateWorldMatrix(true, false);
         return { aperture: scanner.localToWorld(new V(0, 0.092, -0.075)), dir: new V(0, 0, -1).transformDirection(scanner.matrixWorld) };
       };
+      const beacons = ['a', 'b', 'c', 'd', 'e', 'f'].map((id) => api.get3DTargetWorldPosition(`sector-${id}`)).filter(Boolean).map((b) => new V(b.x, b.y, b.z));
+      // 'miss': a spot on the globe's face well clear of every beacon (the globe turns when a sector is selected).
+      const missPoint = () => {
+        const centre = beacons.reduce((acc, b) => acc.add(b), new V()).multiplyScalar(1 / beacons.length);
+        for (const [dx, dy] of [[0.16, 0.05], [-0.16, 0.05], [0.14, -0.12], [-0.14, -0.12], [0.0, 0.17]]) {
+          const p = centre.clone().add(new V(dx, dy, -0.03));
+          if (beacons.every((b) => b.distanceTo(p) > 0.08)) return p;
+        }
+        return centre.clone().add(new V(0.2, 0.08, -0.03));
+      };
+      const missAt = aimAt === 'miss' ? missPoint() : null;
       const point = () => {
+        if (missAt) return missAt.clone();
         const p = typeof aimAt === 'string' ? api.get3DTargetWorldPosition(aimAt) : aimAt;
         return new V(p.x, p.y, p.z);
       };
@@ -299,7 +311,7 @@ try {
     'a fingertip brushing the scanner without a pinch leaves it in the holster', JSON.stringify(brush));
   const powerBeforeMiss = (await state()).power;
   t0 = await now();
-  const miss = await H('scanWithScanner', 'hand-right', { x: 0.12, y: 1.2, z: -0.36 }); // over the globe, beam on no beacon
+  const miss = await H('scanWithScanner', 'hand-right', 'miss'); // over the globe, beam on no beacon
   let s = await state();
   check(miss.grabbed, 'pinching the scanner in its holster picks it up (the tool follows the hand)', JSON.stringify(miss));
   const missCues = await cuesSince(t0);
@@ -317,6 +329,67 @@ try {
   check(aimE.selectedWhileAiming === 'E' && s.packets.length === 2 && s.packets.some((p) => p.sectorId === 'B') && s.packets.some((p) => p.sectorId === 'E'),
     'a second scanner pinch scans E and keeps the first cube (no accidental discard)', JSON.stringify(s.packets.map((p) => `${p.id}:${p.sectorId}`)));
   check((await pos('scanner-tool'))?.x < -0.4, 'scanner returns to the left holster after each release', JSON.stringify(await pos('scanner-tool')));
+
+  // ---- Quest menu / headset off / leaving VR: the running pass pauses, nothing is lost, the laser resumes it ----
+  const snap = () => page.evaluate(() => {
+    const api = window.__ORBIT_ZERO__;
+    const st = api.getState();
+    return { paused: st.paused, clock: st.passRemainingSec, phase: st.phase, media: api.getMediaState(), immersive: api.getRuntimeStatus().immersive,
+      step: api.getPanelText('mission-hud', 'StepTitle'), button: api.getPanelText('mission-hud', 'Lbl_HudTransmit') };
+  });
+  const resumeByLaser = async () => {
+    await H('rayPinch', 'hand-right', await pos('mission-hud:Btn_HudTransmit'));
+    await page.waitForTimeout(300);
+    return snap();
+  };
+  let before = await snap();
+  await page.evaluate(() => window.__ORBIT_IWER__.updateVisibilityState('visible-blurred'));
+  await page.waitForTimeout(400);
+  const inMenu = await snap();
+  await page.waitForTimeout(2600);
+  await page.evaluate(() => window.__ORBIT_IWER__.updateVisibilityState('visible'));
+  await page.waitForTimeout(400);
+  let after = await snap();
+  check(before.clock !== null && !before.paused && inMenu.paused && inMenu.media.held && inMenu.media.audio.held && inMenu.media.voiceHeld,
+    'Quest menu (session visible-blurred): the pass pauses, voice and sound are held', `before=${JSON.stringify(before)} inMenu=${JSON.stringify(inMenu)}`);
+  check(after.paused && Math.abs(after.clock - before.clock) < 0.05 && after.step === 'PAUSED' && /RESUME PASS/.test(after.button ?? ''),
+    '3 s in the Quest menu = 0 s of pass clock; back in the game the HUD reads PAUSED / RESUME PASS', `clock ${before.clock?.toFixed(2)} -> ${after.clock?.toFixed(2)} | ${after.step} | ${after.button}`);
+  let resumed = await resumeByLaser();
+  await page.waitForTimeout(1000);
+  const ticking = await snap();
+  check(!resumed.paused && !resumed.media.held && !resumed.media.audio.held && ticking.clock < resumed.clock - 0.3,
+    'laser + pinch on RESUME PASS resumes: voice and sound return and the clock runs again', `paused=${resumed.paused} held=${resumed.media.held} clock ${resumed.clock?.toFixed(2)} -> ${ticking.clock?.toFixed(2)}`);
+
+  before = await snap();
+  await page.evaluate(() => window.__ORBIT_IWER__.updateVisibilityState('hidden'));
+  await page.waitForTimeout(1500);
+  await page.evaluate(() => window.__ORBIT_IWER__.updateVisibilityState('visible'));
+  await page.waitForTimeout(400);
+  after = await snap();
+  check(after.paused && Math.abs(after.clock - before.clock) < 0.05, 'headset taken off (session hidden) for 1.5 s: paused, 0 s of pass clock used',
+    `clock ${before.clock?.toFixed(2)} -> ${after.clock?.toFixed(2)} paused=${after.paused}`);
+  resumed = await resumeByLaser();
+
+  before = await snap();
+  await page.evaluate(() => window.__ORBIT_IWER__.activeSession?.end());
+  await page.waitForFunction(() => !window.__ORBIT_ZERO__.getRuntimeStatus().immersive, null, { timeout: 15000 });
+  await page.waitForTimeout(1500);
+  after = await snap();
+  check(!resumed.paused && after.paused && !after.immersive && Math.abs(after.clock - before.clock) < 0.3,
+    'the session ends mid-pass (Quest menu > Exit): the pass pauses on the flat page and keeps its clock', `clock ${before.clock?.toFixed(2)} -> ${after.clock?.toFixed(2)} paused=${after.paused}`);
+  // Back into VR (test setup: in-world XR button), then resume by laser.
+  await page.evaluate(() => window.__ORBIT_ZERO__.clickPanel('briefing-panel', 'xr-button'));
+  await page.waitForFunction(() => window.__ORBIT_ZERO__.getRuntimeStatus().immersive, null, { timeout: 30000 });
+  await page.evaluate(async () => {
+    const r = window.__ORBIT_IWER__.remote;
+    await r.dispatch('set_input_mode', { mode: 'hand' });
+    for (const d of ['hand-left', 'hand-right']) await r.dispatch('set_connected', { device: d, connected: true });
+    for (const d of ['hand-left', 'hand-right']) await r.dispatch('set_transform', { device: d, position: window.__HANDS__.rest(d) });
+  });
+  await page.waitForTimeout(1200);
+  resumed = await resumeByLaser();
+  check(resumed.immersive && !resumed.paused && resumed.clock <= after.clock && resumed.clock > after.clock - 3,
+    'back in VR, laser + pinch on RESUME PASS continues the same pass', `immersive=${resumed.immersive} paused=${resumed.paused} clock ${after.clock?.toFixed(2)} -> ${resumed.clock?.toFixed(2)}`);
 
   // ---- Discard must be deliberate ----
   const beforeDiscard = (await state()).packets.length;

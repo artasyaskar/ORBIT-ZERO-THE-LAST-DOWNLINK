@@ -113,6 +113,27 @@ describe('VoiceCommander (Commander ARIA-7)', () => {
     expect(audio.playRadioSquelchBurst).not.toHaveBeenCalled();
   });
 
+  it('holds speech while the pass is paused and speaks the interrupted line again on release', () => {
+    voiceCommander.trigger('PASS_START');
+    expect(voiceCommander.getIsSpeaking()).toBe(true);
+
+    voiceCommander.setHeld(true);
+    expect(voiceCommander.getIsHeld()).toBe(true);
+    expect(voiceCommander.getIsSpeaking()).toBe(false);
+
+    // A line triggered during the pause waits; nothing is spoken while held.
+    voiceCommander.trigger('SCAN_ACQUIRED');
+    vi.advanceTimersByTime(15000);
+    expect(voiceCommander.getIsSpeaking()).toBe(false);
+
+    // Release: the cut-off line comes first, then the one queued during the pause.
+    voiceCommander.setHeld(false);
+    expect(voiceCommander.getIsSpeaking()).toBe(true);
+    expect(voiceCommander.getActiveSubtitle()).toContain('Indus levees breached');
+    vi.advanceTimersByTime(12000);
+    expect(voiceCommander.getActiveSubtitle()).toContain('Telemetry acquired');
+  });
+
   it('computes avatar reactivity metrics during speech vs idle', () => {
     // Idle state
     const idleMetrics = voiceCommander.getAvatarMetrics(0.016);

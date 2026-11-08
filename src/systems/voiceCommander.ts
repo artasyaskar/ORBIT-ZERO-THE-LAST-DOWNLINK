@@ -156,6 +156,8 @@ export class VoiceCommander {
   private activeLine: DialogueLine | null = null;
   private isSpeaking = false;
   private isMuted = false;
+  /** Pass paused: speech stopped, queue kept (see setHeld). */
+  private held = false;
   private cooldownTimestamps = new Map<VoiceDialogueId, number>();
   private speechTimeoutId: number | null = null;
   private radioTransientTimeoutId: number | null = null;
@@ -207,6 +209,27 @@ export class VoiceCommander {
   public toggleMute(): boolean {
     this.setMuted(!this.isMuted);
     return this.isMuted;
+  }
+
+  /**
+   * While the pass is paused nothing is spoken. A line cut off by the pause goes back to the front of the
+   * queue and is spoken again on release; lines triggered meanwhile wait behind it.
+   */
+  public setHeld(held: boolean): void {
+    if (this.held === held) return;
+    this.held = held;
+    if (held) {
+      const interrupted = this.isSpeaking ? this.activeLine : null;
+      this.stopCurrentSpeech();
+      if (interrupted) this.queue.unshift(interrupted);
+      this.activeLine = null;
+      return;
+    }
+    if (!this.isSpeaking) this.advanceQueue();
+  }
+
+  public getIsHeld(): boolean {
+    return this.held;
   }
 
   public getIsMuted(): boolean {
@@ -393,6 +416,7 @@ export class VoiceCommander {
   }
 
   private advanceQueue(): void {
+    if (this.held) return; // paused pass: setHeld(false) speaks the queue
     if (this.queue.length === 0) {
       this.activeLine = null;
       this.isSpeaking = false;
