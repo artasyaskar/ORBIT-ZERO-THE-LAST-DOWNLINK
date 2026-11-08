@@ -256,6 +256,7 @@ function buildSphericalSectorOverlay(
     roughness: 0.2,
     metalness: 0.2,
     side: DoubleSide,
+    forceSinglePass: true, // thin ribbon on the globe: one pass instead of back+front (one draw per eye saved)
     transparent: true,
     opacity: 0.86,
     depthWrite: false,
@@ -328,6 +329,7 @@ function buildSphericalSectorOverlay(
       transparent: true,
       opacity: 0.18,
       side: DoubleSide,
+      forceSinglePass: true,
       depthWrite: false,
     });
     stormMat.name = `SectorStormCapMat_${sectorId}`;
@@ -606,6 +608,7 @@ export function createEarthGlobeAsset(): Object3D {
     transparent: true,
     opacity: 0.0,
     side: DoubleSide,
+    forceSinglePass: true,
     depthWrite: false,
   });
   swathMat.name = 'OrbitalScanSwathConeMat';
@@ -684,6 +687,7 @@ export function createEarthGlobeAsset(): Object3D {
     transparent: true,
     opacity: 0.0,
     side: DoubleSide,
+    forceSinglePass: true,
     depthWrite: false,
   });
   laserSheathMat.name = 'DownlinkLaserSheathMat';
@@ -704,6 +708,7 @@ export function createEarthGlobeAsset(): Object3D {
     transparent: true,
     opacity: 0.95,
     side: DoubleSide,
+    forceSinglePass: true,
     depthWrite: false,
   });
   reticleRingMat.name = 'ActiveReticleRingMat';

@@ -622,6 +622,7 @@ export function createOrbitalConsoleAsset(): Object3D {
             opacity: 0.18,
             blending: AdditiveBlending,
             side: DoubleSide,
+            forceSinglePass: true,
             depthWrite: false,
         });
         const sweepMesh = new Mesh(sweepGeo, sweepMat);
@@ -678,6 +679,7 @@ export function createOrbitalConsoleAsset(): Object3D {
                 opacity: 0.45,
                 blending: AdditiveBlending,
                 side: DoubleSide,
+                forceSinglePass: true,
                 depthWrite: false,
             }),
         );
@@ -886,6 +888,7 @@ export function createOrbitalConsoleAsset(): Object3D {
         transparent: true,
         opacity: 0.0,
         side: DoubleSide,
+        forceSinglePass: true,
         depthWrite: false,
     });
     beamMat.name = 'DownlinkUplinkBeamMat';
@@ -1233,6 +1236,10 @@ export function createOrbitalConsoleAsset(): Object3D {
             opacity: 0.85,
             blending: AdditiveBlending,
             side: DoubleSide,
+            // One pass instead of back+front. Without depth writes every face still adds its glow, so the
+            // additive result matches the two-pass look (one draw per eye saved on a 3k-triangle arc).
+            forceSinglePass: true,
+            depthWrite: false,
         }),
     );
     horizonLimbGlow.name = 'StarboardAtmosphereGlowArc';
@@ -1520,6 +1527,7 @@ export function createOrbitalConsoleAsset(): Object3D {
         transparent: true,
         opacity: 0.88,
         side: DoubleSide,
+        forceSinglePass: true,
     });
     const skylightAtmoArc = new Mesh(
         new TorusGeometry(0.60, 0.035, 12, 48, Math.PI * 0.85),
@@ -1546,6 +1554,7 @@ export function createOrbitalConsoleAsset(): Object3D {
         opacity: 0.024,
         depthWrite: false,
         side: DoubleSide,
+        forceSinglePass: true,
     });
     const canopyGlass = new Mesh(
         bevelBox(2.88, 1.35, 0.004, 0.001, 0.002, 1),

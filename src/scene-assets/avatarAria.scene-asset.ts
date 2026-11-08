@@ -291,6 +291,7 @@ export function createAvatarAriaAsset(): Object3D {
       blending: AdditiveBlending,
       depthWrite: false,
       side: DoubleSide,
+      forceSinglePass: true, // flat additive plate: one pass looks the same as three.js's back+front passes
     });
     portraitMat.name = 'AriaPortraitPlateMat';
     const portraitMesh = new Mesh(new PlaneGeometry(0.26, 0.26), portraitMat);

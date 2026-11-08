@@ -193,6 +193,7 @@ function createMergedStormFloodLightning(): Mesh {
     roughness: 0.9,
     metalness: 0.0,
     side: DoubleSide,
+    forceSinglePass: true,
     depthWrite: false,
   });
   mergedMat.name = 'MergedStormFloodLightningMat';
