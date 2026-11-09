@@ -2,12 +2,18 @@ import { iwsdkDev } from '@iwsdk/vite-plugin-dev';
 import { rmSync } from 'node:fs';
 import { defineConfig, type Plugin } from 'vite';
 
-/** Vite copies public/ verbatim (ignoring .gitignore); keep raw source models out of deployments. */
+/**
+ * Vite copies public/ verbatim (ignoring .gitignore); keep raw source models out of deployments. The two NASA
+ * CubeSat GLBs are reference files only: the game's CubeSat is procedural (createOrbitZeroCubeSatAsset).
+ */
 const excludeIncomingSources = (): Plugin => ({
   name: 'orbit-zero-exclude-incoming-sources',
   apply: 'build',
   closeBundle() {
     rmSync('dist/assets/models/incoming', { recursive: true, force: true });
+    for (const file of ['nasa-cubesat-icecube.glb', 'nasa-cubesat-mirata.glb']) {
+      rmSync(`dist/assets/models/${file}`, { force: true });
+    }
   },
 });
 

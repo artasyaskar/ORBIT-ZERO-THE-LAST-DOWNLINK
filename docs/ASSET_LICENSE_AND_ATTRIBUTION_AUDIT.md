@@ -17,9 +17,9 @@ All visual, geometric, sonic, and textural assets used in *ORBIT ZERO: THE LAST 
 
 | Asset Name | Source Path | Provenance / Creator | License | Attribution Citation |
 |---|---|---|---|---|
-| **NASA AcrimSAT** | `public/assets/models/nasa_acrimsat.glb` | NASA / JPL (Jet Propulsion Laboratory) 3D Resources | Public Domain (NASA Open Data & Media Policy) | *NASA JPL 3D Resources: AcrimSAT Earth-observing satellite model.* |
-| **NASA IceCube CubeSat** | `public/assets/models/nasa-cubesat-icecube.glb` | NASA Goddard Space Flight Center / ESTO | Public Domain (NASA Open Data & Media Policy) | *NASA ESTO 3U CubeSat demonstration platform.* |
-| **NASA MiRaTA CubeSat** | `public/assets/models/nasa-cubesat-mirata.glb` | NASA Earth Science Technology Office / MIT LL | Public Domain (NASA Open Data & Media Policy) | *Microwave Radiometer Technology Acceleration (MiRaTA) CubeSat.* |
+| ~~NASA AcrimSAT~~ (removed, not in the project) | - | NASA / JPL 3D Resources | Public Domain | Not used. |
+| **NASA IceCube CubeSat** (reference only, not loaded or deployed) | `public/assets/models/nasa-cubesat-icecube.glb` | NASA Goddard Space Flight Center / ESTO | Public Domain (NASA Open Data & Media Policy) | *NASA ESTO 3U CubeSat demonstration platform.* |
+| **NASA MiRaTA CubeSat** (reference only, not loaded or deployed) | `public/assets/models/nasa-cubesat-mirata.glb` | NASA Earth Science Technology Office / MIT LL | Public Domain (NASA Open Data & Media Policy) | *Microwave Radiometer Technology Acceleration (MiRaTA) CubeSat.* |
 | **Tactile Hardware (Console, Bay, Cradle)** | `src/scene-assets/orbitalConsole.scene-asset.ts`, `tactileHardware.scene-asset.ts` | Original Three.js procedural geometries by author | MIT License (Developer Original) | *Authored procedural geometric primitives.* |
 | **Earth Globe & Beacon Rings** | `src/scene-assets/earthGlobe.scene-asset.ts` | Original Three.js procedural meshes by author | MIT License (Developer Original) | *Authored multi-layer spherical geometries.* |
 

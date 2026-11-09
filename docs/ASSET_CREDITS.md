@@ -4,12 +4,18 @@ All 3D models, planetary textures, and procedural geometry libraries integrated 
 
 ---
 
-## 1. 3D Spacecraft Model (`public/assets/models/`)
+## 1. Spacecraft model
 
-| Asset ID (`src/assets.ts`) | Local File Path | Original Source | License | Size & Geometry | Modifications & Optimization |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| `nasa-cubesat` | `public/assets/models/nasa-cubesat-icecube.glb` | **NASA 3D Resources — ICECube 3U Earth-Observation CubeSat** (`https://science.nasa.gov/3d-resources/` / `https://github.com/nasa/NASA-3D-Resources/tree/master/3D%20Models/CubeSat%20-%20ICECube`) — NASA Goddard Space Flight Center | **NASA Media Usage Guidelines (Public Domain / US Government Work)** | `309.6 KB` (`309,568 bytes`), 6 meshes, 21 PBR material slots | Normalized root scale (`0.042`) to true 1:1 WebXR meters (`0.34m` 3U chassis, `0.68m` deployed wingspan); articulated `Pivot-Layer_2..5` matrices to deploy the twin solar array wings in orbital flight configuration; upgraded material PBR metallic/roughness/emissive factors for Kapton gold MLI foil, silicon photovoltaic cells, optical aperture lens, and anodized structural rails. |
-| *(Reference archive)* | `public/assets/models/nasa-cubesat-mirata.glb` | **NASA 3D Resources — MiRaTa 3U Weather/Radiometer CubeSat** (`https://github.com/nasa/NASA-3D-Resources/tree/master/3D%20Models/CubeSat%20-%20MiRaTa`) | **NASA Public Domain** | `444.6 KB` (`444,564 bytes`) | Retained locally as verified backup 3U radiometer spacecraft asset. |
+The CubeSat in the game is **procedural** (`createOrbitZeroCubeSatAsset` in `src/scene-assets/earthGlobe.scene-asset.ts`, asset id `nasa-cubesat`), modelled after NASA's public 3U CubeSat references. **No GLB model is loaded or deployed.**
+
+Two NASA 3D Resources files stay in the repository as visual references only and are removed from the build by `vite.config.ts`:
+
+| Local file | Original source | License |
+| :--- | :--- | :--- |
+| `public/assets/models/nasa-cubesat-icecube.glb` | NASA 3D Resources: ICECube 3U CubeSat (NASA Goddard), https://github.com/nasa/NASA-3D-Resources | NASA media guidelines (US Government work) |
+| `public/assets/models/nasa-cubesat-mirata.glb` | NASA 3D Resources: MiRaTA 3U CubeSat, https://github.com/nasa/NASA-3D-Resources | NASA media guidelines (US Government work) |
+
+The NASA AcrimSAT model listed in earlier audits was removed from the project and is not used.
 
 ---
 
