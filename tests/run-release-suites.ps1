@@ -10,6 +10,8 @@ $suites = @(
   @{ name = 'enter-vr'; cmd = 'node tests/e2e-enter-vr.mjs' },
   @{ name = 'desktop'; cmd = 'node tests/e2e-redesign-desktop.mjs' },
   @{ name = 'hands-only'; cmd = 'node tests/e2e-hands-only.mjs'; env = @{ ORBIT_SKIP_BUILD = '1' } },
+  @{ name = 'judge-fit'; cmd = 'node tests/e2e-judge-fit.mjs' },
+  @{ name = 'controllers'; cmd = 'node tests/e2e-controllers.mjs' },
   @{ name = 'perf-hud'; cmd = 'node tests/e2e-perf-hud.mjs'; env = @{ ORBIT_PERF_SUMMARY = '0' } },
   @{ name = 'deploy'; cmd = 'node tests/deploy-static-check.mjs' }
 )

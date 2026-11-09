@@ -20,6 +20,9 @@
     "test:hands-first": "node tests/e2e-hands-first-proof.mjs",
     "test:enter-vr": "node tests/e2e-enter-vr.mjs",
     "test:desktop": "node tests/e2e-redesign-desktop.mjs",
+    "test:judge-fit": "node tests/e2e-judge-fit.mjs",
+    "test:controllers": "node tests/e2e-controllers.mjs",
+    "test:release": "powershell -NoProfile -File tests/run-release-suites.ps1",
     "test:deploy": "node tests/deploy-static-check.mjs",
     "build": "vite build",
     "preview": "vite preview"
