@@ -144,7 +144,7 @@ d:\ORBIT-ZERO-THE-LAST-DOWNLINK\
 ## 4. Spatial Interaction & Ergonomic Architecture
 
 ### 4.1 Seated Console Layout ("Airplane Seat Test")
-- Player origin (`world.player`): Seated at `(0, 0, 0)` with eye level around `y = 1.15m – 1.25m` (`ReferenceSpaceType.LocalFloor`).
+- Player rig (`world.player`): starts each session at `(0, 0, 0)` in the `local-floor` space. The cockpit is laid out for a head at the **design eye** `SEATED_EYE = (0, 1.25, 0.10)` (`src/ui/spatialLayout.ts`). On the first valid head pose, `updateSeatFit()` (`src/systems/missionControlSystem.ts`) shifts the rig by `seatFitOffset(head)` so the real head lands there; a standing judge (eye 1.7–1.9 m) is brought down, a low seat raised (limits x/z ±0.8 m, y −0.65…+0.45 m). Sitting down or standing up later (head 0.22 m off the design height for 3 s, nothing grabbed) refits the height. The RECENTER pad and the briefing button refit all three axes. See ADR-010.
 - **Central Console Desk:** Positioned at `y = 0.78m`, `z = -0.50m`, curved in a `50°` arc so every slot is within `0.35m – 0.60m` reach of the user's resting hands.
 - **Left Wing (`x = -0.32m, y = 0.85m, z = -0.45m`):** Scanner Dock (`Optical` / `Radar` mode toggle button + grabbable Scanner Tool) and **Raw Observation Tray** (3 magnetic slots).
 - **Center Stage (`x = 0.0m, y = 0.92m, z = -0.48m`):** Rotatable **3D Earth Globe** (`r = 0.16m`, `OneHandGrabbable` with `rotate: true, translate: false`) and overhead **CubeSat Model** (`y = 1.32m, z = -0.55m`).

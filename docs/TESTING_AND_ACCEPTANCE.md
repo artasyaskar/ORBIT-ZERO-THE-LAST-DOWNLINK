@@ -67,8 +67,13 @@ time out on the 8 GB dev laptop) and prints one PASS/FAIL line each:
 | `tests/e2e-enter-vr.mjs` | Headset lobby, one-tap ENTER VR, every failure path shows a message + TRY AGAIN | emulator |
 | `tests/e2e-redesign-desktop.mjs` | The flat-page game by mouse and keys | desktop |
 | `tests/e2e-hands-only.mjs` | Every object's touch action, with the fingertip placed on the target | unit-level (placement, not reach) |
+| `tests/e2e-judge-fit.mjs` | Four head positions at session start (eye 1.0, 1.25, 1.7, 1.9 m): the seat fit lands the head on the design eye; the 13 desk targets are within 0.7 m of the nearer shoulder of a body model; the globe's near surface is at least 0.4 m from the eye; a laser press works; standing then sitting refits the height; RECENTER restores a drifted head | emulator, geometry (a body model, not a human) |
+| `tests/e2e-controllers.mjs` | Controller input, no hands: START PASS, a beacon with each controller, sensor pad, FIRE SWATH plunger, panel COMPRESS and ADD TO BAY, TRANSMIT opens the downlink window | emulator, end to end |
 | `tests/e2e-perf-hud.mjs` | `?perf=1` readout, head-locked panel, per-eye draws/tris, 60 s summary | emulator |
 | `tests/deploy-static-check.mjs` | `dist/` served at `/` and a sub-path: landing, game, headset lobby, no failed requests | static hosting |
+
+`npm run test:release` runs the same runner. Unit tests (`npx vitest run`) include the seat-fit offset maths
+(`tests/spatialReadability.test.ts`).
 
 Render budget: `node tests/profile-xr-budget.mjs <label>` (per-eye draws and triangles in nine views).
 Live site: `node tests/live-url-smoke.mjs <https-url>` after a deploy (see `docs/DEPLOY.md`).
@@ -92,7 +97,7 @@ If a Meta Quest 2, 3, or 3S is available during Phase 6:
 ## 6. Final Submission Acceptance Checklist (Competition Gate)
 - [ ] **Gaming Track & New Experience Compliance:** All code written within the competition window; genuine strategy game loop.
 - [ ] **Hands-First Mandate:** 100% playable from start to finish and replayable without controllers.
-- [ ] **Seated Airplane-Seat Test:** Zero roomscale movement required; all interactions within `< 2 ft` radius.
+- [ ] **Seated Airplane-Seat Test:** Zero roomscale movement required; all interactions within `< 2 ft` radius. *Not yet met on paper:* in the body model 9 of 13 near targets are 0.60-0.69 m from the nearer shoulder (ADR-010); decide on the headset whether that needs a lean.
 - [ ] **One Bus Stop Test:** Complete session takes 4–6 minutes (`< 10 minutes`).
 - [ ] **Public HTTPS Build Live:** Deployed URL opens cleanly and enters WebXR without certificate errors or broken assets.
 - [ ] **Honest Demo Video (`< 3:00`):** Public YouTube/Vimeo link (`~2:40` runtime) showing real captured gameplay from Quest or IWER/XR Simulator, with zero fabricated/AI-generated gameplay footage.

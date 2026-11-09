@@ -1,6 +1,6 @@
 # ARCHITECTURAL DECISION RECORDS (DECISIONS.md)
 
-*Last updated: 2026-10-28*
+*Last updated: 2026-11-10*
 
 This document records major technical, gameplay, and tooling decisions for **ORBIT ZERO: THE LAST DOWNLINK**. No recorded decision may be silently reversed without updating this file and obtaining user approval.
 
@@ -122,3 +122,21 @@ This document records major technical, gameplay, and tooling decisions for **ORB
   3. **One result vocabulary:** `src/mission/resultLabels.ts` (MISSION SUCCESS / PARTIAL SUCCESS / MISSION FAILED + "GRADE S/A/B/C"; storage in "memory blocks"). Certification and mission rank stay in the debrief report for tests and logs but are not shown.
   4. **MR tabletop removed:** the toggle, the `immersive-ar` request and the tabletop panel layout are gone; the stored preference is ignored. This applies ADR-003 instead of reversing it.
 - **Consequences:** Multiview on Quest Browser is ASSUMED (IWSDK requests `multiviewStereo`); without it the GPU submits twice the per-eye numbers. The refresh-rate fallback and resolution step are UNVERIFIED on a headset (IWER does not implement `updateTargetFrameRate`).
+
+---
+
+## ADR-010: Fit the cockpit to the player (design eye, session-start seat fit, sit/stand refit)
+- **Date:** 2026-11-10
+- **Status:** Accepted (judge-readiness pass after P4)
+- **Context:** (1) RECENTER moved the player so the head sat at (0, 1.20, 0.44). From there every desk target was 0.73-0.93 m from the shoulders (out of reach), and the HUD text angles had been tuned for a head at z=0. The IWER suites never caught it because IWER teleports hands. (2) A head at the `local-floor` origin (z=0; IWER's default headset sits there, and a Quest session is ASSUMED to start close to it) put the globe's near surface only 0.32 m from the eye, too close to focus on. (3) Standing judges (eye 1.7-1.9 m) and low seats were not fitted at all, and a stored `seatOffset` from an earlier session was restored even though the floor origin changes every session.
+- **Decisions:**
+  1. **Design eye `SEATED_EYE = (0, 1.25, 0.10)`** (`src/ui/spatialLayout.ts`). At z=0.10 the globe's near surface is 0.43 m from the eye and the desk targets are 0.60-0.69 m from the nearer shoulder. Rejected: z=0.34 (0.73-0.93 m, out of reach) and z=0 (0.32 m, too close). The panel poses moved +0.10 m in z with the eye (side panels z=-0.76, HUD card z=-0.72, HUD strip z=-0.90), so the eye-relative geometry is unchanged.
+  2. **Session-start fit:** each session resets the rig to 0 and, on the first valid viewer pose, applies `seatFitOffset(head)` (`updateSeatFit` in `missionControlSystem.ts`). Per-axis deadband 5 / 5 / 8 cm (x / y / z), clamped to x and z +-0.8 m and y -0.65...+0.45 m, so heads from about 0.6 m to 1.9 m fit.
+  3. **Sit/stand refit:** head height 0.22 m off the design height for 3 s of wall-clock time with nothing grabbed refits the height only, with a short select sound.
+  4. **RECENTER (desk pad and briefing button)** fits all three axes, in XR only.
+  5. **Stored `seatOffset` is no longer restored.** The field stays in the profile for compatibility.
+  6. **Controllers:** no code change. Controllers cannot carry cubes, so the telemetry panel buttons (compress, add to bay, discard, next cube) and the desk pads do those jobs; `tests/e2e-controllers.mjs` plays a whole pass that way.
+  Rejected: a yaw fit (a fresh session is assumed to face -Z already, and turning the rig would touch the hand and ray maths) and a manual-only RECENTER (a standing judge would start with the desk 0.45 m too low).
+- **Reach, as measured (body model in `tests/e2e-judge-fit.mjs`: shoulders 25 cm below the eye, 18 cm to each side, 8 cm behind it):** 9 of the 13 near targets are above the project goal of 0.6 m from the nearer shoulder: cube trays 0.66-0.68 m, RECENTER pad 0.69 m, master power and ARIA pads 0.67 m, discard chute 0.63 m, FIRE SWATH plunger and cradle 0.60 m. The suite's limit is 0.7 m (a pinch with a slight lean). Not moved: a head further forward brings the globe under 0.4 m, and moving desk geometry would invalidate the touch maps checked by `e2e-hands-only`. Pads and panel buttons also work by laser; only carrying a cube needs the pinch at the tray.
+- **Risk and safer alternative:** the fit shifts the whole play space by up to 0.65 m. If a headset reported a misleading first pose (for example mid-motion), the cockpit would sit off until RECENTER is pressed. The safer fallback is to skip the session-start fit (leave `seatFitPending` false) and keep the sit/stand refit and RECENTER; standing judges would then need RECENTER first.
+- **Consequences:** Verified in IWER only (`e2e-judge-fit` 22/22, `e2e-controllers` 10/10, 5 seat-fit unit tests). Not verified on a Meta Quest: that Quest Browser reports the first viewer pose in a floor-level space that matches the judge's seated posture, and the real reach. A system recenter (long press of the Meta button) moves the origin: the height refit still works, but x and z offsets from before stay until RECENTER is pressed. A `reset`-event handler was not added because it cannot be tested without a headset.
