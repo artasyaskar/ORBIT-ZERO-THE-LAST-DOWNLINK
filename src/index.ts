@@ -13,6 +13,7 @@ import { GrabSystem, World } from '@iwsdk/core';
 import projectOptions from 'virtual:iwsdk-project';
 import type { MissionScenarioId } from './mission/types';
 import { MissionControlSystem } from './systems/missionControlSystem';
+import { PerfMonitorSystem } from './systems/perfMonitor';
 import { LandingController } from './landing/landingController';
 import { defaultCampaignCard } from './landing/landingUI';
 import { getXrEntryOverlay } from './ui/xrEntryOverlay';
@@ -60,6 +61,9 @@ export async function initOrbitZeroGame(
   }
 
   world.registerSystem(MissionControlSystem);
+  // Frame-time monitor + adaptive quality (refresh-rate fallback, lower resolution after a slow session).
+  // `?perf=1` adds the readout and the 60 s summary.
+  world.registerSystem(PerfMonitorSystem);
 
   if (config.launchXR) {
     // requestSession() needs a live user gesture. World.create() above loads every critical asset first,
