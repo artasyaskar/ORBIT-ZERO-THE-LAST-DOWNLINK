@@ -1,3 +1,8 @@
+// UNIT-LEVEL CHECK of the direct-touch input path, run in a browser.
+// It places (teleports) the emulated fingertip exactly on each target and pinches, so it proves that a touch on
+// each object maps to the right action. It does NOT prove a seated player can reach or aim at them: that is
+// tests/e2e-hands-first-proof.mjs (laser aim from a rest pose, hand paths in small steps) and, finally, the
+// headset checklist in docs/HEADSET_SESSION_CHECKLIST.md.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';

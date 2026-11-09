@@ -56,7 +56,25 @@ Executed in desktop Chrome/Edge over `https://localhost:5173` (or `4173`) using 
 
 ---
 
+### 4a. Release suites (run before every commit that changes runtime code)
+`npm run build`, then `powershell -File tests/run-release-suites.ps1` runs these one at a time (parallel runs
+time out on the 8 GB dev laptop) and prints one PASS/FAIL line each:
+
+| Suite | What it proves (IWER Quest 3, hand input) | Level |
+|---|---|---|
+| `tests/virtual-headset-player.mjs` | A judge's whole session by laser + pinch: card, three scans, result, retry, hint | emulator, end to end |
+| `tests/e2e-hands-first-proof.mjs` | Laser aim from a seated rest pose, hand paths in steps, scanner carry, Quest menu / headset off / session end pause | emulator, end to end |
+| `tests/e2e-enter-vr.mjs` | Headset lobby, one-tap ENTER VR, every failure path shows a message + TRY AGAIN | emulator |
+| `tests/e2e-redesign-desktop.mjs` | The flat-page game by mouse and keys | desktop |
+| `tests/e2e-hands-only.mjs` | Every object's touch action, with the fingertip placed on the target | unit-level (placement, not reach) |
+| `tests/e2e-perf-hud.mjs` | `?perf=1` readout, head-locked panel, per-eye draws/tris, 60 s summary | emulator |
+| `tests/deploy-static-check.mjs` | `dist/` served at `/` and a sub-path: landing, game, headset lobby, no failed requests | static hosting |
+
+Render budget: `node tests/profile-xr-budget.mjs <label>` (per-eye draws and triangles in nine views).
+Live site: `node tests/live-url-smoke.mjs <https-url>` after a deploy (see `docs/DEPLOY.md`).
+
 ## 5. Tier 4: Physical Meta Quest Headset Protocol (If Hardware Access Secured)
+**Run `docs/HEADSET_SESSION_CHECKLIST.md` (60-90 min, riskiest first).** Nothing has run on a physical headset yet.
 If a Meta Quest 2, 3, or 3S is available during Phase 6:
 0. **Enter VR (verify first; emulator coverage: `node tests/e2e-enter-vr.mjs`).**
    - Open the deployed HTTPS URL in Meta Quest Browser: the lobby (not the cinematic landing) shows "Loading the mission...", then ENTER VR. Note the load time.
