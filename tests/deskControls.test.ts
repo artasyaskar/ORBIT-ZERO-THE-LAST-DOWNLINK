@@ -6,10 +6,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MissionEngine } from '../src/mission/missionEngine';
 import { DesktopControlsManager, type DesktopControllerHost } from '../src/systems/desktopControls';
-import { createDeskGaugesAsset } from '../src/scene-assets/deskGauges.scene-asset';
+import {
+  GAUGE_SEGMENT_COUNT,
+  GAUGE_SEGMENT_RANGES,
+  GAUGE_SEGMENTS_MESH_NAME,
+  createDeskGaugesAsset,
+} from '../src/scene-assets/deskGauges.scene-asset';
 import { createSwathPlungerAsset } from '../src/scene-assets/swathPlunger.scene-asset';
 import { OrbitalAudioController } from '../src/systems/orbitalAudio';
-import { InstancedMesh, Mesh, Object3D } from '@iwsdk/core';
+import { InstancedMesh, Matrix4, Mesh, Object3D, Vector3 } from '@iwsdk/core';
 
 describe('Phase 3: Diegetic Desk Physical Controls & Arc Gauges', () => {
   describe('Asset Generation & Semantic Hierarchy', () => {
@@ -57,18 +62,29 @@ describe('Phase 3: Diegetic Desk Physical Controls & Arc Gauges', () => {
         expect(seg instanceof Mesh).toBe(true);
       }
 
-      // Stage 2: Controlled InstancedMesh nodes for zero draw-call bloat
-      const battInst = gauges.getObjectByName('BatteryGaugeInstanced');
-      expect(battInst instanceof InstancedMesh).toBe(true);
-      expect((battInst as InstancedMesh).count).toBe(10);
-
-      const storageInst = gauges.getObjectByName('StorageGaugeInstanced');
-      expect(storageInst instanceof InstancedMesh).toBe(true);
-      expect((storageInst as InstancedMesh).count).toBe(9);
-
-      const winInst = gauges.getObjectByName('WindowGaugeInstanced');
-      expect(winInst instanceof InstancedMesh).toBe(true);
-      expect((winInst as InstancedMesh).count).toBe(10);
+      // Stage 2: all 29 visible segments are one InstancedMesh (one draw call); each meter owns a range,
+      // and each segment sits where its meter's proxy segment is.
+      const segments = gauges.getObjectByName(GAUGE_SEGMENTS_MESH_NAME);
+      expect(segments instanceof InstancedMesh).toBe(true);
+      const inst = segments as InstancedMesh;
+      expect(inst.count).toBe(GAUGE_SEGMENT_COUNT);
+      const { battery, storage, window: win } = GAUGE_SEGMENT_RANGES;
+      expect([battery.count, storage.count, win.count]).toEqual([10, 9, 10]);
+      expect(battery.start + battery.count).toBe(storage.start);
+      expect(storage.start + storage.count).toBe(win.start);
+      expect(win.start + win.count).toBe(GAUGE_SEGMENT_COUNT);
+      // Same layout as the three per-meter meshes it replaced: rows centred at x = -0.11 / 0 / +0.11, 6.5 mm pitch.
+      gauges.updateMatrixWorld(true);
+      const instanceMatrix = new Matrix4();
+      const instancePos = new Vector3();
+      for (const [range, meterX] of [[battery, -0.11], [storage, 0], [win, 0.11]] as const) {
+        for (let i = 0; i < range.count; i++) {
+          inst.getMatrixAt(range.start + i, instanceMatrix);
+          instancePos.setFromMatrixPosition(instanceMatrix.premultiply(inst.matrixWorld));
+          const expectedX = meterX + (i - (range.count - 1) / 2) * 0.0065;
+          expect(instancePos.distanceTo(new Vector3(expectedX, 0.013, 0))).toBeLessThan(1e-6);
+        }
+      }
 
       // Preallocated shared materials and colors on userData
       expect(gauges.userData.colors).toBeDefined();

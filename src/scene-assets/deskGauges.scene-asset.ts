@@ -16,7 +16,6 @@
 import {
   Color,
   CylinderGeometry,
-  DynamicDrawUsage,
   Group,
   InstancedMesh,
   Mesh,
@@ -25,6 +24,20 @@ import {
   Object3D,
 } from '@iwsdk/core';
 import { bevelBox, mergeStaticMeshesByMaterial } from './lib/hardsurface';
+
+export interface GaugeSegmentRange {
+  start: number;
+  count: number;
+}
+
+/** Instance ranges of the three meters inside the one gauge-segment InstancedMesh. */
+export const GAUGE_SEGMENT_RANGES = {
+  battery: { start: 0, count: 10 },
+  storage: { start: 10, count: 9 },
+  window: { start: 19, count: 10 },
+} as const satisfies Record<string, GaugeSegmentRange>;
+export const GAUGE_SEGMENT_COUNT = 29;
+export const GAUGE_SEGMENTS_MESH_NAME = 'DeskGaugeSegmentsInstanced';
 
 export function createDeskGaugesAsset(): Object3D {
   const root = new Group();
@@ -89,89 +102,42 @@ export function createDeskGaugesAsset(): Object3D {
   const gaugeSharedMat = new MeshBasicMaterial({ color: 0xffffff });
   const dummy = new Object3D();
 
-  // 2. Battery Meter: Left Segmented Arc (10 segments into 1 InstancedMesh)
-  const battGroup = new Group();
-  battGroup.name = 'BatteryGaugeGroup';
-  battGroup.position.set(-0.11, 0.013, 0);
+  // All 29 segments of the three meters are one InstancedMesh (one draw call); each meter owns a range of
+  // instances (GAUGE_SEGMENT_RANGES) whose colours the mission system rewrites when the readings change.
+  const segments = new InstancedMesh(segGeo, gaugeSharedMat, GAUGE_SEGMENT_COUNT);
+  segments.name = GAUGE_SEGMENTS_MESH_NAME;
+  const meters: Array<{ group: string; x: number; range: GaugeSegmentRange; proxy: string; mat: MeshStandardMaterial; color: Color }> = [
+    // 2. Battery Meter: left (10 segments)
+    { group: 'BatteryGaugeGroup', x: -0.11, range: GAUGE_SEGMENT_RANGES.battery, proxy: 'GaugeBattSeg', mat: cyanLitMat, color: COLOR_CYAN },
+    // 3. Storage Buffer Meter: centre (9 segments)
+    { group: 'StorageGaugeGroup', x: 0, range: GAUGE_SEGMENT_RANGES.storage, proxy: 'GaugeStorageSeg', mat: unlitMat, color: COLOR_UNLIT },
+    // 4. Downlink Window Meter: right (10 segments)
+    { group: 'WindowGaugeGroup', x: 0.11, range: GAUGE_SEGMENT_RANGES.window, proxy: 'GaugeWindowSeg', mat: unlitMat, color: COLOR_UNLIT },
+  ];
+  for (const meter of meters) {
+    const group = new Group();
+    group.name = meter.group;
+    group.position.set(meter.x, 0.013, 0);
+    const centre = (meter.range.count - 1) / 2;
+    for (let i = 0; i < meter.range.count; i++) {
+      dummy.position.set(meter.x + (i - centre) * 0.0065, 0.013, 0);
+      dummy.rotation.set(Math.PI / 2, 0, 0);
+      dummy.scale.set(1, 1, 1);
+      dummy.updateMatrix();
+      segments.setMatrixAt(meter.range.start + i, dummy.matrix);
+      segments.setColorAt(meter.range.start + i, meter.color);
 
-  const battInstanced = new InstancedMesh(segGeo, gaugeSharedMat, 10);
-  battInstanced.name = 'BatteryGaugeInstanced';
-  battInstanced.instanceMatrix.setUsage(DynamicDrawUsage);
-
-  for (let i = 0; i < 10; i++) {
-    dummy.position.set((i - 4.5) * 0.0065, 0, 0);
-    dummy.rotation.set(Math.PI / 2, 0, 0);
-    dummy.scale.set(1, 1, 1);
-    dummy.updateMatrix();
-    battInstanced.setMatrixAt(i, dummy.matrix);
-    battInstanced.setColorAt(i, COLOR_CYAN);
-
-    // Backward-compatible query proxy (hidden from rendering, 0 draw calls)
-    const segProxy = new Mesh(segGeo, cyanLitMat);
-    segProxy.name = `GaugeBattSeg_${i}`;
-    segProxy.visible = false;
-    battGroup.add(segProxy);
+      // Backward-compatible query proxy (hidden from rendering, 0 draw calls)
+      const segProxy = new Mesh(segGeo, meter.mat);
+      segProxy.name = `${meter.proxy}_${i}`;
+      segProxy.visible = false;
+      group.add(segProxy);
+    }
+    root.add(group);
   }
-  battInstanced.instanceMatrix.needsUpdate = true;
-  if (battInstanced.instanceColor) battInstanced.instanceColor.needsUpdate = true;
-  battGroup.add(battInstanced);
-  root.add(battGroup);
-
-  // 3. Storage Buffer Meter: Center Segmented Arc (9 segments into 1 InstancedMesh)
-  const storageGroup = new Group();
-  storageGroup.name = 'StorageGaugeGroup';
-  storageGroup.position.set(0, 0.013, 0);
-
-  const storageInstanced = new InstancedMesh(segGeo, gaugeSharedMat, 9);
-  storageInstanced.name = 'StorageGaugeInstanced';
-  storageInstanced.instanceMatrix.setUsage(DynamicDrawUsage);
-
-  for (let i = 0; i < 9; i++) {
-    dummy.position.set((i - 4) * 0.0065, 0, 0);
-    dummy.rotation.set(Math.PI / 2, 0, 0);
-    dummy.scale.set(1, 1, 1);
-    dummy.updateMatrix();
-    storageInstanced.setMatrixAt(i, dummy.matrix);
-    storageInstanced.setColorAt(i, COLOR_UNLIT);
-
-    // Backward-compatible query proxy (hidden from rendering, 0 draw calls)
-    const segProxy = new Mesh(segGeo, unlitMat);
-    segProxy.name = `GaugeStorageSeg_${i}`;
-    segProxy.visible = false;
-    storageGroup.add(segProxy);
-  }
-  storageInstanced.instanceMatrix.needsUpdate = true;
-  if (storageInstanced.instanceColor) storageInstanced.instanceColor.needsUpdate = true;
-  storageGroup.add(storageInstanced);
-  root.add(storageGroup);
-
-  // 4. Downlink Window Meter: Right Segmented Arc (10 segments into 1 InstancedMesh)
-  const windowGroup = new Group();
-  windowGroup.name = 'WindowGaugeGroup';
-  windowGroup.position.set(0.11, 0.013, 0);
-
-  const windowInstanced = new InstancedMesh(segGeo, gaugeSharedMat, 10);
-  windowInstanced.name = 'WindowGaugeInstanced';
-  windowInstanced.instanceMatrix.setUsage(DynamicDrawUsage);
-
-  for (let i = 0; i < 10; i++) {
-    dummy.position.set((i - 4.5) * 0.0065, 0, 0);
-    dummy.rotation.set(Math.PI / 2, 0, 0);
-    dummy.scale.set(1, 1, 1);
-    dummy.updateMatrix();
-    windowInstanced.setMatrixAt(i, dummy.matrix);
-    windowInstanced.setColorAt(i, COLOR_UNLIT);
-
-    // Backward-compatible query proxy (hidden from rendering, 0 draw calls)
-    const segProxy = new Mesh(segGeo, unlitMat);
-    segProxy.name = `GaugeWindowSeg_${i}`;
-    segProxy.visible = false;
-    windowGroup.add(segProxy);
-  }
-  windowInstanced.instanceMatrix.needsUpdate = true;
-  if (windowInstanced.instanceColor) windowInstanced.instanceColor.needsUpdate = true;
-  windowGroup.add(windowInstanced);
-  root.add(windowGroup);
+  segments.instanceMatrix.needsUpdate = true;
+  if (segments.instanceColor) segments.instanceColor.needsUpdate = true;
+  root.add(segments);
 
   // 5. Tactile Recenter Button (The Airplane Seat Test)
   // Mounted directly at the center front bezel lip [0.0, 0.010, 0.034] within 40cm reach
@@ -272,15 +238,13 @@ export function createDeskGaugesAsset(): Object3D {
   beaconGroup.add(beaconCap);
   root.add(beaconGroup);
 
-  // Consolidate static button bases by shared material to eliminate redundant draw calls
+  // The bezel and the three button flanges share housingMat: one static mesh, named GaugesHousingBezel
+  // (the bezel comes first). The button caps move and light up, so they stay separate.
   mergeStaticMeshesByMaterial(root, [
     'PadIlluminatedCap',
     'MasterIgnitionCap',
     'AriaBeaconCap',
-    'GaugesHousingBezel',
-    'BatteryGaugeInstanced',
-    'StorageGaugeInstanced',
-    'WindowGaugeInstanced',
+    GAUGE_SEGMENTS_MESH_NAME,
   ]);
 
   // Store preallocated color palette and material references on userData

@@ -74,7 +74,7 @@ import { NamedChildCache, SceneObjectCache } from './sceneObjectCache';
 import { clipText, retryGuidanceFor } from '../ui/debriefText';
 import { DELIBERATE_SCANNER_PRESS_RADIUS_M, SCANNER_TARGET_ID, isStrayScannerGrab, pressOwner } from './scannerArbitration';
 import { GLOBE_CARD_SCALE, IMMERSIVE_PANEL_POSES, MISSION_HUD_POSES, type PanelPose } from '../ui/spatialLayout';
-import { animateWeather, applyWeather, createWeatherFx } from './sectorWeatherFx';
+import { SectorWeatherLayer } from './sectorWeatherFx';
 import { paintSensorView } from '../ui/sensorViewPainter';
 import { missionCardModel, resultModel, trackerText } from '../ui/hudText';
 import { getXrEntryOverlay, isXrEntryOverlayShowing } from '../ui/xrEntryOverlay';
@@ -87,6 +87,7 @@ import {
   latLonToGlobePoint,
 } from '../scene-assets/earthGlobe.scene-asset';
 import { createEarthGlobeEnhancementsOptimized, updateEarthEnhancementsOptimized } from '../scene-assets/earthGlobeEnhancements.optimized';
+import { GAUGE_SEGMENT_RANGES, GAUGE_SEGMENTS_MESH_NAME } from '../scene-assets/deskGauges.scene-asset';
 import { alignSpan, isBakedStaticMaterial } from '../scene-assets/lib/hardsurface';
 import { VRHandSimulator } from './vrHandSimulator';
 import { OrbitalAudioController, type OrbitalSoundCue } from './orbitalAudio';
@@ -1352,7 +1353,7 @@ export class MissionControlSystem extends createSystem({
     }
 
     this.animateCubeTransitions(delta);
-    for (const fx of this.weatherFx.values()) animateWeather(fx, this.elapsedTime, reducedMotion);
+    this.weatherLayer?.animate(this.elapsedTime, reducedMotion);
 
     // Deep Agentic Co-Pilot Telemetry & Spatial Delegation Loop
     const intervention = this.coPilot.update(delta);
@@ -1570,46 +1571,27 @@ export class MissionControlSystem extends createSystem({
       const gaugesChanged = gaugeKey !== this.gaugeKey;
       this.gaugeKey = gaugeKey;
 
-      // 1. Battery Gauge (10 segments into 1 InstancedMesh)
-      const battInst = gaugesChanged ? this.childByName(deskGauges, 'BatteryGaugeInstanced') : undefined;
-      if (battInst instanceof InstancedMesh) {
+      // All three meters are ranges of one InstancedMesh (battery 10, storage 9, Karachi window 10 segments).
+      const segments = gaugesChanged ? this.childByName(deskGauges, GAUGE_SEGMENTS_MESH_NAME) : undefined;
+      if (segments instanceof InstancedMesh) {
         const battColor = battFrac > 0.8 ? cCyan : battFrac >= 0.36 ? cAmber : cRed;
-        for (let i = 0; i < 10; i++) {
-          battInst.setColorAt(i, i < litBattSegs ? battColor : cUnlit);
-        }
-        if (battInst.instanceColor) battInst.instanceColor.needsUpdate = true;
+        const winColor = flashRed ? cRed : totalTxSec <= 0.8 * state.downlinkWindowSec ? cCyan : cAmber;
+        const { battery, storage, window: win } = GAUGE_SEGMENT_RANGES;
+        for (let i = 0; i < battery.count; i++) segments.setColorAt(battery.start + i, i < litBattSegs ? battColor : cUnlit);
+        for (let i = 0; i < storage.count; i++) segments.setColorAt(storage.start + i, i < litStorageSegs ? cAmber : cUnlit);
+        for (let i = 0; i < win.count; i++) segments.setColorAt(win.start + i, i < litWinSegs ? winColor : cUnlit);
+        if (segments.instanceColor) segments.instanceColor.needsUpdate = true;
       } else if (mats && gaugesChanged) {
         const battMat = battFrac > 0.8 ? mats.cyan : battFrac >= 0.36 ? mats.amber : mats.red;
+        const winMat = flashRed ? mats.red : totalTxSec <= 0.8 * state.downlinkWindowSec ? mats.cyan : mats.amber;
         for (let i = 0; i < 10; i++) {
           const seg = this.childByName(deskGauges, `GaugeBattSeg_${i}`);
           if (seg instanceof Mesh) seg.material = i < litBattSegs ? battMat : mats.unlit;
         }
-      }
-
-      // 2. Solid-State Storage Buffer Gauge (9 segments into 1 InstancedMesh)
-      const storageInst = gaugesChanged ? this.childByName(deskGauges, 'StorageGaugeInstanced') : undefined;
-      if (storageInst instanceof InstancedMesh) {
-        for (let i = 0; i < 9; i++) {
-          storageInst.setColorAt(i, i < litStorageSegs ? cAmber : cUnlit);
-        }
-        if (storageInst.instanceColor) storageInst.instanceColor.needsUpdate = true;
-      } else if (mats && gaugesChanged) {
         for (let i = 0; i < 9; i++) {
           const seg = this.childByName(deskGauges, `GaugeStorageSeg_${i}`);
           if (seg instanceof Mesh) seg.material = i < litStorageSegs ? mats.amber : mats.unlit;
         }
-      }
-
-      // 3. Karachi Contact Window Gauge (10 segments into 1 InstancedMesh)
-      const windowInst = gaugesChanged ? this.childByName(deskGauges, 'WindowGaugeInstanced') : undefined;
-      if (windowInst instanceof InstancedMesh) {
-        const winColor = flashRed ? cRed : totalTxSec <= 0.8 * state.downlinkWindowSec ? cCyan : cAmber;
-        for (let i = 0; i < 10; i++) {
-          windowInst.setColorAt(i, i < litWinSegs ? winColor : cUnlit);
-        }
-        if (windowInst.instanceColor) windowInst.instanceColor.needsUpdate = true;
-      } else if (mats && gaugesChanged) {
-        const winMat = flashRed ? mats.red : totalTxSec <= 0.8 * state.downlinkWindowSec ? mats.cyan : mats.amber;
         for (let i = 0; i < 10; i++) {
           const seg = this.childByName(deskGauges, `GaugeWindowSeg_${i}`);
           if (seg instanceof Mesh) seg.material = i < litWinSegs ? winMat : mats.unlit;
@@ -5147,29 +5129,30 @@ export class MissionControlSystem extends createSystem({
     }
   }
 
-  private weatherFx = new Map<SectorId, Points>();
+  /** Every sector's weather puffs, in one Points object parented to the globe (rotates and scales with it). */
+  private weatherLayer: SectorWeatherLayer | null = null;
+  private weatherSlots = new Map<SectorId, number>();
 
-  /** One weather volume per sector, parented to the globe so it rotates and scales with the planet. */
   private syncSectorWeather(): void {
     const globe = this.sceneObject('earth-globe');
     if (!globe) return;
     const state = this.engine.getState();
     const custom = this.engine.getActiveCustomScenario();
-    SECTOR_ORDER.forEach((sectorId, index) => {
-      let fx = this.weatherFx.get(sectorId);
-      if (!fx) {
+    if (!this.weatherLayer) {
+      const layer = new SectorWeatherLayer(SECTOR_ORDER.length);
+      SECTOR_ORDER.forEach((sectorId, index) => {
         const def = SECTOR_GEO_DEFINITIONS[sectorId];
         if (!def) return;
-        fx = createWeatherFx(index + 1);
         const local = latLonToGlobePoint(def.centerLatLon[0], def.centerLatLon[1], GLOBE_RADIUS * 1.004);
-        fx.position.copy(local);
-        fx.quaternion.setFromUnitVectors(this.worldUp, local.clone().normalize());
-        globe.add(fx);
-        this.weatherFx.set(sectorId, fx);
-        this.cleanupFuncs.push(() => { fx!.removeFromParent(); fx!.geometry.dispose(); });
-      }
-      applyWeather(fx, getScenarioSector(state.scenarioId, sectorId, custom).cloudCover);
-    });
+        this.weatherSlots.set(sectorId, layer.addSector(local, local, index + 1));
+      });
+      globe.add(layer.points);
+      this.weatherLayer = layer;
+      this.cleanupFuncs.push(() => { layer.dispose(); this.weatherLayer = null; this.weatherSlots.clear(); });
+    }
+    for (const [sectorId, slot] of this.weatherSlots) {
+      this.weatherLayer.setWeather(slot, getScenarioSector(state.scenarioId, sectorId, custom).cloudCover);
+    }
   }
 
   /** Beacon size and colour per sector: delivered/cut pins, scan result, selected, hovered by a laser or the head. */
