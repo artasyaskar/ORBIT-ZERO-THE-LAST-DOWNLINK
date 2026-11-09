@@ -28,7 +28,9 @@ a real Quest has not been tried.
       the Mission Card is straight ahead and readable, the desk pads and cubes are below you. Nothing needs a lean.
 - [ ] Repeat standing (eye about 1.6-1.8 m): after entering, the whole cockpit is at your seat height and you do
       not bend down. Repeat sitting low (sofa, eye about 1.0 m): you do not reach up.
-- [ ] Nearest beacon on the globe looks single (no double vision). Design distance: at least 0.43 m from the eye.
+- [ ] The nearest part of the globe and its beacons look single (no double vision, no eye strain). Design
+      distance: about 0.41 m from the eye to the globe surface (full-size globe in live play; it is smaller on
+      the Mission Card).
 - [ ] Reach test with both hands, seated: touch every desk pad, the scanner and the three cube trays. In the
       body model (eye 1.25 m, shoulders 25 cm lower, 18 cm either side) 9 of the 13 near targets are 0.60-0.69 m
       from the nearer shoulder, over the 0.6 m goal: the cube trays 0.66-0.68 m, the RECENTER pad 0.69 m. Pads
@@ -39,6 +41,8 @@ a real Quest has not been tried.
 - [ ] Stand up mid-pass and stay up for 3 s: a short select sound, and the cockpit re-seats to the new height
       (it never moves while you hold a cube). Sit down again: same.
 - [ ] Head movements of about 5 cm never move the cockpit.
+- [ ] Open the Quest menu and come back (and take the headset off and on): the cockpit is fitted again to
+      where you now sit, without a visible jump to your feet or the ceiling.
 - [ ] If the desk appears at ankle height or the globe near the ceiling, note it with the browser version.
 
 ## 2. Hand laser and pinch (20-28 min)
