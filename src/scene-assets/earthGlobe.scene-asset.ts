@@ -38,6 +38,7 @@ import {
   mergeStaticMeshesByMaterial,
   mergeStaticMeshesIntoBakedMaterial,
 } from './lib/hardsurface';
+import { mergeSectorOverlays, type SectorOverlaySource } from './lib/sectorOverlayMesh';
 
 export const GLOBE_RADIUS = 0.195;
 
@@ -492,8 +493,9 @@ export function createEarthGlobeAsset(): Object3D {
   const orbitalRingsStaticGroup = new Group();
   orbitalRingsStaticGroup.name = 'GlobeOrbitalTrackRingsGroup';
 
+  // A 3.6 mm glowing tube: 6 sides read as round at arm's length (12 cost 860 more triangles).
   const horizonLimbRing = new Mesh(
-    new TorusGeometry(GLOBE_RADIUS * 1.014, 0.0036, 12, 72),
+    new TorusGeometry(GLOBE_RADIUS * 1.014, 0.0036, 6, 72),
     orbitalRingsSharedMat,
   );
   horizonLimbRing.name = 'GlobeHorizonLimbRing';
@@ -521,14 +523,23 @@ export function createEarthGlobeAsset(): Object3D {
   // 4. Surface-Conforming Spherical Sector Boundary Polygons (Sectors A-F)
   const sectorOverlayGroup = new Group();
   sectorOverlayGroup.name = 'SphericalSectorBoundaries';
+  root.add(sectorOverlayGroup);
+  // Every sector ribbon and storm cap is merged into one mesh (one draw call). Each part keeps its own look in
+  // vertex attributes, which the mission system changes per sector and part (see lib/sectorOverlayMesh.ts).
+  const overlaySources: SectorOverlaySource[] = [];
   for (const [id, def] of Object.entries(SECTOR_GEO_DEFINITIONS) as Array<
     [SectorId, (typeof SECTOR_GEO_DEFINITIONS)[SectorId]]
   >) {
-    sectorOverlayGroup.add(
-      buildSphericalSectorOverlay(id, def.polygonLatLon, def.centerLatLon, def.isStorm),
-    );
+    const overlay = buildSphericalSectorOverlay(id, def.polygonLatLon, def.centerLatLon, def.isStorm);
+    sectorOverlayGroup.add(overlay);
+    const ribbon = overlay.getObjectByName(`SectorPoly_${id}`);
+    if (ribbon instanceof Mesh) overlaySources.push({ sectorId: id, part: 'ribbon', mesh: ribbon });
+    const cap = overlay.getObjectByName(`SectorStormCap_${id}`);
+    if (cap instanceof Mesh) overlaySources.push({ sectorId: id, part: 'cap', mesh: cap });
   }
-  root.add(sectorOverlayGroup);
+  const sectorOverlays = mergeSectorOverlays(sectorOverlayGroup, overlaySources);
+  sectorOverlayGroup.clear(); // the per-sector groups are empty after the merge
+  sectorOverlayGroup.add(sectorOverlays);
 
   // 5. Concentric Tilted Orbital Coordinate Grid Bands (subtle delicate aesthetic matching Concept Images 1 & 2)
   const primaryBand = buildOrbitalTelemetryBand(
@@ -1009,13 +1020,14 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
     roughness: 0.52,
     metalness: 0.65,
   });
+  // Front side only: every foil patch faces out of the bus (their backs face the closed chassis), so the
+  // patches join the CubeSat's one baked static draw instead of drawing on their own.
   const kaptonGoldMat = new MeshStandardMaterial({
     color: 0xf5b82e,
     emissive: 0x6b3e06,
     emissiveIntensity: 0.24,
     roughness: 0.22,
     metalness: 0.92,
-    side: DoubleSide,
   });
   const kaptonSolidGoldMat = new MeshStandardMaterial({
     color: 0xf5b82e,

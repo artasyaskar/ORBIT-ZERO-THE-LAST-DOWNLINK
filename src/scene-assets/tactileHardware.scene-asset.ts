@@ -26,28 +26,26 @@ export function createScannerToolAsset(): Object3D {
   const root = new Group();
   root.name = 'OrbitalScannerTool';
 
-  const titaniumMat = new MeshStandardMaterial({
-    color: 0x64748b,
+  // In the game the mission system tints the tool with the active sensor's colour (setObjectTint, from the
+  // first sync on): every part except the grip takes that colour and glows in it, so the housing, titanium
+  // parts and emitters look the same and share one material (one draw after the static merge). The grip keeps
+  // its dark polymer with a faint glow; its tint role is pinned because the merge changes the material count.
+  const toolBodyMat = new MeshStandardMaterial({
+    color: 0x38bdf8,
+    emissive: 0x0284c7,
+    emissiveIntensity: 0.95,
     roughness: 0.25,
     metalness: 0.84,
   });
-  const gunmetalHousingMat = new MeshStandardMaterial({
-    color: 0x1e293b,
-    roughness: 0.34,
-    metalness: 0.72,
-  });
+  const titaniumMat = toolBodyMat;
+  const gunmetalHousingMat = toolBodyMat;
+  const emitterMat = toolBodyMat;
   const gripPolymerMat = new MeshStandardMaterial({
     color: 0x0b111d,
     roughness: 0.68,
     metalness: 0.25,
   });
-  const emitterMat = new MeshStandardMaterial({
-    color: 0x38bdf8,
-    emissive: 0x0284c7,
-    emissiveIntensity: 0.95,
-    roughness: 0.18,
-    metalness: 0.4,
-  });
+  gripPolymerMat.userData.tintRole = 'faint';
 
   // 1. Ergonomic Angled Instrument Grip & Titanium Pommel Base
   const pommelBase = new Mesh(
@@ -290,11 +288,11 @@ export function createDataCubeAsset(accentHex = 0x45c9c0): Object3D {
   baseSubstrate.position.set(0, 0.014, 0);
   root.add(baseSubstrate);
 
-  // 5. Glowing Indus Flood River Channel (recessed aquatic ribbon winding through relief)
+  // 5. Indus Flood River Channel (recessed aquatic ribbon winding through relief). In the game this channel
+  // only ever showed a faint glow of the cube's tint (under 0.11 of it); it is now part of the cube's one
+  // static draw, so it carries that look itself: its blue colour, no glow of its own.
   const waterMat = new MeshStandardMaterial({
     color: 0x38bdf8,
-    emissive: 0x0284c7,
-    emissiveIntensity: 1.25,
     roughness: 0.15,
     metalness: 0.4,
   });

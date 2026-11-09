@@ -89,6 +89,7 @@ import {
 import { createEarthGlobeEnhancementsOptimized, updateEarthEnhancementsOptimized } from '../scene-assets/earthGlobeEnhancements.optimized';
 import { GAUGE_SEGMENT_RANGES, GAUGE_SEGMENTS_MESH_NAME } from '../scene-assets/deskGauges.scene-asset';
 import { alignSpan, isBakedStaticMaterial } from '../scene-assets/lib/hardsurface';
+import { SECTOR_OVERLAYS_MESH_NAME, setSectorOverlayGlow, setSectorOverlayLook } from '../scene-assets/lib/sectorOverlayMesh';
 import { VRHandSimulator } from './vrHandSimulator';
 import { OrbitalAudioController, type OrbitalSoundCue } from './orbitalAudio';
 import { VoiceCommander, type VoiceDialogueId } from './voiceCommander';
@@ -152,6 +153,12 @@ const XR_DESK_PAD_SCALE: Readonly<Record<string, number>> = {
  * The gauge-row buttons are drawn by the desk-gauges asset; the pad entity under each one is what the
  * laser and the near pinch press. Hover and press are mirrored onto the visible button.
  */
+/**
+ * How setObjectTint colours one part: 'full' takes the colour and glows in it, 'dim' and 'faint' keep their
+ * own colour with a weak glow of it (0.22 x 0.35 and 0.18 x 0.3 of the tint).
+ */
+type TintRole = 'full' | 'dim' | 'faint';
+
 /** Evidence-cube parts tinted fully (colour and glow) and faintly (glow only) by setObjectTint. */
 const CUBE_FULL_TINT_PARTS = ['CubeOuterFrame', 'CubeHighwayVector'] as const;
 const CUBE_FAINT_TINT_PARTS = [
@@ -1737,13 +1744,8 @@ export class MissionControlSystem extends createSystem({
 
       // Dynamic breathing pulse on active target sector ribbon
       const selectedId = this.engine.getState().selectedSectorId;
-      const selectedRibbon = this.childByName(globe, `SectorPoly_${selectedId}`);
-      if (
-        selectedRibbon instanceof Mesh &&
-        selectedRibbon.material instanceof MeshStandardMaterial
-      ) {
-        selectedRibbon.material.emissiveIntensity =
-          1.45 + 0.45 * Math.sin(this.elapsedTime * 4.5);
+      if (selectedId) {
+        setSectorOverlayGlow(this.childByName(globe, SECTOR_OVERLAYS_MESH_NAME), selectedId, 'ribbon', 1.45 + 0.45 * Math.sin(this.elapsedTime * 4.5));
       }
 
       // Update & animate cinematic targeting reticle on globe surface (Concept Image 2)
@@ -5183,11 +5185,7 @@ export class MissionControlSystem extends createSystem({
         hex = deliveredHere ? 0x22c55e : 0xef4444;
         obj.scale.setScalar(1.4);
         this.setObjectTint(obj, hex, deliveredHere ? 2.2 : 1.6);
-        const poly = globe?.getObjectByName(`SectorPoly_${sectorId}`);
-        if (poly instanceof Mesh && poly.material instanceof MeshStandardMaterial) {
-          poly.material.color.setHex(hex);
-          poly.material.emissive?.setHex(hex);
-        }
+        setSectorOverlayLook(this.childByName(globe, SECTOR_OVERLAYS_MESH_NAME), sectorId, 'ribbon', { color: hex, emissive: hex });
         continue;
       }
       if (isScanned) {
@@ -5214,56 +5212,28 @@ export class MissionControlSystem extends createSystem({
       this.setObjectTint(obj, hex, isSelected ? 1.45 : isGazed ? 1.35 : isScanned ? 1.15 : 0.85);
 
       if (globe) {
-        const polyRibbon = globe.getObjectByName(`SectorPoly_${sectorId}`);
-        if (
-          polyRibbon instanceof Mesh &&
-          polyRibbon.material instanceof MeshStandardMaterial
-        ) {
-          polyRibbon.material.color.setHex(hex);
-          polyRibbon.material.emissive.setHex(hex);
-          polyRibbon.material.emissiveIntensity = isSelected ? 1.75 : isScanned ? 1.35 : 0.92;
-          polyRibbon.material.opacity = isSelected ? 1.0 : isScanned ? 0.95 : 0.82;
-        }
-        const polyFill = globe.getObjectByName(`SectorFill_${sectorId}`);
-        if (
-          polyFill instanceof Mesh &&
-          polyFill.material instanceof MeshBasicMaterial
-        ) {
-          polyFill.material.color.setHex(hex);
-          polyFill.material.opacity = isSelected
-            ? 0.28
-            : isScanned
-              ? 0.22
-              : sectorCfg.cloudCover !== 'CLEAR'
-                ? 0.08
-                : 0.035;
-        }
-        const stormCap = globe.getObjectByName(`SectorStormCap_${sectorId}`);
-        if (
-          stormCap instanceof Mesh &&
-          stormCap.material instanceof MeshStandardMaterial
-        ) {
-          stormCap.visible = sectorCfg.cloudCover !== 'CLEAR';
-          if (isScanned) {
-            if (scannedPkt.sensorMode === 'RADAR' || scannedPkt.sensorMode === 'THERMAL') {
-              // Microwave radar or MWIR/LWIR thermal penetrated the obscuration layer
-              stormCap.material.opacity = 0.24;
-              stormCap.material.emissive.setHex(
-                scannedPkt.sensorMode === 'THERMAL' ? 0xff6b2b : 0x38bdf8,
-              );
-              stormCap.material.emissiveIntensity = 0.55;
-            } else {
-              // Optical failed against cloud/smoke deck: high-albedo reflection glare
-              stormCap.material.opacity = 0.92;
-              stormCap.material.color.setHex(0xe2e8f0);
-              stormCap.material.emissive.setHex(0xef4444);
-              stormCap.material.emissiveIntensity = 0.45;
-            }
-          } else {
-            stormCap.material.opacity = isSelected ? 0.82 : 0.68;
-            stormCap.material.emissive.setHex(0x000000);
-            stormCap.material.emissiveIntensity = 0.0;
-          }
+        // The ribbon and the storm cap are parts of the one SectorOverlays mesh; fields left out keep their value.
+        const overlays = this.childByName(globe, SECTOR_OVERLAYS_MESH_NAME);
+        setSectorOverlayLook(overlays, sectorId, 'ribbon', {
+          color: hex,
+          emissive: hex,
+          emissiveIntensity: isSelected ? 1.75 : isScanned ? 1.35 : 0.92,
+          opacity: isSelected ? 1.0 : isScanned ? 0.95 : 0.82,
+        });
+        const capVisible = sectorCfg.cloudCover !== 'CLEAR';
+        if (isScanned && (scannedPkt.sensorMode === 'RADAR' || scannedPkt.sensorMode === 'THERMAL')) {
+          // Microwave radar or MWIR/LWIR thermal penetrated the obscuration layer
+          setSectorOverlayLook(overlays, sectorId, 'cap', {
+            visible: capVisible,
+            opacity: 0.24,
+            emissive: scannedPkt.sensorMode === 'THERMAL' ? 0xff6b2b : 0x38bdf8,
+            emissiveIntensity: 0.55,
+          });
+        } else if (isScanned) {
+          // Optical failed against cloud/smoke deck: high-albedo reflection glare
+          setSectorOverlayLook(overlays, sectorId, 'cap', { visible: capVisible, opacity: 0.92, color: 0xe2e8f0, emissive: 0xef4444, emissiveIntensity: 0.45 });
+        } else {
+          setSectorOverlayLook(overlays, sectorId, 'cap', { visible: capVisible, opacity: isSelected ? 0.82 : 0.68, emissive: 0x000000, emissiveIntensity: 0 });
         }
       }
     }
@@ -6560,11 +6530,14 @@ export class MissionControlSystem extends createSystem({
 
     for (let i = 0; i < mats.length; i++) {
       const m = mats[i];
-      // Preserve metallic titanium/gunmetal structural frames while tinting emissive cores
-      if (mats.length > 2 && i < mats.length - 3) {
+      // Preserve metallic titanium/gunmetal structural frames while tinting emissive cores. An asset can pin a
+      // part's role with material.userData.tintRole (it survives the clone); otherwise its position decides.
+      const pinned = m.userData.tintRole as TintRole | undefined;
+      const role: TintRole = pinned ?? (mats.length > 2 && i < mats.length - 3 ? 'faint' : mats.length > 1 && i === 0 ? 'dim' : 'full');
+      if (role === 'faint') {
         m.emissive.copy(color).multiplyScalar(0.18);
         m.emissiveIntensity = emissiveIntensity * 0.3;
-      } else if (mats.length > 1 && i === 0) {
+      } else if (role === 'dim') {
         m.emissive.copy(color).multiplyScalar(0.22);
         m.emissiveIntensity = emissiveIntensity * 0.35;
       } else {

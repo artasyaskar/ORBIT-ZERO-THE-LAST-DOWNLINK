@@ -1181,8 +1181,9 @@ export function createOrbitalConsoleAsset(): Object3D {
     planetVista.rotation.set(0.12, -1.22, 0.05);
     cupolaGroup.add(planetVista);
 
+    // 8 sides around a 6.5 cm glow tube 5 m away read as round; 16 cost 1.5k more triangles per eye.
     const horizonLimbGlow = new Mesh(
-        new TorusGeometry(5.25, 0.065, 16, 96, Math.PI * 0.45),
+        new TorusGeometry(5.25, 0.065, 8, 96, Math.PI * 0.45),
         new MeshBasicMaterial({
             color: 0x38bdf8,
             transparent: true,
@@ -1456,8 +1457,9 @@ export function createOrbitalConsoleAsset(): Object3D {
     cupolaGroup.add(brandGlowStrip);
 
     // 13. Overhead Circular Cupola Cap Skylight (Flush Ceiling Mounting — Concept Images 1 & 2)
+    // Overhead rings, 1.4 m above the eye: 8 sides around the tube are enough (was 16 and 14).
     const domeRing = new Mesh(
-        new TorusGeometry(0.62, 0.024, 16, 64),
+        new TorusGeometry(0.62, 0.024, 8, 64),
         titaniumRimMat,
     );
     domeRing.name = 'CupolaSkylightRing';
@@ -1466,7 +1468,7 @@ export function createOrbitalConsoleAsset(): Object3D {
     cupolaGroup.add(domeRing);
 
     const innerDomeRing = new Mesh(
-        new TorusGeometry(0.66, 0.018, 14, 64),
+        new TorusGeometry(0.66, 0.018, 8, 64),
         gunmetalBezelMat,
     );
     innerDomeRing.name = 'CupolaInnerSkylightRing';
@@ -1483,7 +1485,7 @@ export function createOrbitalConsoleAsset(): Object3D {
         forceSinglePass: true,
     });
     const skylightAtmoArc = new Mesh(
-        new TorusGeometry(0.60, 0.035, 12, 48, Math.PI * 0.85),
+        new TorusGeometry(0.60, 0.035, 8, 48, Math.PI * 0.85),
         skylightLimbMat,
     );
     skylightAtmoArc.name = 'CupolaSkylightAtmosphereArc';
