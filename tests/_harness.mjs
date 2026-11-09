@@ -11,6 +11,9 @@ import { chromium } from 'playwright';
 export const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const vite = join(root, 'node_modules', 'vite', 'bin', 'vite.js');
 
+/** How long a suite waits for `vite preview` to answer (see launchApp). */
+export const PREVIEW_START_TIMEOUT_MS = 240000;
+
 /** Console errors every harness page ignores (offline font/CDN lookups). Extra patterns per page via `ignoreErrors`. */
 const OFFLINE_NOISE = ['ERR_NAME_NOT_RESOLVED', 'ERR_INTERNET_DISCONNECTED'];
 
@@ -59,7 +62,12 @@ export async function launchApp({ skipLanding = false, viewport = { width: 1440,
     cwd: root,
     stdio: 'pipe',
   });
-  const deadline = Date.now() + 30000;
+  let previewLog = '';
+  preview.stdout.on('data', (d) => { previewLog += d; });
+  preview.stderr.on('data', (d) => { previewLog += d; });
+  // vite.config.ts imports @iwsdk/vite-plugin-dev (playwright, sharp, a 2 MB bundle). With a cold file cache
+  // that import alone kept `vite preview` silent for ~100 s on the 8 GB dev laptop (10-15 s warm).
+  const deadline = Date.now() + PREVIEW_START_TIMEOUT_MS;
   for (;;) {
     const ok = await new Promise((r) => {
       const q = getHttps(url, { rejectUnauthorized: false }, (resp) => {
@@ -73,7 +81,10 @@ export async function launchApp({ skipLanding = false, viewport = { width: 1440,
       });
     });
     if (ok) break;
-    if (Date.now() > deadline) throw new Error('preview did not start');
+    if (Date.now() > deadline) {
+      preview.kill();
+      throw new Error(`preview did not start within ${PREVIEW_START_TIMEOUT_MS / 1000} s. Output: ${previewLog.trim() || '(none)'}`);
+    }
     await new Promise((r) => setTimeout(r, 150));
   }
   const installed = process.env.ORBIT_BROWSER_PATH || (existsSync(chromium.executablePath()) ? chromium.executablePath() : undefined);

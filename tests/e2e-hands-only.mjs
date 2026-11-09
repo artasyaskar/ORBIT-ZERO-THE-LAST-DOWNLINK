@@ -54,7 +54,8 @@ let page;
 const failures = [];
 
 try {
-  const deadline = Date.now() + 30000;
+  // A cold `vite preview` can take ~100 s on the 8 GB dev laptop (~10-15 s warm); see tests/_harness.mjs.
+  const deadline = Date.now() + 240000;
   while (true) {
     try {
       const ready = baseUrl.startsWith('https://')

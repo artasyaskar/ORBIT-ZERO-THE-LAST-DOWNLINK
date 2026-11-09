@@ -88,7 +88,8 @@ export async function launchImmersiveGame({ skipBuild = false, headed = false, c
     cwd: root,
     stdio: 'ignore',
   });
-  const deadline = Date.now() + 30000;
+  // A cold `vite preview` can take ~100 s on the 8 GB dev laptop (~10-15 s warm); see tests/_harness.mjs.
+  const deadline = Date.now() + 240000;
   for (;;) {
     const ok = await new Promise((res) => {
       const req = getHttps(baseUrl, { rejectUnauthorized: false }, (r) => {

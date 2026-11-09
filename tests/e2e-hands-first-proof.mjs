@@ -365,8 +365,15 @@ try {
     await page.waitForTimeout(300);
     return snap();
   };
-  let before = await snap();
-  await page.evaluate(() => window.__ORBIT_IWER__.updateVisibilityState('visible-blurred'));
+  // Reads the clock and changes the session visibility in the same page task, so no XR frame can tick the
+  // pass clock between the "before" reading and the change (separate calls raced under machine load).
+  const snapThenVisibility = (visibility) => page.evaluate((v) => {
+    const st = window.__ORBIT_ZERO__.getState();
+    const reading = { paused: st.paused, clock: st.passRemainingSec };
+    window.__ORBIT_IWER__.updateVisibilityState(v);
+    return reading;
+  }, visibility);
+  let before = await snapThenVisibility('visible-blurred');
   await page.waitForTimeout(400);
   const inMenu = await snap();
   await page.waitForTimeout(2600);
@@ -383,8 +390,7 @@ try {
   check(!resumed.paused && !resumed.media.held && !resumed.media.audio.held && ticking.clock < resumed.clock - 0.3,
     'laser + pinch on RESUME PASS resumes: voice and sound return and the clock runs again', `paused=${resumed.paused} held=${resumed.media.held} clock ${resumed.clock?.toFixed(2)} -> ${ticking.clock?.toFixed(2)}`);
 
-  before = await snap();
-  await page.evaluate(() => window.__ORBIT_IWER__.updateVisibilityState('hidden'));
+  before = await snapThenVisibility('hidden');
   await page.waitForTimeout(1500);
   await page.evaluate(() => window.__ORBIT_IWER__.updateVisibilityState('visible'));
   await page.waitForTimeout(400);
@@ -393,8 +399,12 @@ try {
     `clock ${before.clock?.toFixed(2)} -> ${after.clock?.toFixed(2)} paused=${after.paused}`);
   resumed = await resumeByLaser();
 
-  before = await snap();
-  await page.evaluate(() => window.__ORBIT_IWER__.activeSession?.end());
+  // Same page task again: read the clock, then end the session.
+  before = await page.evaluate(() => {
+    const reading = { clock: window.__ORBIT_ZERO__.getState().passRemainingSec };
+    window.__ORBIT_IWER__.activeSession?.end();
+    return reading;
+  });
   await page.waitForFunction(() => !window.__ORBIT_ZERO__.getRuntimeStatus().immersive, null, { timeout: 15000 });
   await page.waitForTimeout(1500);
   after = await snap();
