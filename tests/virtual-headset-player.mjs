@@ -8,7 +8,7 @@
 // This is an emulator check. It does not replace a physical Quest test (tracking noise, optics, fps).
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { launchApp, root } from './_harness.mjs';
+import { DESIGN_EYE, launchApp, root } from './_harness.mjs';
 
 const out = join(root, 'artifacts', 'virtual-headset');
 await mkdir(out, { recursive: true });
@@ -19,7 +19,8 @@ const check = (ok, name, detail = '') => { results.push({ ok: Boolean(ok), name,
 const shot = (name) => page.screenshot({ path: join(out, `${name}.png`) });
 const state = () => page.evaluate(() => window.__ORBIT_ZERO__.getState());
 const hudText = (id) => page.evaluate((i) => window.__ORBIT_ZERO__.getPanelText('mission-hud', i), id);
-const SEATED_EYE = { x: 0, y: 1.25, z: 0 };
+// The cockpit is laid out for this head position; the game's seat fit moves the rig so a real head lands here.
+const SEATED_EYE = DESIGN_EYE;
 
 const settleFrames = () => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(r)))));
 

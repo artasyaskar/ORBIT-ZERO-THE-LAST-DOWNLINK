@@ -73,7 +73,7 @@ import { NamedChildCache, SceneObjectCache } from './sceneObjectCache';
 import { clipText, plainScience, retryGuidanceFor } from '../ui/debriefText';
 import { gradeLabel, memoryBlocks, outcomeLabel as outcomeWords, resultHeadline, TRAINING_COMPLETE_LABEL } from '../mission/resultLabels';
 import { DELIBERATE_SCANNER_PRESS_RADIUS_M, SCANNER_TARGET_ID, isStrayScannerGrab, pressOwner } from './scannerArbitration';
-import { GLOBE_CARD_SCALE, IMMERSIVE_PANEL_POSES, MISSION_HUD_POSES, type PanelPose } from '../ui/spatialLayout';
+import { GLOBE_CARD_SCALE, IMMERSIVE_PANEL_POSES, MISSION_HUD_POSES, SEATED_EYE, seatFitOffset, type PanelPose } from '../ui/spatialLayout';
 import { SectorWeatherLayer } from './sectorWeatherFx';
 import { paintSensorView } from '../ui/sensorViewPainter';
 import { missionCardModel, resultModel, trackerText } from '../ui/hudText';
@@ -227,8 +227,13 @@ const GLOBE_CENTER_WORLD = new Vector3(0, 0.98, -0.48);
 const ARIA_XR_POSITION = new Vector3(-0.38, 1.06, -0.7);
 const DOWNLINK_BAY_CENTER_WORLD = new Vector3(0.32, 0.79, -0.43);
 
-// Target seated eye position in world space (0.44m back from origin, 1.20m seated eye height)
-const SEATED_TARGET_HEAD_WORLD = new Vector3(0, 1.20, 0.44);
+// The head position the cockpit is laid out for (see SEATED_EYE in ui/spatialLayout.ts).
+const SEATED_TARGET_HEAD_WORLD = new Vector3(SEATED_EYE[0], SEATED_EYE[1], SEATED_EYE[2]);
+/** Session-start head error (m) that is left alone: a seated player is not moved for a few centimetres. */
+const SEAT_FIT_DEADBAND: readonly [number, number, number] = [0.05, 0.05, 0.08];
+/** Sitting down or standing up: the head must stay this far (m) from the design height for this long (s) before the rig follows. */
+const SEAT_REFIT_HEIGHT_M = 0.22;
+const SEAT_REFIT_HOLD_SEC = 3;
 
 interface CubeCanvasBinding {
   canvas: HTMLCanvasElement;
@@ -380,6 +385,12 @@ export class MissionControlSystem extends createSystem({
   private mediaHeld = false;
   /** XR presentation state the desk pads were last synced for (null = never). */
   private deskPadsPresenting: boolean | null = null;
+  /** Waiting for the first headset pose to fit the rig to this player's head. */
+  private seatFitPending = false;
+  private seatFitCount = 0;
+  private seatCheckAtMs = 0;
+  /** performance.now() when the head first went more than SEAT_REFIT_HEIGHT_M off the design height (0 = it is not). */
+  private seatHeightOffSinceMs = 0;
   private moodLightCache: Light[] | null = null;
   private baseEnvironmentIntensity?: number;
   /**
@@ -658,8 +669,8 @@ export class MissionControlSystem extends createSystem({
       }
     });
 
-    // 7. Seated XR calibration: keep player origin at (0,0,0) for physical Quest local-floor,
-    // configure IWER emulator device to seated pose when present, and clean up on XR exit.
+    // 7. Seated XR calibration: the rig starts at (0,0,0) in each session and updateSeatFit() then shifts it so the
+    // player's real head lands on the design eye; configure the IWER emulator device to that pose when present.
     this.configureIwerSeatedPoseIfPresent();
     this.cleanupFuncs.push(
       this.world.visibilityState.subscribe((visibilityState) => {
@@ -674,9 +685,11 @@ export class MissionControlSystem extends createSystem({
           this.player.rotation.set(0, 0, 0);
           this.syncAll();
         } else {
-          // On physical Quest hardware in local-floor space, restore persisted seated calibration
-          const [ox, oy, oz] = this.profile.preferences.seatOffset;
-          this.player.position.set(ox, oy, oz);
+          // Every session starts with the head over its own floor origin, so a stored offset from an earlier session
+          // means nothing. Fit the rig to this player's real head as soon as the headset reports a pose.
+          this.player.position.set(0, 0, 0);
+          this.seatFitPending = true;
+          this.seatHeightOffSinceMs = 0;
           this.applyXRPerformanceProfile(true);
           this.configureIwerSeatedPoseIfPresent();
           this.bindXRSessionHandEvents();
@@ -965,6 +978,7 @@ export class MissionControlSystem extends createSystem({
         toggleSpatialHud: (active?: boolean) => this.toggleSpatialHud(active),
         getSpatialHudVisible: () => this.spatialHudVisible,
         calibrateSeatedView: () => this.calibrateSeatedView(),
+        getSeatFit: () => ({ pending: this.seatFitPending, count: this.seatFitCount, playerOffset: this.player.position.toArray(), target: SEATED_TARGET_HEAD_WORLD.toArray(), heightOffMs: this.seatHeightOffSinceMs ? performance.now() - this.seatHeightOffSinceMs : 0, grabbed: this.isAnyObjectGrabbed() }),
         getSceneObject: (id: string) => this.sceneObject(id),
         trigger3DNode: (nodeId: string) => this.handleTrigger3DNodeById(nodeId),
         highlightDropZones: (active: boolean) => this.highlightDropZones(active),
@@ -1326,6 +1340,7 @@ export class MissionControlSystem extends createSystem({
       this.syncTelemetryPanel();
     }
     const presenting = this.world.renderer.xr.isPresenting;
+    if (presenting) this.updateSeatFit();
     if (presenting !== this.deskPadsPresenting) {
       this.deskPadsPresenting = presenting;
       this.syncDeskPadsForXR(presenting);
@@ -2595,15 +2610,63 @@ export class MissionControlSystem extends createSystem({
     };
   }
 
+  /** Head position in floor-origin coordinates (before the rig offset), or null until the headset reports a pose. */
+  private readHeadLocal(): [number, number, number] | null {
+    const xr = this.world.renderer.xr;
+    const frame = xr.getFrame();
+    const space = xr.getReferenceSpace();
+    const pose = frame && space ? frame.getViewerPose(space) : null;
+    if (!pose) return null;
+    const p = pose.transform.position;
+    if (![p.x, p.y, p.z].every(Number.isFinite) || p.y < 0.3) return null; // not tracking yet
+    return [p.x, p.y, p.z];
+  }
+
+  /**
+   * Puts this player's real head on the cockpit's design eye. At session start (once the first pose arrives) only
+   * errors beyond SEAT_FIT_DEADBAND move the rig; a standing player (eye 1.7 m) is brought down, a low seat is
+   * raised. Afterwards, sitting down or standing up (head 0.22 m off the design height for 3 s, hands empty) refits
+   * the height; the RECENTER pad and the briefing button refit all three axes on demand.
+   */
+  private updateSeatFit(): void {
+    if (this.seatFitPending) {
+      const head = this.readHeadLocal();
+      if (!head) return;
+      this.seatFitPending = false;
+      const [ox, oy, oz] = seatFitOffset(head, SEAT_FIT_DEADBAND);
+      this.player.position.set(ox, oy, oz);
+      this.seatFitCount++;
+      return;
+    }
+    // Wall-clock time, so a slow frame rate cannot stretch the 3 s hold.
+    const now = performance.now();
+    if (now - this.seatCheckAtMs < 250) return;
+    this.seatCheckAtMs = now;
+    const head = this.readHeadLocal();
+    if (!head) return;
+    const heightError = Math.abs(head[1] + this.player.position.y - SEATED_TARGET_HEAD_WORLD.y);
+    if (heightError <= SEAT_REFIT_HEIGHT_M || this.isAnyObjectGrabbed()) {
+      this.seatHeightOffSinceMs = 0;
+      return;
+    }
+    if (this.seatHeightOffSinceMs === 0) this.seatHeightOffSinceMs = now;
+    if (now - this.seatHeightOffSinceMs < SEAT_REFIT_HOLD_SEC * 1000) return;
+    this.seatHeightOffSinceMs = 0;
+    const [, oy] = seatFitOffset(head);
+    this.player.position.y = oy;
+    this.seatFitCount++;
+    this.playCue('SELECT_SECTOR');
+  }
+
   private configureIwerSeatedPoseIfPresent(): void {
     if (typeof window === 'undefined') return;
     const iwer = (window as unknown as Record<string, any>).IWER_DEVICE;
     if (!iwer) return;
 
-    // Configure desktop IWER emulator to a seated operator posture (1.25m eye height, 0.32m back)
-    // without mutating world.player.position (keeping real Quest local-floor 1:1).
+    // Configure the desktop IWER emulator headset to the seated operator posture (the design eye point), so it
+    // starts where the seat fit would put it. Only the emulated device moves here, not world.player.position.
     if (iwer.position?.set) {
-      iwer.position.set(0, 1.25, 0.34);
+      iwer.position.set(SEATED_TARGET_HEAD_WORLD.x, SEATED_TARGET_HEAD_WORLD.y, SEATED_TARGET_HEAD_WORLD.z);
     }
     if (iwer.quaternion?.set) {
       // Slight -11 deg downward pitch toward the console and Earth globe
@@ -2623,17 +2686,20 @@ export class MissionControlSystem extends createSystem({
     }
   }
 
+  /** RECENTER: puts the player's head on the design eye on all three axes. In the headset only. */
   public calibrateSeatedView(): number[] {
-    // Compute tracked head local position relative to player rig origin
-    const camWorld = this.camera.getWorldPosition(new Vector3());
-    const headLocal = camWorld.sub(this.player.position);
-
-    // Offset player rig so resulting camera world position matches SEATED_TARGET_HEAD_WORLD
-    const offsetX = Math.max(-0.8, Math.min(0.8, SEATED_TARGET_HEAD_WORLD.x - headLocal.x));
-    const offsetY = Math.max(-0.65, Math.min(0.45, SEATED_TARGET_HEAD_WORLD.y - headLocal.y));
-    const offsetZ = Math.max(-0.8, Math.min(0.8, SEATED_TARGET_HEAD_WORLD.z - headLocal.z));
-
+    if (!this.world.renderer.xr.isPresenting) return this.player.position.toArray();
+    // Tracked head position relative to the floor origin: the viewer pose, or last frame's camera minus the rig.
+    const head = this.readHeadLocal() ?? (() => {
+      const cam = this.camera.getWorldPosition(new Vector3()).sub(this.player.position);
+      return [cam.x, cam.y, cam.z] as [number, number, number];
+    })();
+    const [offsetX, offsetY, offsetZ] = seatFitOffset(head);
     this.player.position.set(offsetX, offsetY, offsetZ);
+    this.seatFitPending = false;
+    this.seatHeightOffSinceMs = 0;
+    this.seatFitCount++;
+    // Kept for profile compatibility only: every new session fits again from the real head.
     this.profile.preferences.seatOffset = [offsetX, offsetY, offsetZ];
     saveMissionProfile(this.profile);
     this.playCue('SELECT_SECTOR');
@@ -4659,7 +4725,7 @@ export class MissionControlSystem extends createSystem({
       Lbl_GazeAssist: `HEAD POINT ASSIST: ${p.gazeAssist ? 'ON' : 'OFF'}`,
     };
     for (const [id, text] of Object.entries(labels)) this.setText(this.telemetryPanel, id, text);
-    this.setText(this.telemetryPanel, 'AudioCaption', p.captions ? this.caption || 'GROUND CONTROL: one pass, three requests, one final downlink.' : '');
+    this.setText(this.telemetryPanel, 'AudioCaption', p.captions ? clipText(this.caption || 'GROUND CONTROL: one pass, three requests, one final downlink.', 96) : '');
     if (this.debriefPanel) {
       const mastery = this.profile.mastery[this.engine.getState().scenarioId];
       this.setText(this.debriefPanel, 'MasteryReadout', mastery

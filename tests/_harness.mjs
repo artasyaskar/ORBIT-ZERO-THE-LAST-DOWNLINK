@@ -23,12 +23,16 @@ const OFFLINE_NOISE = ['ERR_NAME_NOT_RESOLVED', 'ERR_INTERNET_DISCONNECTED'];
  * - userAgent: override the browser's user agent (e.g. Meta Quest Browser)
  * - initScript: extra script that runs after IWER in every document
  */
-export async function openPage(browser, { skipLanding = false, viewport = { width: 1440, height: 960 }, userAgent, iwer = true, initScript = '', ignoreErrors = [] } = {}) {
+/** The head position the cockpit is laid out for (SEATED_EYE in src/ui/spatialLayout.ts). A headset that starts here is not moved by the seat fit. */
+export const DESIGN_EYE = { x: 0, y: 1.25, z: 0.1 };
+
+export async function openPage(browser, { skipLanding = false, viewport = { width: 1440, height: 960 }, userAgent, iwer = true, initScript = '', ignoreErrors = [], headStart = DESIGN_EYE, inputMode = 'hand' } = {}) {
   const context = await browser.newContext({ viewport, ignoreHTTPSErrors: true, ...(userAgent ? { userAgent } : {}) });
   if (iwer) {
     const iwerSource = await readFile(join(root, 'node_modules', 'iwer', 'build', 'iwer.js'), 'utf8');
+    // The emulated head starts at `headStart` (default: the design eye), like a seated player.
     await context.addInitScript({
-      content: `${iwerSource}\nconst device = new window.IWER.XRDevice(window.IWER.metaQuest3, { stereoEnabled: false }); device.installRuntime({forceInstall:true}); device.primaryInputMode = 'hand'; window.__ORBIT_IWER__ = device;`,
+      content: `${iwerSource}\nconst device = new window.IWER.XRDevice(window.IWER.metaQuest3, { stereoEnabled: false }); device.installRuntime({forceInstall:true}); device.primaryInputMode = '${inputMode}'; device.position.set(${headStart.x}, ${headStart.y}, ${headStart.z}); window.__ORBIT_IWER__ = device;`,
     });
   }
   const extra = `${skipLanding ? 'window.__ORBIT_SKIP_LANDING__ = true;' : ''}${initScript}`;
@@ -46,7 +50,7 @@ export async function openPage(browser, { skipLanding = false, viewport = { widt
   return { context, page, failures };
 }
 
-export async function launchApp({ skipLanding = false, viewport = { width: 1440, height: 960 }, userAgent, iwer = true, initScript = '', ignoreErrors = [] } = {}) {
+export async function launchApp({ skipLanding = false, viewport = { width: 1440, height: 960 }, userAgent, iwer = true, initScript = '', ignoreErrors = [], headStart = DESIGN_EYE, inputMode = 'hand' } = {}) {
   const port = await new Promise((res, rej) => {
     const s = createServer();
     s.once('error', rej);
@@ -93,7 +97,7 @@ export async function launchApp({ skipLanding = false, viewport = { width: 1440,
     headless: process.env.ORBIT_HEADED !== '1',
     args: ['--enable-webgl', '--ignore-gpu-blocklist', ...(process.platform === 'win32' ? ['--use-angle=d3d11'] : [])],
   });
-  const { context, page, failures } = await openPage(browser, { skipLanding, viewport, userAgent, iwer, initScript, ignoreErrors });
+  const { context, page, failures } = await openPage(browser, { skipLanding, viewport, userAgent, iwer, initScript, ignoreErrors, headStart, inputMode });
   const close = async () => {
     await browser.close().catch(() => {});
     preview.kill();

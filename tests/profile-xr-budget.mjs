@@ -10,7 +10,7 @@
 // Output: artifacts/profile/xr-budget-<label>.json
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { launchApp, root } from './_harness.mjs';
+import { DESIGN_EYE, launchApp, root } from './_harness.mjs';
 
 const label = process.argv[2] ?? 'current';
 const out = join(root, 'artifacts', 'profile');
@@ -60,12 +60,12 @@ try {
     await remote.dispatch('set_input_mode', { mode: 'hand' });
     for (const d of ['hand-left', 'hand-right']) await remote.dispatch('set_connected', { device: d, connected: true });
   });
-  // Seated eye (the project's seated posture: 1.25 m eye height, 0.34 m behind the desk edge).
-  const look = (target) => page.evaluate(async (t) => {
+  // Design eye: the head position the cockpit is laid out for (the game's seat fit puts a real head here).
+  const look = (target) => page.evaluate(async ({ t, eye }) => {
     const remote = window.__ORBIT_IWER__.remote;
-    await remote.dispatch('set_transform', { device: 'headset', position: { x: 0, y: 1.25, z: 0.34 } });
+    await remote.dispatch('set_transform', { device: 'headset', position: eye });
     await remote.dispatch('look_at', { device: 'headset', target: t });
-  }, target);
+  }, { t: target, eye: DESIGN_EYE });
   const views = async (name) => {
     const r = {};
     await look({ x: 0, y: 1.32, z: -1.2 });

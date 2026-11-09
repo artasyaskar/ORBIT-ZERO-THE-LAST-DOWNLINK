@@ -7,7 +7,9 @@ import {
   MIN_PANEL_TEXT_DEG,
   PRIMARY_PANEL_TEXT_DEG,
   SEATED_EYE,
+  SEAT_FIT_LIMITS,
   eyeDistance,
+  seatFitOffset,
   textAngleDeg,
   type PanelPose,
 } from '../src/ui/spatialLayout';
@@ -110,5 +112,48 @@ describe('Spatial panel legibility (geometry)', () => {
     const before: PanelPose = { position: [0.88, 1.16, -0.98], yawDeg: -30, scale: 0.098 };
     expect(textAngleDeg(12, before)).toBeLessThan(0.55);
     expect(textAngleDeg(13, IMMERSIVE_PANEL_POSES.telemetry)).toBeGreaterThanOrEqual(0.75);
+  });
+});
+
+/**
+ * The rig offset that puts a judge's head on SEATED_EYE. Geometry only: it does not prove that a real
+ * Quest session starts with the head near the local-floor origin (that is checked on the headset).
+ */
+describe('Seat fit (rig offset)', () => {
+  const head = (x: number, y: number, z: number): [number, number, number] => [x, y, z];
+  const apply = (h: [number, number, number], off: [number, number, number]) => h.map((v, i) => v + off[i]);
+
+  it('leaves a head that is already on the design eye alone', () => {
+    expect(seatFitOffset(head(...SEATED_EYE))).toEqual([0, 0, 0]);
+  });
+
+  it('ignores errors inside the deadband, per axis', () => {
+    const deadband: [number, number, number] = [0.05, 0.05, 0.08];
+    expect(seatFitOffset(head(0.04, 1.25 + 0.04, 0.1 + 0.07), deadband)).toEqual([0, 0, 0]);
+    const [ox, oy, oz] = seatFitOffset(head(0, 1.6, 0.1), deadband);
+    expect(ox).toBe(0);
+    expect(oy).toBeCloseTo(1.25 - 1.6, 5);
+    expect(oz).toBe(0);
+  });
+
+  it('lands the head on the design eye for a standing judge, a low seat and a default Quest head', () => {
+    for (const h of [head(0, 1.7, 0), head(0, 1.9, 0), head(0, 1.0, 0), head(0.1, 1.6, 0.02)]) {
+      const landed = apply(h, seatFitOffset(h));
+      SEATED_EYE.forEach((target, i) => expect(landed[i]).toBeCloseTo(target, 5));
+    }
+  });
+
+  it('never shifts the rig farther than the limits', () => {
+    const tall = seatFitOffset(head(0, 2.4, 0));
+    const tiny = seatFitOffset(head(0, 0.2, 0));
+    const wide = seatFitOffset(head(3, 1.25, -3));
+    expect(tall[1]).toBe(SEAT_FIT_LIMITS.y[0]);
+    expect(tiny[1]).toBe(SEAT_FIT_LIMITS.y[1]);
+    expect(wide[0]).toBe(SEAT_FIT_LIMITS.x[0]);
+    expect(wide[2]).toBe(SEAT_FIT_LIMITS.z[1]);
+  });
+
+  it('keeps the design eye where the cockpit was laid out (1.25 m high, 0.10 m forward of the origin)', () => {
+    expect([...SEATED_EYE]).toEqual([0, 1.25, 0.1]);
   });
 });
