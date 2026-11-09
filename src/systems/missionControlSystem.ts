@@ -87,7 +87,7 @@ import {
   latLonToGlobePoint,
 } from '../scene-assets/earthGlobe.scene-asset';
 import { createEarthGlobeEnhancementsOptimized, updateEarthEnhancementsOptimized } from '../scene-assets/earthGlobeEnhancements.optimized';
-import { alignSpan } from '../scene-assets/lib/hardsurface';
+import { alignSpan, isBakedStaticMaterial } from '../scene-assets/lib/hardsurface';
 import { VRHandSimulator } from './vrHandSimulator';
 import { OrbitalAudioController, type OrbitalSoundCue } from './orbitalAudio';
 import { VoiceCommander, type VoiceDialogueId } from './voiceCommander';
@@ -151,6 +151,12 @@ const XR_DESK_PAD_SCALE: Readonly<Record<string, number>> = {
  * The gauge-row buttons are drawn by the desk-gauges asset; the pad entity under each one is what the
  * laser and the near pinch press. Hover and press are mirrored onto the visible button.
  */
+/** Evidence-cube parts tinted fully (colour and glow) and faintly (glow only) by setObjectTint. */
+const CUBE_FULL_TINT_PARTS = ['CubeOuterFrame', 'CubeHighwayVector'] as const;
+const CUBE_FAINT_TINT_PARTS = [
+  'CubeConfidenceCore', 'CubeAcrylicShell', 'CubeContourWireframe_1', 'CubeBridgeSpan', 'CubeCloudObscurationCap', 'CubeRadarSpikes',
+] as const;
+
 const GAUGE_BUTTON_TWIN: Readonly<Record<string, { group: string; cap: string }>> = {
   'pad-recenter-desk': { group: 'RecenterDeskButton', cap: 'PadIlluminatedCap' },
   'pad-master-power': { group: 'MasterIgnitionSwitch', cap: 'MasterIgnitionCap' },
@@ -286,6 +292,8 @@ export class MissionControlSystem extends createSystem({
   private tutorial = new TutorialEngine();
   private audio = new OrbitalAudioController();
   private materialCache = new WeakMap<Object3D, MeshStandardMaterial[]>();
+  /** Per tinted root: is it an evidence cube (tinted on its core), decided once. */
+  private evidenceCubeRoots = new WeakMap<Object3D, boolean>();
   private cubeCanvasMap = new Map<number, CubeCanvasBinding>();
   private tempVec = new Vector3();
   private tempObj = new Object3D();
@@ -1645,11 +1653,6 @@ export class MissionControlSystem extends createSystem({
       const sweepBlade = this.childByName(orbitalConsole, 'TacticalRadarSweepBlade');
       if (sweepBlade) {
         sweepBlade.rotation.z += (reducedMotion ? 0 : delta) * 0.95;
-      }
-      // Floating 3D Flood Inundation Hologram (Subtle hover & pulse)
-      const floodHolo = this.childByName(orbitalConsole, 'FloodInundationHoloRelief');
-      if (floodHolo) {
-        floodHolo.position.y = 0.24 + Math.sin(this.elapsedTime * 2.0) * 0.008;
       }
     }
 
@@ -6514,6 +6517,8 @@ export class MissionControlSystem extends createSystem({
       ) {
         return;
       }
+      // A merged static part (e.g. a cube's frame) is never tinted, and a clone would drop its shader patch.
+      if (!Array.isArray(child.material) && isBakedStaticMaterial(child.material)) return;
       const source = Array.isArray(child.material)
         ? child.material
         : [child.material];
@@ -6542,30 +6547,30 @@ export class MissionControlSystem extends createSystem({
   ): void {
     const mats = this.ensureClonedMaterials(root);
     const color = this.tempColor.setHex(hex);
+    // Only colours and intensities change here: three.js uploads them as uniforms every frame, so no
+    // material.needsUpdate (which would re-check the shader program of every tinted material each frame).
 
-    if (root.name === 'EvidenceDataCube') {
-      const core = root.getObjectByName('CubeConfidenceCore');
-      if (core instanceof Mesh && core.material instanceof MeshStandardMaterial) {
-        core.material.color.copy(color);
-        core.material.emissive.copy(color);
-        core.material.emissiveIntensity = emissiveIntensity;
-        core.material.needsUpdate = true;
+    // Evidence cubes: the frame (and the highway line) glow in the cube's colour, the inner parts get a faint
+    // glow. The front and top display plates hide the core, so the frame is what shows the colour. Parts are
+    // named explicitly; the scene renames the asset root ("Evidence Cube 1"), so a cube is found by its frame.
+    let isCube = this.evidenceCubeRoots.get(root);
+    if (isCube === undefined) {
+      isCube = Boolean(root.getObjectByName('CubeConfidenceCore') && root.getObjectByName('CubeOuterFrame'));
+      this.evidenceCubeRoots.set(root, isCube);
+    }
+    if (isCube) {
+      for (const name of CUBE_FULL_TINT_PARTS) {
+        const part = this.childByName(root, name);
+        if (!(part instanceof Mesh) || !(part.material instanceof MeshStandardMaterial)) continue;
+        part.material.color.copy(color);
+        part.material.emissive.copy(color);
+        part.material.emissiveIntensity = emissiveIntensity;
       }
-      const shell = root.getObjectByName('CubeAcrylicShell');
-      if (shell instanceof Mesh && shell.material instanceof MeshStandardMaterial) {
-        shell.material.emissive.copy(color).multiplyScalar(0.25);
-        shell.material.emissiveIntensity = 0.25;
-        shell.material.needsUpdate = true;
-      }
-      const contour1 = root.getObjectByName('CubeContourWireframe_1');
-      if (contour1 instanceof Mesh && contour1.material instanceof MeshStandardMaterial) {
-        contour1.material.emissive.copy(color).multiplyScalar(0.6);
-        contour1.material.needsUpdate = true;
-      }
-      const contour2 = root.getObjectByName('CubeContourWireframe_2');
-      if (contour2 instanceof Mesh && contour2.material instanceof MeshStandardMaterial) {
-        contour2.material.emissive.copy(color).multiplyScalar(0.6);
-        contour2.material.needsUpdate = true;
+      for (const name of CUBE_FAINT_TINT_PARTS) {
+        const part = this.childByName(root, name);
+        if (!(part instanceof Mesh) || !(part.material instanceof MeshStandardMaterial)) continue;
+        part.material.emissive.copy(color).multiplyScalar(0.18);
+        part.material.emissiveIntensity = emissiveIntensity * 0.3;
       }
       return;
     }
@@ -6584,7 +6589,6 @@ export class MissionControlSystem extends createSystem({
         m.emissive.copy(color);
         m.emissiveIntensity = emissiveIntensity;
       }
-      m.needsUpdate = true;
     }
   }
 }

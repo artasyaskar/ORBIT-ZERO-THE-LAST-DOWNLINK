@@ -14,6 +14,7 @@ import {
     AdditiveBlending,
     BackSide,
     BufferGeometry,
+    Color,
     CylinderGeometry,
     DoubleSide,
     Float32BufferAttribute,
@@ -25,7 +26,6 @@ import {
     MeshBasicMaterial,
     MeshStandardMaterial,
     Object3D,
-    PlaneGeometry,
     PointLight,
     Points,
     PointsMaterial,
@@ -492,18 +492,30 @@ export function createOrbitalConsoleAsset(): Object3D {
         holoTable.name = 'HoloTacticalWarTable';
         holoTable.position.set(0, 0.779, -0.05);
 
-        const holoCyanBasicMat = new MeshBasicMaterial({
-            color: 0x00f0ff,
+        // Cyan and amber glow parts share one additive material; each part carries its own colour and opacity
+        // as RGBA vertex colours, so the static merge makes all the rings and nodes one draw call.
+        const holoGlowMat = new MeshBasicMaterial({
+            color: 0xffffff,
+            vertexColors: true,
             transparent: true,
-            opacity: 0.88,
             blending: AdditiveBlending,
         });
-        const holoAmberBasicMat = new MeshBasicMaterial({
-            color: 0xf59e0b,
-            transparent: true,
-            opacity: 0.82,
-            blending: AdditiveBlending,
-        });
+        const glowTint = new Color();
+        const holoGlowGeometry = (source: BufferGeometry, hex: number, opacity: number): BufferGeometry => {
+            const geometry = source.clone();
+            glowTint.setHex(hex);
+            const rgba = new Float32Array(geometry.getAttribute('position').count * 4);
+            for (let i = 0; i < rgba.length; i += 4) {
+                rgba[i] = glowTint.r;
+                rgba[i + 1] = glowTint.g;
+                rgba[i + 2] = glowTint.b;
+                rgba[i + 3] = opacity;
+            }
+            geometry.setAttribute('color', new Float32BufferAttribute(rgba, 4));
+            return geometry;
+        };
+        const holoCyan = (source: BufferGeometry) => holoGlowGeometry(source, 0x00f0ff, 0.88);
+        const holoAmber = (source: BufferGeometry) => holoGlowGeometry(source, 0xf59e0b, 0.82);
 
         // 1. Heavy Chamfered Titanium Collar Frame & Recessed Dark Carbon Core
         const outerBezel = new Mesh(
@@ -524,8 +536,8 @@ export function createOrbitalConsoleAsset(): Object3D {
 
         // 2. Concentric Holographic Emissive Energy Rings (shared materials for static merge)
         const outerGlowRing = new Mesh(
-            new TorusGeometry(0.55, 0.0035, 6, 24),
-            holoCyanBasicMat,
+            holoCyan(new TorusGeometry(0.55, 0.0035, 6, 24)),
+            holoGlowMat,
         );
         outerGlowRing.name = 'HoloRingOuterCyan';
         outerGlowRing.rotation.set(Math.PI / 2, 0, 0);
@@ -533,8 +545,8 @@ export function createOrbitalConsoleAsset(): Object3D {
         holoTable.add(outerGlowRing);
 
         const midTacticalRing = new Mesh(
-            new TorusGeometry(0.38, 0.0028, 6, 24),
-            holoAmberBasicMat,
+            holoAmber(new TorusGeometry(0.38, 0.0028, 6, 24)),
+            holoGlowMat,
         );
         midTacticalRing.name = 'HoloRingMidAmber';
         midTacticalRing.rotation.set(Math.PI / 2, 0, 0);
@@ -542,8 +554,8 @@ export function createOrbitalConsoleAsset(): Object3D {
         holoTable.add(midTacticalRing);
 
         const innerOrbitRing = new Mesh(
-            new TorusGeometry(0.24, 0.0024, 6, 24),
-            holoCyanBasicMat,
+            holoCyan(new TorusGeometry(0.24, 0.0024, 6, 24)),
+            holoGlowMat,
         );
         innerOrbitRing.name = 'HoloRingInnerCyan';
         innerOrbitRing.rotation.set(Math.PI / 2, 0, 0);
@@ -582,7 +594,7 @@ export function createOrbitalConsoleAsset(): Object3D {
         radialLines.name = 'HoloCompassRadialLines';
         holoTable.add(radialLines);
 
-        // 4. Tactical Data Network Nodes (shared materials so static merge collapses 12 meshes -> 2)
+        // 4. Tactical Data Network Nodes (one shared material, so the static merge folds them into the rings' draw)
         const nodeGroup = new Group();
         nodeGroup.name = 'HoloTacticalNodes';
 
@@ -597,18 +609,21 @@ export function createOrbitalConsoleAsset(): Object3D {
 
         const nodeRingGeo = new TorusGeometry(0.022, 0.0016, 4, 12);
         const nodeCoreGeo = new SphereGeometry(0.006, 6, 6);
+        const nodeRingCyan = holoCyan(nodeRingGeo);
+        const nodeRingAmber = holoAmber(nodeRingGeo);
+        const nodeCoreCyan = holoCyan(nodeCoreGeo);
+        const nodeCoreAmber = holoAmber(nodeCoreGeo);
 
         for (const n of nodesData) {
             const nGroup = new Group();
             nGroup.name = n.id;
             nGroup.position.set(n.pos[0], n.pos[1], n.pos[2]);
-            const sharedMat = n.amber ? holoAmberBasicMat : holoCyanBasicMat;
 
-            const ringMesh = new Mesh(nodeRingGeo, sharedMat);
+            const ringMesh = new Mesh(n.amber ? nodeRingAmber : nodeRingCyan, holoGlowMat);
             ringMesh.rotation.set(Math.PI / 2, 0, 0);
             nGroup.add(ringMesh);
 
-            const coreMesh = new Mesh(nodeCoreGeo, sharedMat);
+            const coreMesh = new Mesh(n.amber ? nodeCoreAmber : nodeCoreCyan, holoGlowMat);
             nGroup.add(coreMesh);
 
             nodeGroup.add(nGroup);
@@ -638,71 +653,8 @@ export function createOrbitalConsoleAsset(): Object3D {
         tablePointLight.position.set(0, 0.08, 0);
         holoTable.add(tablePointLight);
 
-        // 7. Floating 3D Flood Inundation Hologram Mesh (Image 2 & 4 Signature!)
-        const floodReliefGroup = new Group();
-        floodReliefGroup.name = 'FloodInundationHoloRelief';
-        floodReliefGroup.position.set(0, 0.24, -0.06);
-        floodReliefGroup.rotation.set(-0.35, 0, 0);
-
-        const terrainGeo = new PlaneGeometry(0.42, 0.26, 20, 14);
-        const pos = terrainGeo.attributes.position;
-        for (let i = 0; i < pos.count; i++) {
-            const x = pos.getX(i);
-            const y = pos.getY(i);
-            const distFromRiver = Math.abs(x - Math.sin(y * 8) * 0.06);
-            if (distFromRiver < 0.05) {
-                pos.setZ(i, -0.016 + Math.cos(distFromRiver * 30) * 0.008);
-            } else {
-                pos.setZ(i, Math.sin(x * 12) * Math.cos(y * 10) * 0.008);
-            }
-        }
-        terrainGeo.computeVertexNormals();
-
-        const terrainMesh = new Mesh(
-            terrainGeo,
-            new MeshBasicMaterial({
-                color: 0x0f2a4a,
-                wireframe: true,
-                transparent: true,
-                opacity: 0.65,
-                blending: AdditiveBlending,
-            }),
-        );
-        terrainMesh.name = 'HoloRiverTerrainWire';
-        floodReliefGroup.add(terrainMesh);
-
-        const floodWaterGeo = new PlaneGeometry(0.36, 0.18, 12, 8);
-        const floodWaterMesh = new Mesh(
-            floodWaterGeo,
-            new MeshBasicMaterial({
-                color: 0x00f0ff,
-                transparent: true,
-                opacity: 0.45,
-                blending: AdditiveBlending,
-                side: DoubleSide,
-                forceSinglePass: true,
-                depthWrite: false,
-            }),
-        );
-        floodWaterMesh.name = 'HoloFloodWaterPolygons';
-        floodWaterMesh.position.set(0, 0, 0.003);
-        floodReliefGroup.add(floodWaterMesh);
-
-        const reticleGeo = new TorusGeometry(0.018, 0.002, 6, 20);
-        const reticleMesh = new Mesh(
-            reticleGeo,
-            new MeshBasicMaterial({
-                color: 0xef4444,
-                transparent: true,
-                opacity: 0.95,
-                blending: AdditiveBlending,
-            }),
-        );
-        reticleMesh.name = 'HoloBreachWarningReticle';
-        reticleMesh.position.set(0.02, 0.02, 0.01);
-        floodReliefGroup.add(reticleMesh);
-
-        holoTable.add(floodReliefGroup);
+        // The flood-relief hologram that floated here was cut: it sat behind the globe, and it showed flood
+        // terrain in the wildfire and earthquake operations too.
 
         return holoTable;
     }

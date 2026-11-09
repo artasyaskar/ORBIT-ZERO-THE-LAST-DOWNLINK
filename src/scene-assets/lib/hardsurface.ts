@@ -645,7 +645,9 @@ export function mergeStaticMeshesByMaterial(
     const uvs: number[] = [];
     const colors: number[] = [];
     const hasUvs = meshes.every((mesh) => Boolean(mesh.geometry.getAttribute('uv')));
-    const hasColors = meshes.every((mesh) => Boolean(mesh.geometry.getAttribute('color')));
+    // RGB or RGBA vertex colours (RGBA lets one additive mesh keep each part's own opacity).
+    const colorSize = meshes[0].geometry.getAttribute('color')?.itemSize ?? 0;
+    const hasColors = colorSize > 0 && meshes.every((mesh) => mesh.geometry.getAttribute('color')?.itemSize === colorSize);
     const indices: number[] = [];
     let vertexOffset = 0;
 
@@ -669,6 +671,7 @@ export function mergeStaticMeshesByMaterial(
         if (hasColors) {
           const color = geo.getAttribute('color');
           colors.push(color.getX(i), color.getY(i), color.getZ(i));
+          if (colorSize === 4) colors.push(color.getW(i));
         }
       }
 
@@ -691,7 +694,7 @@ export function mergeStaticMeshesByMaterial(
     mergedGeo.setAttribute('position', new Float32BufferAttribute(positions, 3));
     mergedGeo.setAttribute('normal', new Float32BufferAttribute(normals, 3));
     if (hasUvs) mergedGeo.setAttribute('uv', new Float32BufferAttribute(uvs, 2));
-    if (hasColors) mergedGeo.setAttribute('color', new Float32BufferAttribute(colors, 3));
+    if (hasColors) mergedGeo.setAttribute('color', new Float32BufferAttribute(colors, colorSize));
     mergedGeo.setIndex(indices);
     mergedGeo.computeBoundingSphere();
 
@@ -706,6 +709,7 @@ export function mergeStaticMeshesByMaterial(
  * ------------------------------------------------------------------ */
 
 const BAKED_PROGRAM_KEY = 'oz-baked-standard-v1';
+const BAKED_MATERIAL_NAME = 'BakedStaticMat';
 
 /** Shader text this patch replaces in three.js r181 MeshStandardMaterial (checked when a program compiles). */
 const BAKED_FRAGMENT_PATCHES: ReadonlyArray<[string, string]> = [
@@ -735,7 +739,7 @@ export function createBakedStandardMaterial(side: Material['side'], flatShading:
     side,
     flatShading,
   });
-  material.name = 'BakedStaticMat';
+  material.name = BAKED_MATERIAL_NAME;
   material.onBeforeCompile = (shader) => {
     const missing = [...BAKED_VERTEX_PATCHES.filter(([from]) => !shader.vertexShader.includes(from)),
       ...BAKED_FRAGMENT_PATCHES.filter(([from]) => !shader.fragmentShader.includes(from))];
@@ -748,6 +752,14 @@ export function createBakedStandardMaterial(side: Material['side'], flatShading:
   };
   material.customProgramCacheKey = () => BAKED_PROGRAM_KEY;
   return material;
+}
+
+/**
+ * True for a material made by createBakedStandardMaterial. Do not clone one: Material.clone() does not copy
+ * onBeforeCompile, so the clone would lose the baked colours and render plain grey-white.
+ */
+export function isBakedStaticMaterial(material: Material): boolean {
+  return material.name === BAKED_MATERIAL_NAME && material.customProgramCacheKey() === BAKED_PROGRAM_KEY;
 }
 
 /** True for a material whose whole look is colour, emissive, roughness and metalness. */
@@ -782,7 +794,10 @@ export function mergeStaticMeshesIntoBakedMaterial(root: Object3D, keepNames: st
     }
     if (mesh instanceof InstancedMesh || (mesh as unknown as { isSkinnedMesh?: boolean }).isSkinnedMesh) return false;
     if (mesh.morphTargetInfluences || mesh.renderOrder !== 0 || Array.isArray(mesh.material)) return false;
-    if (mesh.geometry.groups.length > 0 || !mesh.geometry.getAttribute('position')) return false;
+    // Geometry groups only matter for multi-material meshes (excluded above): with one material three.js
+    // draws the whole draw range, as the merge does. A partial draw range would not survive the merge.
+    const { start, count } = mesh.geometry.drawRange;
+    if (start !== 0 || count !== Infinity || !mesh.geometry.getAttribute('position')) return false;
     return isBakeableStandardMaterial(mesh.material);
   };
 

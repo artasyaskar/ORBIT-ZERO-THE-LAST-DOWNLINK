@@ -20,7 +20,7 @@ import {
   PointsMaterial,
   TorusGeometry,
 } from '@iwsdk/core';
-import { bevelBox, mergeStaticMeshesByMaterial } from './lib/hardsurface';
+import { bevelBox, mergeStaticMeshesByMaterial, mergeStaticMeshesIntoBakedMaterial } from './lib/hardsurface';
 
 export function createScannerToolAsset(): Object3D {
   const root = new Group();
@@ -168,11 +168,10 @@ export function createDataCubeAsset(accentHex = 0x45c9c0): Object3D {
     metalness: 0.82,
   });
 
-  const titaniumTrimMat = new MeshStandardMaterial({
-    color: 0x64748b,
-    roughness: 0.18,
-    metalness: 0.90,
-  });
+  // The trim ribs and corner pillars share the frame material: at runtime the mission system tints the frame,
+  // trim and pillars with the cube's colour (they are what the player sees around the display plates), so one
+  // shared material lets the static merge draw all of them as one mesh named CubeOuterFrame.
+  const titaniumTrimMat = frameMat;
 
   // Dedicated material for runtime CanvasTexture telemetry display plates
   const displayPlateMat = new MeshStandardMaterial({
@@ -244,11 +243,14 @@ export function createDataCubeAsset(accentHex = 0x45c9c0): Object3D {
   terrainCore.position.set(0, 0.036, 0);
   root.add(terrainCore);
 
-  // Horizontal Glowing Slit Emitter Bar (front and back aperture)
-  const slitMat = new MeshBasicMaterial({
+  // Horizontal Glowing Slit Emitter Bar (front and back aperture). Full white emissive renders pure white
+  // (no tone mapping), like the old 95%-opaque white, and lets the slit join the cube's one static draw.
+  const slitMat = new MeshStandardMaterial({
     color: 0xffffff,
-    transparent: true,
-    opacity: 0.95,
+    emissive: 0xffffff,
+    emissiveIntensity: 1,
+    roughness: 1,
+    metalness: 0,
   });
   const frontSlit = new Mesh(
     bevelBox(0.036, 0.006, 0.052, 0.001, 0.002, 1),
@@ -484,10 +486,15 @@ export function createDataCubeAsset(accentHex = 0x45c9c0): Object3D {
   particles.raycast = () => {};
   root.add(particles);
 
-  mergeStaticMeshesByMaterial(root, [
-    'CubeAcrylicShell', 'CubeConfidenceCore', 'CubeContourWireframe_1', 'CubeContourWireframe_2',
+  // Parts the mission system tints, scales, toggles or textures by name keep their own meshes.
+  const dynamicParts = [
+    'CubeAcrylicShell', 'CubeConfidenceCore', 'CubeContourWireframe_1',
     'CubeBridgeSpan', 'CubeCloudObscurationCap', 'CubeRadarSpikes', 'CubeHighwayVector',
-  ]);
+  ];
+  // Frame + collars + plinth + trim + pillars -> one tinted mesh 'CubeOuterFrame'; the two display plates -> one.
+  mergeStaticMeshesByMaterial(root, dynamicParts);
+  // The untinted rest (flood channel, glow slit) becomes one draw that keeps each part's own look.
+  mergeStaticMeshesIntoBakedMaterial(root, [...dynamicParts, 'CubeOuterFrame', 'CubeFrontDisplay', 'CubeTopDisplay']);
   return root;
 }
 
