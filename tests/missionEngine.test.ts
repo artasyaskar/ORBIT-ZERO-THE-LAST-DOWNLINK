@@ -1343,7 +1343,7 @@ describe('ORBIT ZERO - MissionEngine Deterministic Triage Simulation', () => {
         } else if (s.label === 'B+C+E') {
           expect(deb.deterministicRecommendation).toContain('unused link capacity beyond the 2-cube optimum');
         } else if (s.expectedGrade === 'A') {
-          expect(deb.deterministicRecommendation).toContain('almost no buffer against loss of signal (Grade A / SILVER)');
+          expect(deb.deterministicRecommendation).toContain('almost no buffer against loss of signal (Grade A)');
         }
       }
 

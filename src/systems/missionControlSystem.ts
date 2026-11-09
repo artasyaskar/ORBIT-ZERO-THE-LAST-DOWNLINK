@@ -34,7 +34,6 @@ import {
   Raycaster,
   SphereGeometry,
   SRGBColorSpace,
-  SessionMode,
   UIKit,
   UIKitMLAsset,
   Vector2,
@@ -71,7 +70,8 @@ import { describeMissionPlan, getMissionBenchmark, getNextPlanAction, getQueueSc
 import { SolverMemo } from '../mission/solverMemo';
 import { coveredRequestIds, formatClock, getNextStep, isPassStalled } from '../mission/guidance';
 import { NamedChildCache, SceneObjectCache } from './sceneObjectCache';
-import { clipText, retryGuidanceFor } from '../ui/debriefText';
+import { clipText, plainScience, retryGuidanceFor } from '../ui/debriefText';
+import { gradeLabel, memoryBlocks, outcomeLabel as outcomeWords, resultHeadline, TRAINING_COMPLETE_LABEL } from '../mission/resultLabels';
 import { DELIBERATE_SCANNER_PRESS_RADIUS_M, SCANNER_TARGET_ID, isStrayScannerGrab, pressOwner } from './scannerArbitration';
 import { GLOBE_CARD_SCALE, IMMERSIVE_PANEL_POSES, MISSION_HUD_POSES, type PanelPose } from '../ui/spatialLayout';
 import { SectorWeatherLayer } from './sectorWeatherFx';
@@ -426,7 +426,6 @@ export class MissionControlSystem extends createSystem({
   private cubeTransitions = new Map<string, { kind: 'SCAN' | 'PROCESS'; remaining: number }>();
   private gazeSectorId: SectorId | null = null;
   private gazeDwellSec = 0;
-  private isArSupported = false;
 
   // UIKitML references
   private briefingPanel?: UIKitMLAsset;
@@ -549,14 +548,6 @@ export class MissionControlSystem extends createSystem({
       voiceCommander: this.voiceCommander,
       audio: this.audio,
     });
-    if (typeof navigator !== 'undefined' && 'xr' in navigator) {
-      (navigator as any).xr?.isSessionSupported?.('immersive-ar').then((supported: boolean) => {
-        this.isArSupported = Boolean(supported);
-        this.syncSettings();
-      }).catch(() => {
-        this.isArSupported = false;
-      });
-    }
     // Leaving the page (tab hidden) or, on the flat page, switching away (window blur) holds the media and
     // pauses a running pass. In a headset the session's own visibility events do this (bindXRSessionHandEvents).
     const onPageVisibility = () => this.setInterrupted(document.hidden, true);
@@ -799,8 +790,7 @@ export class MissionControlSystem extends createSystem({
         getReachablePlan: () => this.getSolution(this.engine.getState()),
         getProfile: () => structuredClone(this.profile),
         togglePreference: (key: keyof MissionPreferences) => this.cyclePreference(key),
-        toggleTabletopMode: () => { this.cyclePreference('tabletopMode'); return this.profile.preferences.tabletopMode; },
-        getGazeState: () => ({ sectorId: this.gazeSectorId, dwellProgress: Math.min(1, this.gazeDwellSec / 1.35), gazeAssist: this.profile.preferences.gazeAssist, tabletopMode: this.profile.preferences.tabletopMode }),
+        getGazeState: () => ({ sectorId: this.gazeSectorId, dwellProgress: Math.min(1, this.gazeDwellSec / 1.35), gazeAssist: this.profile.preferences.gazeAssist }),
         setCameraPreset: (preset: 'HERO' | 'GLOBE' | 'CUBES' | 'CRADLE' | 'DOWNLINK' | 'DEBRIEF') => this.setCameraPreset(preset),
         pause: () => this.togglePause(),
         selectPacket: (id: string) => { this.applyAction({ type: 'SELECT_PACKET', packetId: id }); this.syncAll(); },
@@ -1282,8 +1272,8 @@ export class MissionControlSystem extends createSystem({
     const sc = this.engine.getActiveScenario();
     // One config-driven line for every operation, so the spoken numbers always match the budget.
     this.voiceCommander?.speakDirect(
-      `Orbit Zero online. ${sc.operationCode ?? sc.name} active. ${st.power} Watt-hours and ${st.maxStorage} Storage Units ready. Select a priority sector on the globe.`,
-      `[ARIA-7] ${sc.operationCode ?? sc.name} [SIMULATED]. ${st.power} Wh / ${st.maxStorage} STR online. Select sector on globe.`,
+      `Orbit Zero online. ${sc.operationCode ?? sc.name} active. ${st.power} Watt-hours and ${st.maxStorage} memory blocks ready. Select a priority sector on the globe.`,
+      `[ARIA-7] ${sc.operationCode ?? sc.name} [SIMULATED]. ${st.power} Wh / ${st.maxStorage} memory blocks online. Select sector on globe.`,
       'HIGH',
     );
   }
@@ -3581,13 +3571,10 @@ export class MissionControlSystem extends createSystem({
         calibrateButton?.setProperties({ display: 'none' });
       } else {
         const launchXR = () => {
-          const isArRequested = this.profile.preferences.tabletopMode && this.isArSupported;
           // Same defensive path as the DOM ENTER VR button: a failed request shows a message and TRY AGAIN.
           const overlay = getXrEntryOverlay();
           overlay.attach(this.world);
-          overlay.enter({
-            sessionMode: isArRequested ? SessionMode.ImmersiveAR : SessionMode.ImmersiveVR,
-          });
+          overlay.enter();
         };
         const exitXR = () => this.world.exitXR();
         xrButton.addEventListener('click', launchXR);
@@ -3600,11 +3587,6 @@ export class MissionControlSystem extends createSystem({
             xrButton.setProperties({ display: is2D ? 'flex' : 'none' });
             exitButton.setProperties({ display: is2D ? 'none' : 'flex' });
             calibrateButton?.setProperties({ display: is2D ? 'none' : 'flex' });
-            if (!is2D && this.world.renderer) {
-              const session = (this.world.renderer.xr as any)?.getSession?.();
-              const isAR = session?.mode === 'immersive-ar';
-              this.world.renderer.setClearColor(0x000000, isAR ? 0 : 1);
-            }
           }),
         );
       }
@@ -3626,7 +3608,7 @@ export class MissionControlSystem extends createSystem({
       this.settingsOpen = !this.settingsOpen;
       this.telemetryPanel?.getElementById('AccessibilitySettings')?.setProperties({ display: this.settingsOpen ? 'flex' : 'none' });
     });
-    const preferenceIds = { guidance: 'Guidance', dominantHand: 'DominantHand', oneHanded: 'OneHanded', gazeAssist: 'GazeAssist', tabletopMode: 'TabletopMode', largeText: 'LargeText', highContrast: 'HighContrast', reducedMotion: 'ReducedMotion', captions: 'Captions', audioLevel: 'AudioLevel', relaxedClock: 'RelaxedClock' } as const;
+    const preferenceIds = { guidance: 'Guidance', dominantHand: 'DominantHand', oneHanded: 'OneHanded', gazeAssist: 'GazeAssist', largeText: 'LargeText', highContrast: 'HighContrast', reducedMotion: 'ReducedMotion', captions: 'Captions', audioLevel: 'AudioLevel', relaxedClock: 'RelaxedClock' } as const;
     for (const key of Object.keys(preferenceIds) as (keyof typeof preferenceIds)[]) {
       bindClick(this.telemetryPanel, `Btn_${preferenceIds[key]}`, () => this.cyclePreference(key));
     }
@@ -3811,7 +3793,7 @@ export class MissionControlSystem extends createSystem({
     this.setText(hud, 'ClockLabel', clockLabel);
     this.setText(hud, 'ClockText', clockText);
     this.setTextColor(hud, 'ClockText', clockColor);
-    this.setText(hud, 'ResourceLine', `BATTERY ${state.power}/${state.maxPower} Wh  |  MEMORY ${state.storageUsed}/${state.maxStorage}  |  SEND ${state.downlinkCommittedSec.toFixed(1)}/${state.downlinkWindowSec.toFixed(1)}s`);
+    this.setText(hud, 'ResourceLine', `BATTERY ${state.power}/${state.maxPower} Wh  |  MEMORY ${state.storageUsed}/${state.maxStorage} blocks  |  SEND ${state.downlinkCommittedSec.toFixed(1)}/${state.downlinkWindowSec.toFixed(1)}s`);
     this.setText(hud, 'TrackerLine', trackerText(state, custom));
     const stalled = isPassStalled(state, custom);
     this.setText(hud, 'Lbl_HudTransmit', state.paused ? 'RESUME PASS' : state.phase === 'DOWNLINK' ? 'CLOSE LINK' : stalled ? 'ABORT PASS' : `TRANSMIT (${state.queuePacketIds.length}/${this.engine.getActiveScenario().budget.maxQueueSlots} LOADED)`);
@@ -4126,6 +4108,8 @@ export class MissionControlSystem extends createSystem({
       this.scanBeamSectorId = this.engine.getState().selectedSectorId;
       this.scanBeamMode = mode;
       this.playCue(mode === 'OPTICAL' ? 'SCAN_OPTICAL' : 'SCAN_RADAR');
+      // Thermal shares the radar sweep sound; its caption must not claim a radar image.
+      if (mode === 'THERMAL') this.caption = 'THERMAL SCAN: heat image acquired; thermal infrared sees through smoke, not thick cloud.';
       this.audio.playSubBassPulse();
 
       // Achievement: the chosen sensor saw through this sector's weather well enough for its request.
@@ -4440,8 +4424,8 @@ export class MissionControlSystem extends createSystem({
     if (this.cueLog.length > 40) this.cueLog.shift();
     const captions: Partial<Record<OrbitalSoundCue, string>> = {
       SCAN_OPTICAL: 'OPTICAL APERTURE: Visible-band reflectance frame acquired.',
-      SCAN_RADAR: 'SAR BACKSCATTER: Active microwave return acquired through cloud layer.',
-      PROCESS_SUCCESS: `PROCESSING COMPLETE: Onboard feature vectorization compressed packet to ${this.engine.getActiveScenario().budget.onboardProcess.compressedStorageCost} STR.`,
+      SCAN_RADAR: 'RADAR SCAN: microwave image acquired; radar sees surface shape through cloud and dust.',
+      PROCESS_SUCCESS: `COMPRESSION DONE: the cube now takes ${memoryBlocks(this.engine.getActiveScenario().budget.onboardProcess.compressedStorageCost)} and sends faster.`,
       DOWNLINK_COMMIT: 'CARRIER ACQUIRED: S-Band phased array live downlink active.',
       PACKET_RECEIVED: 'GROUND ACKNOWLEDGEMENT: Evidence telemetry verified at regional depot.',
       LINK_CUTOFF: 'LOSS OF SIGNAL: Orbital horizon cutoff reached.',
@@ -4534,23 +4518,15 @@ export class MissionControlSystem extends createSystem({
     panel.scale.setScalar(pose.scale);
   }
 
+  /**
+   * Places the side panels for the flat page or the headset. (The MR tabletop / passthrough layout was
+   * removed: it hid the cabin but was never tested on a headset. See ADR-009.)
+   */
   public applyTabletopMode(): void {
-    const isTabletop = this.profile.preferences.tabletopMode;
     const isImmersive = Boolean(this.world.renderer?.xr?.isPresenting);
-    const consoleObj = this.sceneObject('orbital-console');
-    if (consoleObj) {
-      const cabinEnclosure = consoleObj.getObjectByName('CockpitEnclosureShell');
-      if (cabinEnclosure) cabinEnclosure.visible = !isTabletop;
-      const cosmicDome = consoleObj.getObjectByName('MilkyWayCosmicDome');
-      if (cosmicDome) cosmicDome.visible = !isTabletop;
-    }
 
     if (this.briefingPanel) {
-      if (isTabletop) {
-        this.briefingPanel.position.set(-0.92, 1.25, -1.36);
-        this.briefingPanel.rotation.set(0, (32 * Math.PI) / 180, 0);
-        this.briefingPanel.scale.setScalar(0.118);
-      } else if (isImmersive) {
+      if (isImmersive) {
         this.applyPanelPose(this.briefingPanel, IMMERSIVE_PANEL_POSES.briefing);
       } else {
         this.briefingPanel.position.set(-0.74, 1.16, -1.04);
@@ -4559,11 +4535,7 @@ export class MissionControlSystem extends createSystem({
       }
     }
     if (this.telemetryPanel) {
-      if (isTabletop) {
-        this.telemetryPanel.position.set(0, 1.78, -1.48);
-        this.telemetryPanel.rotation.set((14 * Math.PI) / 180, 0, 0);
-        this.telemetryPanel.scale.setScalar(0.122);
-      } else if (isImmersive) {
+      if (isImmersive) {
         this.applyPanelPose(this.telemetryPanel, IMMERSIVE_PANEL_POSES.telemetry);
       } else {
         this.telemetryPanel.position.set(0, 1.67, -1.16);
@@ -4572,11 +4544,7 @@ export class MissionControlSystem extends createSystem({
       }
     }
     if (this.debriefPanel) {
-      if (isTabletop) {
-        this.debriefPanel.position.set(0.92, 1.25, -1.36);
-        this.debriefPanel.rotation.set(0, (-32 * Math.PI) / 180, 0);
-        this.debriefPanel.scale.setScalar(0.118);
-      } else if (isImmersive) {
+      if (isImmersive) {
         // Same slot as telemetry (hidden during debrief). Centered behind the globe the debrief was hidden by it.
         this.applyPanelPose(this.debriefPanel, IMMERSIVE_PANEL_POSES.debrief);
       } else {
@@ -4689,21 +4657,15 @@ export class MissionControlSystem extends createSystem({
       Lbl_RelaxedClock: `PASS CLOCK: ${p.relaxedClock ? 'OFF (RELAXED)' : 'ON'}`,
       Lbl_AudioLevel: `AUDIO: ${Math.round(p.audioLevel * 100)}%`,
       Lbl_GazeAssist: `HEAD POINT ASSIST: ${p.gazeAssist ? 'ON' : 'OFF'}`,
-      Lbl_TabletopMode: `MR TABLETOP: ${p.tabletopMode
-          ? this.isArSupported
-            ? 'ON (PASSTHROUGH)'
-            : 'ON (CUPOLA VR)'
-          : 'OFF'
-        }`,
     };
     for (const [id, text] of Object.entries(labels)) this.setText(this.telemetryPanel, id, text);
     this.setText(this.telemetryPanel, 'AudioCaption', p.captions ? this.caption || 'GROUND CONTROL: one pass, three requests, one final downlink.' : '');
     if (this.debriefPanel) {
       const mastery = this.profile.mastery[this.engine.getState().scenarioId];
       this.setText(this.debriefPanel, 'MasteryReadout', mastery
-        ? `PERSONAL BEST: ${mastery.bestScore}/100 | ${mastery.bestGrade}-RANK | ${mastery.bestMarginSec.toFixed(1)}s MARGIN | ${mastery.attempts} PASSES`
+        ? `PERSONAL BEST: ${mastery.bestScore}/100 | ${gradeLabel(mastery.bestGrade)} | ${mastery.bestMarginSec.toFixed(1)}s MARGIN | ${mastery.attempts} PASSES`
         : `PROVEN OBJECTIVE: ${getMissionBenchmark(this.engine.getState().scenarioId, this.engine.getActiveCustomScenario()).score}/100 | COMPLETE THIS PASS TO EARN MASTERY`);
-      this.setText(this.debriefPanel, 'MedalsReadout', this.earnedMedals.length ? this.earnedMedals.join(' | ') : 'GROUND TRUTH / POWER DISCIPLINE / LINK PRECISION');
+      this.setText(this.debriefPanel, 'MedalsReadout', this.earnedMedals.length ? this.earnedMedals.join(' | ') : 'NO MEDALS YET THIS PASS');
     }
   }
 
@@ -5717,7 +5679,7 @@ export class MissionControlSystem extends createSystem({
 
       ctx.fillStyle = '#64748b';
       ctx.font = 'bold 20px monospace';
-      ctx.fillText(`STORAGE CAPACITY: ${rawStorageUnits(this.engine.getActiveScenario().budget)} STR`, 120, 395);
+      ctx.fillText(`RAW SCAN: ${memoryBlocks(rawStorageUnits(this.engine.getActiveScenario().budget)).toUpperCase()}`, 120, 395);
 
       ctx.fillStyle = '#e2e8f0';
       ctx.font = 'bold 24px monospace';
@@ -5769,21 +5731,9 @@ export class MissionControlSystem extends createSystem({
       ctx.font = 'bold 16px monospace';
       ctx.fillText(snrText, 274, 178);
 
-      const compLabel =
-        pkt.compressionAlgorithm === 'INTERFEROMETRIC_CHANGE_DETECTION'
-          ? 'CHANGE-DET'
-          : pkt.compressionAlgorithm === 'THERMAL_RADIOMETRIC_ENCODING'
-            ? 'THERM-ENC'
-            : pkt.compressionAlgorithm === 'OPTICAL_ROAD_EDGE_ENCODING'
-              ? 'EDGE'
-              : pkt.compressionAlgorithm === 'SAR_AMBIGUITY_METADATA_ENCODING'
-                ? 'AMBIG'
-                : pkt.sensorMode === 'RADAR'
-                  ? 'SAR-ENC'
-                  : 'OPT-ENC';
       const procStr = pkt.processed
-        ? `${pkt.storageCost} STR (${compLabel})`
-        : `${pkt.rawStorageCost} STR (RAW)`;
+        ? `${pkt.storageCost} BLOCK (COMPRESSED)`
+        : `${pkt.rawStorageCost} BLOCKS (RAW)`;
       ctx.fillStyle = pkt.processed ? '#10b981' : '#f59e0b';
       ctx.font = 'bold 16px monospace';
       ctx.fillText(`ONBOARD: ${procStr}`, 274, 214);
@@ -5823,7 +5773,7 @@ export class MissionControlSystem extends createSystem({
 
       ctx.fillStyle = '#38bdf8';
       ctx.font = 'bold 15px monospace';
-      const metaLine = `${pkt.phenomenologyTag.replace(/_/g, ' ')} | ${pkt.resolutionMeters.toFixed(2)}m RES`;
+      const metaLine = `PIXEL SIZE ${pkt.resolutionMeters.toFixed(2)} m | ${pkt.swathWidthKm.toFixed(0)} km WIDE SCAN`;
       ctx.fillText(metaLine.length > 46 ? metaLine.substring(0, 43) + '...' : metaLine, 38, 432);
 
       ctx.fillStyle = '#94a3b8';
@@ -6185,7 +6135,7 @@ export class MissionControlSystem extends createSystem({
         this.telemetryPanel,
         'InspectorScience',
         // One readable sentence in the headset; the full caveat stays in the desktop inspector.
-        clipText(selectedPkt.scientificReason, 150),
+        clipText(plainScience(selectedPkt.scientificReason), 150),
       );
 
       const cardColor =
@@ -6336,19 +6286,13 @@ export class MissionControlSystem extends createSystem({
       const debriefRate = d.downlinkThroughputMbps ?? rateOf(this.engine.getActiveScenario().budget);
       const isAcademyPass =
         state.scenarioId === 'ORBITAL_ACADEMY' && d.outcome === 'SUCCESS';
-      const outcomeLabel = isAcademyPass
-        ? 'TRAINING COMPLETE'
-        : d.outcome === 'SUCCESS'
-          ? 'MISSION SUCCESS'
-          : d.outcome === 'PARTIAL_SUCCESS'
-            ? 'PARTIAL SUCCESS'
-            : 'MISSION FAILURE';
+      const outcomeLabel = isAcademyPass ? TRAINING_COMPLETE_LABEL : outcomeWords(d.outcome);
       this.setText(
         this.debriefPanel,
         'DebriefRankTitle',
         isAcademyPass
-          ? `${outcomeLabel}: ${d.missionRank} (${d.totalScore}/${d.maxScore} PTS)`
-          : `${outcomeLabel}: ${d.missionRank} [GRADE ${d.efficiencyGrade} / ${d.certification}] (${d.totalScore}/${d.maxScore} PTS)`,
+          ? `${outcomeLabel} (${d.totalScore}/${d.maxScore} PTS)`
+          : `${resultHeadline(d.outcome, d.efficiencyGrade)} (${d.totalScore}/${d.maxScore} PTS)`,
       );
       this.setText(
         this.debriefPanel,

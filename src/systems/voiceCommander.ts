@@ -92,7 +92,7 @@ export const DIALOGUE_CATALOG: Record<VoiceDialogueId, DialogueLine> = {
   QUEUE_OVERFLOW: {
     id: 'QUEUE_OVERFLOW',
     spoken:
-      'Warning! Total downlink time exceeds our 10-second Karachi horizon window! Drag raw data cubes into the Amber Cradle to run onboard compression.',
+      'Warning! The loaded cubes take longer to send than the link window allows. Compress raw cubes in the amber cradle.',
     subtitle: '[ARIA-7] DOWNLINK OVERFLOW: Queue exceeds the downlink window! Compress packets in Amber Cradle.',
     priority: 'CRITICAL',
     cooldownSec: 6,
@@ -108,16 +108,16 @@ export const DIALOGUE_CATALOG: Record<VoiceDialogueId, DialogueLine> = {
   DEBRIEF_VICTORY: {
     id: 'DEBRIEF_VICTORY',
     spoken:
-      'Outstanding triage, Operator! Karachi response teams received all verified corridor vectors before horizon cutoff. Mission Grade: S-Rank.',
-    subtitle: '[ARIA-7] MISSION ACCOMPLISHED: All priority ground requests verified. S-Rank orbital mastery.',
+      'Outstanding triage, Operator. The best possible evidence reached the ground teams before loss of signal.',
+    subtitle: '[ARIA-7] BEST POSSIBLE TRIAGE: the most valuable evidence reached the ground.',
     priority: 'HIGH',
     cooldownSec: 10,
   },
   DEBRIEF_RETRY: {
     id: 'DEBRIEF_RETRY',
     spoken:
-      'Pass window closed. Telemetry packet loss detected. Ground teams need full verified coverage. Prepare for orbital re-entry.',
-    subtitle: '[ARIA-7] PASS CONCLUDED: Telemetry incomplete. Prepare for next orbital pass.',
+      'Pass complete. Some evidence could still be better. Check the result, then try for a higher score.',
+    subtitle: '[ARIA-7] PASS COMPLETE: check the result for a better plan.',
     priority: 'HIGH',
     cooldownSec: 10,
   },
@@ -130,8 +130,8 @@ export const DIALOGUE_CATALOG: Record<VoiceDialogueId, DialogueLine> = {
   },
   PROCESS_SUCCESS: {
     id: 'PROCESS_SUCCESS',
-    spoken: 'Feature extraction complete. Packet size halved for high-speed downlink.',
-    subtitle: '[ARIA-7] Compression complete. Packet size halved.',
+    spoken: 'Compression complete. The cube is smaller and sends faster.',
+    subtitle: '[ARIA-7] Compression complete: smaller cube, faster send.',
     priority: 'LOW',
     cooldownSec: 4,
   },

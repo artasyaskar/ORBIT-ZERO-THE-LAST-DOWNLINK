@@ -17,6 +17,7 @@ import {
   SECTOR_ORDER,
 } from './missionConfig';
 import { generateProceduralCrisis, type ThreatVector } from './proceduralCrisis';
+import { memoryBlocks } from './resultLabels';
 import { buildDebriefReport } from './scoring';
 import type {
   ActionResult,
@@ -202,16 +203,17 @@ export class MissionEngine {
     const sector = getScenarioSector(this.currentScenarioId, sectorId, this.activeCustomScenario);
     this.state.selectedSectorId = sectorId;
     this.state.stepCounter += 1;
+    // The weather only: which sensor sees through it is the puzzle, so the status line does not say.
     const cloudTag =
       sector.cloudCover === 'DENSE_STORM' || sector.cloudCover === 'CONVECTIVE_CLOUD'
-        ? 'DENSE STORM CLOUDS (RADAR rec.)'
+        ? 'DENSE STORM CLOUDS'
         : sector.cloudCover === 'MODERATE_SMOKE' ||
             sector.cloudCover === 'DENSE_SMOKE' ||
             sector.cloudCover === 'THIN_SMOKE'
-          ? 'BIOMASS SMOKE PLUME (THERMAL IR rec.)'
+          ? 'WILDFIRE SMOKE'
           : sector.cloudCover === 'SEISMIC_DUST'
-            ? 'SEISMIC DUST PLUME (RADAR / THERMAL rec.)'
-            : 'CLEAR SKY (OPTICAL rec.)';
+            ? 'EARTHQUAKE DUST'
+            : 'CLEAR SKY';
     this.state.lastStatusMessage = `Selected ${sector.code} ${sector.name} - ${cloudTag}.`;
     this.state.lastActionOk = true;
     return this.getState();
@@ -233,7 +235,7 @@ export class MissionEngine {
     const cost = getScanCost(budget, mode);
     const throughput = budget.downlinkThroughputMbps ?? DOWNLINK_THROUGHPUT_MBPS;
     const mb = cost.payloadMb ?? Number((cost.transmitSec * throughput).toFixed(1));
-    const spec = `${cost.powerCost} Wh, ${cost.storageCost} STR, ${mb} MB / ${cost.transmitSec.toFixed(1)}s Tx @ ${throughput} MB/s`;
+    const spec = `${cost.powerCost} Wh, ${memoryBlocks(cost.storageCost)}, ${mb} MB / ${cost.transmitSec.toFixed(1)}s to send`;
     this.state.lastStatusMessage =
       mode === 'OPTICAL'
         ? `Sensor switched to OPTICAL (${spec}) - High detail in clear skies; blocked by dense clouds and smoke.`
@@ -268,7 +270,7 @@ export class MissionEngine {
     const pkt = this.state.packets.find((p) => p.id === packetId);
     if (pkt) {
       this.state.selectedPacketId = pkt.id;
-      this.state.lastStatusMessage = `Inspecting ${pkt.id} (${pkt.sectorCode} ${pkt.sensorMode} | ${pkt.confidenceBadge} | ${pkt.storageCost} STR | ${pkt.transmitSec.toFixed(1)}s Tx).`;
+      this.state.lastStatusMessage = `Inspecting ${pkt.id} (${pkt.sectorCode} ${pkt.sensorMode} | ${pkt.confidenceBadge} | ${memoryBlocks(pkt.storageCost)} | ${pkt.transmitSec.toFixed(1)}s to send).`;
       this.state.lastActionOk = true;
     } else {
       this.state.lastStatusMessage = `Packet "${packetId}" not found in onboard storage.`;
@@ -327,7 +329,7 @@ export class MissionEngine {
     if (this.state.storageUsed + scanCost.storageCost > this.state.maxStorage) {
       return this.fail(
         'INSUFFICIENT_STORAGE',
-        `Onboard Storage full (${this.state.storageUsed}/${this.state.maxStorage} STR). Process a valid cube (3->1 STR) or discard an unverified cube first.`,
+        `Onboard memory full (${this.state.storageUsed}/${this.state.maxStorage} blocks). Compress a usable cube (${scanCost.storageCost} -> ${budget.onboardProcess.compressedStorageCost} blocks) or discard an unusable cube first.`,
       );
     }
 
@@ -442,7 +444,7 @@ export class MissionEngine {
     // The orbital pass clock starts with the first scan: planning before it is free.
     this.state.passStarted = true;
 
-    const msg = `Scanned ${sector.code} (${sensorMode}): ${outcome.confidenceBadge} - ${outcome.headline} (-${scanCost.powerCost} Wh, +${scanCost.storageCost} STR, ${payloadMb} MB / ${computedTxSec.toFixed(1)}s Tx).`;
+    const msg = `Scanned ${sector.code} (${sensorMode}): ${outcome.confidenceBadge} - ${outcome.headline} (-${scanCost.powerCost} Wh, +${memoryBlocks(scanCost.storageCost)}, ${payloadMb} MB / ${computedTxSec.toFixed(1)}s to send).`;
     this.state.lastStatusMessage = msg;
     this.state.lastActionOk = true;
 
@@ -475,14 +477,14 @@ export class MissionEngine {
     if (pkt.processed) {
       return this.fail(
         'ALREADY_PROCESSED',
-        `${pkt.id} (${pkt.sectorCode}) is already compressed to ${pkt.storageCost} STR / ${pkt.transmitSec.toFixed(1)}s Tx.`,
+        `${pkt.id} (${pkt.sectorCode}) is already compressed to ${memoryBlocks(pkt.storageCost)} / ${pkt.transmitSec.toFixed(1)}s to send.`,
       );
     }
 
     if (pkt.confidence === 'UNVERIFIED') {
       return this.fail(
         'CANNOT_PROCESS_UNVERIFIED',
-        `Processing rejected for ${pkt.id}: Onboard feature extraction cannot fabricate missing ground data from an [X] UNVERIFIED blocked frame. Discard this cube to free ${pkt.storageCost} STR.`,
+        `Processing rejected for ${pkt.id}: compression cannot invent ground detail that an [X] UNVERIFIED scan never saw. Discard this cube to free ${memoryBlocks(pkt.storageCost)}.`,
       );
     }
 
@@ -550,7 +552,7 @@ export class MissionEngine {
 
     this.recalculateQueueTiming();
 
-    const msg = `Processed ${pkt.id} (${pkt.sectorCode} ${pkt.sensorMode} [${pkt.compressionAlgorithm}]): compressed to ${pkt.storageCost} STR (${compressedPayloadMb.toFixed(0)} MB / ${pkt.transmitSec.toFixed(1)}s Tx @ ${throughputMbps} MB/s, -${procCost.powerCost} Wh, freed ${storageDelta} STR).${upgradedByChangeDetection ? ' Change detection upgraded it to CONFIRMED.' : ''}`;
+    const msg = `Processed ${pkt.id} (${pkt.sectorCode} ${pkt.sensorMode}): compressed to ${memoryBlocks(pkt.storageCost)} (${compressedPayloadMb.toFixed(0)} MB / ${pkt.transmitSec.toFixed(1)}s to send, -${procCost.powerCost} Wh, freed ${memoryBlocks(storageDelta)}).${upgradedByChangeDetection ? ' Change detection upgraded it to CONFIRMED.' : ''}`;
     this.state.lastStatusMessage = msg;
     this.state.lastActionOk = true;
 
@@ -585,7 +587,7 @@ export class MissionEngine {
     }
 
     this.state.stepCounter += 1;
-    const msg = `Discarded ${removed.id} (${removed.sectorCode} ${removed.sensorMode}) - freed ${removed.storageCost} STR.`;
+    const msg = `Discarded ${removed.id} (${removed.sectorCode} ${removed.sensorMode}) - freed ${memoryBlocks(removed.storageCost)}.`;
     this.state.lastStatusMessage = msg;
     this.state.lastActionOk = true;
 

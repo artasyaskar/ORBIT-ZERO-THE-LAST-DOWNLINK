@@ -15,6 +15,7 @@ import {
 } from './missionConfig';
 import { describeMissionPlan, getMissionBenchmark } from './missionPlanner';
 import { compressedPayloadMb, scanPayloadMb } from './budgetText';
+import { memoryBlocks } from './resultLabels';
 import type {
   ConfidenceLevel, DataPacket, DebriefReport, FailureReasonCode, GroundRequest,
   MissionCertification, MissionOutcome, MissionScenarioConfig,
@@ -238,7 +239,7 @@ export function buildDebriefReport(params: {
           );
         } else if (scenarioId === 'FIRELINE_PASS') {
           advice.push(
-            `Best evidence and Grade S GOLD execution (2/${transmittedPackets.length} packets compressed to ${transmittedPayloadMb} MB / ${downlinkUsedSec.toFixed(1)}s: +${powerRemaining} Wh battery reserve, +${windowMargin.toFixed(1)}s S-Band link safety margin; note that compressing both ${thermalMb} MB Thermal cubes B+E saves an extra ${thermalExtraMb.toFixed(1)} MB / ${thermalExtraSec.toFixed(1)}s for the same ${2 * proc.powerCost} Wh energy). Try the next orbital pass.`,
+            `Best evidence and Grade S execution (2/${transmittedPackets.length} packets compressed to ${transmittedPayloadMb} MB / ${downlinkUsedSec.toFixed(1)}s: +${powerRemaining} Wh battery reserve, +${windowMargin.toFixed(1)}s S-Band link safety margin; note that compressing both ${thermalMb} MB Thermal cubes B+E saves an extra ${thermalExtraMb.toFixed(1)} MB / ${thermalExtraSec.toFixed(1)}s for the same ${2 * proc.powerCost} Wh energy). Try the next orbital pass.`,
           );
         } else {
           advice.push(
@@ -247,7 +248,7 @@ export function buildDebriefReport(params: {
         }
       } else if (processedTxCount >= 3) {
         advice.push(
-          `Best evidence and Grade S GOLD execution (3/3 packets compressed to ${transmittedPayloadMb} MB / ${downlinkUsedSec.toFixed(1)}s: +${windowMargin.toFixed(1)}s S-Band link safety margin, ${powerRemaining} Wh deep-discharge battery reserve; in a deterministic ${downlinkWindowSec.toFixed(1)}s window, compressing the 3rd cube spends ${proc.powerCost} Wh for unused link capacity beyond the 2-cube optimum). Try the next orbital pass.`,
+          `Best evidence and Grade S execution (3/3 packets compressed to ${transmittedPayloadMb} MB / ${downlinkUsedSec.toFixed(1)}s: +${windowMargin.toFixed(1)}s S-Band link safety margin, ${powerRemaining} Wh deep-discharge battery reserve; in a deterministic ${downlinkWindowSec.toFixed(1)}s window, compressing the 3rd cube spends ${proc.powerCost} Wh for unused link capacity beyond the 2-cube optimum). Try the next orbital pass.`,
         );
       } else {
         advice.push(
@@ -256,7 +257,7 @@ export function buildDebriefReport(params: {
       }
     } else {
       advice.push(
-        `All requested evidence arrived (+${powerRemaining} Wh battery reserve), but ${windowMargin.toFixed(1)}s link margin leaves almost no buffer against loss of signal (Grade A / SILVER). Finish within ${maxEfficientSec.toFixed(1)}s (the best plan uses ${benchmark.transmitSec.toFixed(1)}s) by compressing one more cube to earn GOLD (Grade S).`,
+        `All requested evidence arrived (+${powerRemaining} Wh battery reserve), but ${windowMargin.toFixed(1)}s link margin leaves almost no buffer against loss of signal (Grade A). Finish within ${maxEfficientSec.toFixed(1)}s (the best plan uses ${benchmark.transmitSec.toFixed(1)}s) by compressing one more cube to earn Grade S.`,
       );
     }
   }
@@ -335,7 +336,7 @@ export function buildDebriefReport(params: {
         summaryHeadline:
           'TRAINING COMPLETE: ALL ORBITAL WORKSTATION GESTURES & TRIAGE STEPS QUALIFIED.',
         deterministicRecommendation:
-          `TRAINING COMPLETE: You have qualified on globe sector targeting, Thermal IR smoke penetration, 3D Data Cube inspection, Processing Cradle compression (${thermalMb} MB -> ${compressedPayloadMb(budget)} MB / ${budget.thermalScan?.storageCost ?? budget.opticalScan.storageCost} STR -> ${proc.compressedStorageCost} STR), Downlink Bay staging, and S-Band transmission. Proceed to Campaign Selection or launch Operation 01: Fireline.`,
+          `TRAINING COMPLETE: You have qualified on globe sector targeting, Thermal IR smoke penetration, 3D Data Cube inspection, Processing Cradle compression (${thermalMb} MB -> ${compressedPayloadMb(budget)} MB, ${budget.thermalScan?.storageCost ?? budget.opticalScan.storageCost} -> ${memoryBlocks(proc.compressedStorageCost)}), Downlink Bay staging, and S-Band transmission. Proceed to Campaign Selection or launch Operation 01: Fireline.`,
         counterfactualComparison:
           `ACADEMY QUALIFICATION BENCHMARK (100/100 TRAINING PASS): 1 verified compressed observation (${transmittedPayloadMb} MB / ${downlinkUsedSec.toFixed(1)}s @ ${throughput.toFixed(1)} MB/s, ${powerRemaining} Wh remaining). Ready for Operation 01: Fireline.`,
         achievableScore: 100,
@@ -372,7 +373,7 @@ export function buildDebriefReport(params: {
     } else if (storageUsed >= 6 && allPackets.every((p) => !p.processed) && requestsUnverifiedCount > 0) {
       failureReasonCode = 'UNPROCESSED_STORAGE_BOTTLENECK';
       failureExplanation =
-        `ONBOARD BUFFER BOTTLENECK: Uncompressed raw cubes filled memory before every target could be scanned. Use the Processing Cradle mid-pass (-> ${proc.compressedStorageCost} STR, -${proc.powerCost} Wh).`;
+        `ONBOARD BUFFER BOTTLENECK: Uncompressed raw cubes filled memory before every target could be scanned. Compress cubes in the Processing Cradle between scans (each shrinks to ${memoryBlocks(proc.compressedStorageCost)} for ${proc.powerCost} Wh).`;
     } else {
       failureReasonCode = 'INSUFFICIENT_VERIFIED_EVIDENCE';
       failureExplanation =
@@ -399,7 +400,7 @@ export function buildDebriefReport(params: {
         ? `ALL THREE REQUESTS VERIFIED BEFORE LOSS OF SIGNAL (GRADE ${efficiencyGrade}).`
         : weighted
           ? `BEST POSSIBLE TRIAGE: ${totalScore}/${benchmark.score} ACHIEVABLE POINTS. NOT EVERY REQUEST COULD BE ANSWERED THIS PASS, AND YOU SAVED THE MOST VALUABLE ONES.`
-          : `SCENARIO MASTERY: ${totalScore}/${benchmark.score} POSSIBLE POINTS EARNED (GRADE ${efficiencyGrade}). THE CONVECTIVE STORM LIMITS CERTAINTY, NOT YOUR TRIAGE SKILL.`
+          : `SCENARIO MASTERY: ${totalScore}/${benchmark.score} POSSIBLE POINTS EARNED (GRADE ${efficiencyGrade}). THE WEATHER ON THIS PASS LIMITS CERTAINTY, NOT YOUR TRIAGE SKILL.`
       : `${requestsVerifiedCount}/${requestCount} VERIFIED - REVIEW THE EVIDENCE THAT DID NOT REACH EARTH.`,
     deterministicRecommendation: advice.join(' '),
     counterfactualComparison: `SCENARIO CEILING (${benchmark.score}/100 RAW): ${describeMissionPlan(benchmark)}. ${benchmark.powerUsed} Wh power units, ${benchmark.transmitSec.toFixed(1)}s transmission @ ${throughput.toFixed(1)} MB/s.`,

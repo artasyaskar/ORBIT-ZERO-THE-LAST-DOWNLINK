@@ -18,6 +18,7 @@ import {
   SCORING,
   SENSOR_PLAIN_GUIDE,
 } from '../mission/missionConfig';
+import { resultHeadline } from '../mission/resultLabels';
 import type { GroundRequestId, MissionScenarioConfig, MissionState } from '../mission/types';
 import { retryGuidanceFor } from './debriefText';
 
@@ -129,12 +130,11 @@ export function resultModel(state: MissionState, custom?: MissionScenarioConfig 
   if (!d) return null;
   const isAcademy = state.scenarioId === 'ORBITAL_ACADEMY' && d.outcome === 'SUCCESS';
   const tone = d.outcome === 'SUCCESS' ? 'success' : d.outcome === 'PARTIAL_SUCCESS' ? 'warn' : 'critical';
-  const label = isAcademy ? 'TRAINING COMPLETE' : d.outcome === 'SUCCESS' ? 'MISSION SUCCESS' : d.outcome === 'PARTIAL_SUCCESS' ? 'PARTIAL SUCCESS' : 'MISSION FAILED';
   const hintCost = (d.hintsUsed ?? 0) * (d.hintPenalty ?? SCORING.hintPenalty);
   const requests = getScenarioRequests(state.scenarioId, custom);
   const guidance = d.outcome === 'SUCCESS' ? null : retryGuidanceFor(d);
   return {
-    title: isAcademy ? label : `${label} | GRADE ${d.efficiencyGrade}`,
+    title: resultHeadline(d.outcome, d.efficiencyGrade, isAcademy),
     tone,
     score: `${d.totalScore} pts (best possible ${d.achievableScore}) | win line ${d.successScore ?? SCORING.defaultSuccessScore}${hintCost ? ` | hints -${hintCost}` : ''}`,
     requests: isAcademy

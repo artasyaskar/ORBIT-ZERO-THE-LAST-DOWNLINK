@@ -4,6 +4,19 @@ export function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
 
+/**
+ * Science text for a headset panel: drops the data's "Simulated gameplay value (NN% confidence):" prefix (the
+ * panel already says "NN% sure (simulated)") and bracketed remote-sensing symbols such as "(tau_3.9 = 0.18)"
+ * or "(PM2.5 particle radius ...)" that a player cannot use.
+ */
+export function plainScience(text: string): string {
+  return text
+    .replace(/^Simulated gameplay value \([^)]*\):\s*/i, '')
+    .replace(/\s*\([^()]*(?:tau|PM2\.5|GSD)[^()]*\)/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 /** Shorten text at a sentence or word boundary so panels do not overflow. */
 export function clipText(text: string, max: number): string {
   if (text.length <= max) return text;
@@ -22,11 +35,8 @@ export const OUTCOME_COLORS: Record<DebriefOutcome, string> = {
   FAILED: '#ef4444',
 };
 
-export const OUTCOME_LABELS: Record<DebriefOutcome, string> = {
-  SUCCESS: 'MISSION SUCCESS',
-  PARTIAL_SUCCESS: 'PARTIAL SUCCESS',
-  FAILED: 'MISSION FAILURE',
-};
+/** Outcome words come from one place (src/mission/resultLabels.ts) for every surface. */
+export { OUTCOME_LABELS } from '../mission/resultLabels';
 
 /** Player-facing titles for the engine's internal failure codes. The codes stay in the report for tests and logs. */
 const RETRY_TITLES: Record<string, string> = {

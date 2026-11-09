@@ -28,7 +28,7 @@ import {
 import type { MissionEngine } from '../mission/missionEngine';
 import { CubeInteractions, cubeStationTargets, nearestCubeStation, setWorldPosition, type CubeDropTarget } from './cubeInteractions';
 import type { MissionState, SectorId, SensorMode } from '../mission/types';
-import { describeWeather, DOWNLINK_THROUGHPUT_MBPS, getScenarioRequests, getScenarioSector, requestValue, SCORING, SENSOR_PLAIN_GUIDE, STORAGE_UNIT_MB } from '../mission/missionConfig';
+import { describeWeather, DOWNLINK_THROUGHPUT_MBPS, getScanCost, getScenarioRequests, getScenarioSector, requestValue, SCORING, SENSOR_PLAIN_GUIDE, STORAGE_UNIT_MB } from '../mission/missionConfig';
 import { formatClock, getNextStep, isPassStalled } from '../mission/guidance';
 import { actionBarHtml, campaignHtml, debriefScoreLine, helpHtml, missionCardHtml, nextStepBannerHtml } from '../ui/desktopHudViews';
 
@@ -2227,14 +2227,15 @@ export class DesktopControlsManager {
     if (!sector) return;
     const isStorm = sector.cloudCover !== 'CLEAR';
     const activeSensor = state.activeSensorMode;
-    const cost = activeSensor === 'OPTICAL' ? 8 : activeSensor === 'THERMAL' ? 11 : 14;
+    const cost = getScanCost(this.host.engine.getActiveScenario().budget, activeSensor).powerCost;
+    const weatherLabel = isStorm ? describeWeather(sector.cloudCover).toUpperCase() : 'CLEAR SKY';
 
     if (this.hudMinimized) {
       this.reconEl.style.maxHeight = '42px';
       this.reconEl.style.overflow = 'hidden';
       this.reconEl.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; height: 22px;" id="btn-toggle-hud-recon">
-          <span style="font-weight: 700; color: #38bdf8; font-size: 11px;">📡 ${sector.code} [${isStorm ? '95% STORM' : 'CLEAR'}]</span>
+          <span style="font-weight: 700; color: #38bdf8; font-size: 11px;">📡 ${sector.code} [${weatherLabel}]</span>
           <span style="font-size: 9px; background: rgba(56, 189, 248, 0.2); color: #38bdf8; padding: 2px 6px; border-radius: 4px; font-weight: 700;">+ EXPAND [V]</span>
         </div>
       `;
@@ -2246,32 +2247,22 @@ export class DesktopControlsManager {
     this.reconEl.style.overflowY = 'auto';
 
     // Optical atmospheric profile
-    const opticalAlbedo = isStorm ? '88% (Convective Nimbus) [Scenario Calibration]' : '< 5% (Clear Atmosphere)';
-    const opticalTau = isStorm ? 'τ > 15 (Droplet Mie Scattering Washout)' : 'τ ≈ 0.02 (Direct Solar Illumination)';
-    const opticalTrans = isStorm ? 'T = e^(-τ) < 0.001% — Complete Mie Extinction' : 'T = e^(-τ) ≈ 98.02% — High Direct Surface Reflectance';
+    // Every number and sentence here comes from this operation's sector data (no fixed flood physics).
+    const opticalOutcome = sector.outcomes.OPTICAL;
+    const radarOutcome = sector.outcomes.RADAR;
+    const opticalAlbedo = isStorm ? describeWeather(sector.cloudCover) : 'Clear atmosphere';
+    const opticalTau = ` (% sure, simulated)`;
+    const opticalTrans = opticalOutcome.finding;
 
     // Active microwave SAR profile
-    let radarPhenomenology = '';
-    if (sector.id === 'B') {
-      radarPhenomenology = 'Specular water forward-scatter (σ⁰ < -22 dB [Scenario Calibration]) — dark tone reveals 2.4 km inundated road through clouds (Depth unmeasured by SAR amplitude)';
-    } else if (sector.id === 'C') {
-      radarPhenomenology = 'Dihedral corner multipath glare on steel truss (σ⁰ > +18.5 dB flare [Scenario Calibration] masks deck water state)';
-    } else if (sector.id === 'E') {
-      radarPhenomenology = 'Elevated corridor above floodline; steep orographic slope causes geometric layover and foreshortening near Km 4';
-    } else if (sector.id === 'A') {
-      radarPhenomenology = 'Low-backscatter specular reflection from calm reservoir impoundment';
-    } else if (sector.id === 'D') {
-      radarPhenomenology = 'Turbulent wave Bragg scattering over submerged broken masonry piers';
-    } else {
-      radarPhenomenology = 'Inundated vegetation corner backscatter across southern agricultural polders';
-    }
+    const radarPhenomenology = radarOutcome.finding;
 
     this.reconEl.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(56, 189, 248, 0.25); padding-bottom: 4px; margin-bottom: 6px;">
         <span style="font-weight: 700; color: #38bdf8; letter-spacing: 0.5px;">TACTICAL RECONNAISSANCE</span>
         <div style="display: flex; gap: 4px; align-items: center;">
           <span style="font-size: 9px; background: ${isStorm ? 'rgba(245, 158, 11, 0.2)' : 'rgba(56, 189, 248, 0.2)'}; color: ${isStorm ? '#f59e0b' : '#38bdf8'}; padding: 1px 5px; border-radius: 4px; font-weight: 700;">
-            ${isStorm ? '95% CONVECTIVE STORM' : 'CLEAR SKY SLOT'}
+            ${weatherLabel}
           </span>
           <button id="btn-min-recon" style="background: none; border: 1px solid rgba(56, 189, 248, 0.3); color: #94a3b8; font-size: 10px; border-radius: 3px; padding: 0 4px; cursor: pointer;" title="Minimize Card [V]">—</button>
         </div>
@@ -2289,12 +2280,12 @@ export class DesktopControlsManager {
           ATMOSPHERIC PROFILE (VIS/NIR OPTICAL: 450–850 nm):
         </div>
         <div style="display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 2px;">
-          <span style="color: #94a3b8;">Cloud Top Albedo:</span>
+          <span style="color: #94a3b8;">Sky over the sector:</span>
           <b style="color: ${isStorm ? '#f59e0b' : '#38bdf8'};">${opticalAlbedo}</b>
         </div>
         <div style="display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 2px;">
-          <span style="color: #94a3b8;">Optical Depth (τ):</span>
-          <b style="color: ${isStorm ? '#ef4444' : '#10b981'};">${opticalTau}</b>
+          <span style="color: #94a3b8;">Optical result:</span>
+          <b style="color: ${opticalOutcome.confidence === 'CONFIRMED' ? '#10b981' : opticalOutcome.confidence === 'PROBABLE' ? '#f59e0b' : '#ef4444'};">${opticalTau}</b>
         </div>
         <div style="font-size: 10px; color: ${isStorm ? '#ef4444' : '#cbd5e1'}; font-style: italic;">
           ${opticalTrans}
@@ -2307,8 +2298,8 @@ export class DesktopControlsManager {
           MICROWAVE BACKSCATTER (ACTIVE SAR: 5.4 GHz / 5.5 cm):
         </div>
         <div style="display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 2px;">
-          <span style="color: #94a3b8;">Atmospheric Transmission:</span>
-          <b style="color: #10b981;">> 98% (Minimal droplet attenuation; rain cores scatter [Scenario Calibration])</b>
+          <span style="color: #94a3b8;">Radar result:</span>
+          <b style="color: ${radarOutcome.confidence === 'CONFIRMED' ? '#10b981' : radarOutcome.confidence === 'PROBABLE' ? '#f59e0b' : '#ef4444'};">${radarOutcome.confidence} (${radarOutcome.observationConfidencePct ?? 0}% sure, simulated)</b>
         </div>
         <div style="font-size: 10px; color: #cbd5e1; margin-top: 2px;">
           <span style="color: #94a3b8;">Surface Response:</span> ${radarPhenomenology}
@@ -2529,13 +2520,8 @@ export class DesktopControlsManager {
       if (sel.sectorId === otherPkt.sectorId) {
         agreeText = `Both observations confirm geographic coordinates and transit alignment of Sector ${sel.sectorId} (${sel.sectorName}).`;
         if (sel.sensorMode !== otherPkt.sensorMode) {
-          if (sel.sectorId === 'B') {
-            deltaText = `Optical is completely blocked by convective cloud deck (τ > 15, SNR 4.1 dB); active C-band SAR pierces clouds to identify 2.4 km smooth water specular forward-scatter across the highway (flood depth unmeasured by amplitude alone).`;
-          } else if (sel.sectorId === 'C') {
-            deltaText = `Optical achieves 0.75m daylight surface contrast verifying dry deck asphalt; active SAR encounters +18.5 dB metallic dihedral glare leaving road deck flood status ambiguous.`;
-          } else {
-            deltaText = `${sel.sensorMode} (${sel.confidence}) delivers surface-specific phenomenology contrasting with ${otherPkt.sensorMode} (${otherPkt.confidence}).`;
-          }
+          // Both readings come from this operation's sector data, so no scenario shows another's physics.
+          deltaText = `${sel.sensorMode} (${sel.confidence}): ${sel.finding} ${otherPkt.sensorMode} (${otherPkt.confidence}): ${otherPkt.finding}`;
         } else {
           deltaText = `Repeated ${sel.sensorMode} pass confirms observation stability across consecutive swath captures.`;
         }
@@ -2547,7 +2533,9 @@ export class DesktopControlsManager {
       if (sel.sensorMode === 'OPTICAL') {
         uncertText = `Physical Limit: Optical imagery confirms visible daylight surfaces; cannot evaluate subsurface structural load capacity or penetrate cloud decks.`;
       } else {
-        uncertText = `Physical Limit: SAR single-pass amplitude identifies smooth water sheets and dihedral corner reflectors; cannot measure floodwater depth without in-situ ground validation.`;
+        uncertText = sel.sensorMode === 'THERMAL'
+          ? `Physical Limit: thermal infrared sees heat through smoke and thin dust; its coarse pixels blur small objects and thick cloud blocks it.`
+          : `Physical Limit: radar maps surface shape and roughness through cloud and dust; it cannot measure temperature, and metal or steep slopes cause glare and distortion.`;
       }
     }
 
@@ -2679,10 +2667,10 @@ export class DesktopControlsManager {
       const telemetryCard = `
 ORBIT ZERO — TACTICAL OPERATOR DEBRIEF
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🎖️ RANK: ${debrief.efficiencyGrade}
+🎖️ GRADE: ${debrief.efficiencyGrade}
 📊 SCORE: ${debrief.totalScore}/${debrief.maxScore}
-🛰️ OUTCOME: ${debrief.outcome ?? 'VERIFIED'} (${debrief.certification ?? 'NONE'} CERTIFICATION) [SIMULATED SCENARIO TELEMETRY]
-⏱️ WINDOW EFFICIENCY: ${debrief.downlinkUsedSec.toFixed(1)}s / ${state.downlinkWindowSec.toFixed(1)}s (${debrief.efficiencyGrade === 'S' ? 'PERFECT' : 'MARGIN: ' + debrief.windowMarginSec.toFixed(1) + 's'})
+🛰️ OUTCOME: ${OUTCOME_LABELS[debrief.outcome ?? 'FAILED']} [SIMULATED SCENARIO]
+⏱️ WINDOW EFFICIENCY: ${debrief.downlinkUsedSec.toFixed(1)}s / ${state.downlinkWindowSec.toFixed(1)}s (MARGIN: ${debrief.windowMarginSec.toFixed(1)}s)
 🔋 BATTERY USED: ${debrief.powerUsed} Wh
 📦 PACKETS: ${debrief.transmittedPacketIds.length}/${state.packets.length} Transmitted
 ✅ VERIFIED: ${debrief.requestsVerifiedCount}/${reqTotal} Ground Requests

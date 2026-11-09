@@ -5,6 +5,7 @@
  * explicitly asks for a hint (which costs points).
  */
 
+import { OUTCOME_LABELS } from './resultLabels';
 import {
   describeWeather,
   getScanCost,
@@ -92,7 +93,7 @@ export function getNextStep(state: MissionState, custom?: MissionScenarioConfig 
 
   if (state.phase === 'DEBRIEF') {
     const d = state.debrief;
-    const label = d?.outcome === 'SUCCESS' ? 'MISSION SUCCESS' : d?.outcome === 'PARTIAL_SUCCESS' ? 'PARTIAL SUCCESS' : 'MISSION FAILED';
+    const label = OUTCOME_LABELS[d?.outcome ?? 'FAILED'];
     return {
       title: `${label} - ${d?.totalScore ?? 0} PTS`,
       body: 'Read what reached the ground and what did not. Retry the pass to beat your score, or go to the next operation.',

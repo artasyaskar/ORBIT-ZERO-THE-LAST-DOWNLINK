@@ -326,12 +326,14 @@ describe('Desktop Controls & First-Time Player Experience', () => {
 
     // Must contain Optical domain
     expect(reconHtml).toContain('ATMOSPHERIC PROFILE (VIS/NIR OPTICAL');
-    expect(reconHtml).toContain('Cloud Top Albedo');
-    expect(reconHtml).toContain('Optical Depth (τ)');
-    // Must contain Radar domain
+    expect(reconHtml).toContain('Sky over the sector');
+    expect(reconHtml).toContain('Optical result');
+    // Must contain Radar domain, read from this operation's sector data (Indus pass, Sector B: flooded road)
     expect(reconHtml).toContain('MICROWAVE BACKSCATTER (ACTIVE SAR');
-    expect(reconHtml).toContain('Atmospheric Transmission');
-    expect(reconHtml).toContain('Specular water forward-scatter');
+    expect(reconHtml).toContain('Radar result');
+    expect(reconHtml).toContain('dark specular flood sheet');
+    // No fixed figures that every operation used to show
+    expect(reconHtml).not.toContain('95% CONVECTIVE STORM');
 
     manager.dispose();
   });
@@ -353,8 +355,9 @@ describe('Desktop Controls & First-Time Player Experience', () => {
     expect(compareHtml).toContain('★ Same Sector Match');
     expect(compareHtml).toContain('✓ Physical Agreement:');
     expect(compareHtml).toContain('⚡ Sensor Delta:');
-    expect(compareHtml).toContain('Optical achieves 0.75m daylight surface contrast');
-    expect(compareHtml).toContain('metallic dihedral glare');
+    // The delta quotes both sensors' findings from the sector data.
+    expect(compareHtml).toContain('dry approaches and visible deck alignment');
+    expect(compareHtml).toContain('dihedral multipath scattering');
 
     manager.dispose();
   });

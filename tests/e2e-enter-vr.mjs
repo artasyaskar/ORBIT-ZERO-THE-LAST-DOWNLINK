@@ -113,12 +113,12 @@ try {
     // speech, and it would be spoken over the lobby.
     await page.waitForTimeout(1500);
     const captionBefore = await page.evaluate(() => window.__ORBIT_ZERO__.getRuntimeStatus().caption ?? '');
-    check(!/STR online/.test(captionBefore), 'while the lobby is up the opening line is held back', `caption="${captionBefore}"`);
+    check(!/memory blocks online/.test(captionBefore), 'while the lobby is up the opening line is held back', `caption="${captionBefore}"`);
     await tap(page, '#oz-xr-enter');
     const inVr = await waitImmersive(page);
     const afterTap = await overlay(page);
     check(inVr && !afterTap.visible, 'ONE tap on ENTER VR starts the immersive session and the lobby hides', JSON.stringify({ inVr, phase: afterTap.phase }));
-    const spoke = await page.waitForFunction(() => /STR online/.test(window.__ORBIT_ZERO__.getRuntimeStatus().caption ?? ''), null, { timeout: 5000 }).then(() => true, () => false);
+    const spoke = await page.waitForFunction(() => /memory blocks online/.test(window.__ORBIT_ZERO__.getRuntimeStatus().caption ?? ''), null, { timeout: 5000 }).then(() => true, () => false);
     check(spoke, 'the opening line plays right after the ENTER VR tap', await page.evaluate(() => window.__ORBIT_ZERO__.getRuntimeStatus().caption ?? ''));
 
     await page.evaluate(() => window.__ORBIT_IWER__.activeSession?.end());
