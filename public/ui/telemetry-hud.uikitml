@@ -188,7 +188,7 @@
   <Button id="Btn_CycleCube" class="action-btn">
     <ButtonLabel style="color: #e2e8f0; font-size: 14px; font-weight: 700;">SELECT NEXT EVIDENCE CUBE</ButtonLabel>
   </Button>
-  <div id="AudioCaption" class="inspector-science">GROUND CONTROL: one pass, three requests, one final downlink.</div>
+  <div id="AudioCaption" class="inspector-science" style="height: 36px; overflow: hidden;">GROUND CONTROL: one pass, three requests, one final downlink.</div>
   <div style="flex-direction: row; gap: 6px; width: 100%;">
     <Button id="Btn_Pause" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_Pause" style="color: #e2e8f0; font-size: 14px;">PAUSE PASS</ButtonLabel></Button>
     <Button id="Btn_Settings" class="action-btn" style="width: 48%;"><ButtonLabel style="color: #e2e8f0; font-size: 14px;">ACCESSIBILITY</ButtonLabel></Button>
