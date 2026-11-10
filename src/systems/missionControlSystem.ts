@@ -3171,6 +3171,7 @@ export class MissionControlSystem extends createSystem({
     sample: LiveXRHandSample,
     viaEvent: 'selectstart' | 'pinch_threshold' | 'poke',
   ): void {
+    this.audio?.unlockFromGesture();
     const hover = this.handHoverTargets.get(sample.handedness);
     const latched = hover && performance.now() - hover.time <= 250 && Math.min(
       hover.sample.position.distanceTo(sample.position),
@@ -4149,6 +4150,7 @@ export class MissionControlSystem extends createSystem({
     const isHandRay = (event: ScenePointerEvent) => event.pointerType === 'ray' && this.isLiveXRHandActive();
     const onDown = (event: ScenePointerEvent) => {
       if (!isHandRay(event) || this.isAnyObjectGrabbed()) return;
+      this.audio?.unlockFromGesture();
       // A pinch on something within reach (a cube, a pad, a beacon) acts on that, in handleXRHandPressStart.
       if (this.isRayHandTouchingTarget(event.pointerId)) return;
       onPinch();
@@ -4818,8 +4820,9 @@ export class MissionControlSystem extends createSystem({
     const spec = COCKPIT_SKINS[skinId] ?? COCKPIT_SKINS.ORBITAL_CYAN;
     const consoleObj = this.sceneObject('orbital-console');
     if (!consoleObj) return;
-    const primaryParts = ['HoloRingOuterCyan', 'HoloRingInnerCyan', 'GimbalAzimuthRing', 'LeftTrayLedStrip', 'TacticalRadarSweepBlade'];
-    const secondaryParts = ['HoloRingMidAmber', 'LeftWingWarmAccentBar', 'RightWingWarmAccentBar'];
+    // Skip vertex-colored holoGlowMat rings (multiplying vertex cyan by red turns black); tint unbaked trim, sweep & projector light cleanly.
+    const primaryParts = ['GimbalAzimuthRing', 'LeftTrayLedStrip'];
+    const secondaryParts = ['LeftWingWarmAccentBar', 'RightWingWarmAccentBar'];
     for (const name of primaryParts) {
       const mesh = this.childByName(consoleObj, name);
       if (mesh) this.setObjectTint(mesh, spec.primaryHex, 1.1);
@@ -4827,6 +4830,14 @@ export class MissionControlSystem extends createSystem({
     for (const name of secondaryParts) {
       const mesh = this.childByName(consoleObj, name);
       if (mesh) this.setObjectTint(mesh, spec.secondaryHex, 0.95);
+    }
+    const sweep = this.childByName(consoleObj, 'TacticalRadarSweepBlade');
+    if (sweep instanceof Mesh && sweep.material instanceof MeshBasicMaterial) {
+      sweep.material.color.setHex(spec.primaryHex);
+    }
+    const tableLight = this.childByName(consoleObj, 'HoloTableProjectorLight');
+    if (tableLight instanceof Light) {
+      tableLight.color.setHex(spec.primaryHex);
     }
   }
 
