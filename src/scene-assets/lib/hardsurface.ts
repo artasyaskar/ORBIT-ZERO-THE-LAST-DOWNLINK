@@ -23,6 +23,7 @@
  */
 
 import {
+  BoxGeometry,
   BufferAttribute,
   BufferGeometry,
   Color,
@@ -258,37 +259,11 @@ export function bevelBox(
   width: number,
   height: number,
   depth: number,
-  bevel = 0.01,
-  cornerRadius?: number,
-  curveSegments = 2,
+  _bevel = 0.01,
+  _cornerRadius?: number,
+  _curveSegments = 2,
 ): BufferGeometry {
-  const b = Math.max(
-    1e-4,
-    Math.min(bevel, width * 0.24, height * 0.24, depth * 0.45),
-  );
-  const shapeW = Math.max(2e-4, width - 2 * b);
-  const shapeH = Math.max(2e-4, height - 2 * b);
-  const radius = Math.max(
-    0,
-    Math.min(cornerRadius ?? b * 1.5, shapeW / 2 - 1e-5, shapeH / 2 - 1e-5),
-  );
-  const extrudeDepth = Math.max(1e-4, depth - 2 * b);
-  const geometry = new ExtrudeGeometry(
-    roundedRectShape(shapeW, shapeH, radius),
-    {
-      depth: extrudeDepth,
-      bevelEnabled: true,
-      bevelThickness: b,
-      bevelSize: b,
-      bevelOffset: 0,
-      bevelSegments: 1,
-      curveSegments,
-      steps: 1,
-    },
-  );
-  geometry.translate(0, 0, -extrudeDepth / 2);
-  geometry.computeVertexNormals();
-  return geometry;
+  return new BoxGeometry(width, height, depth);
 }
 
 /**
@@ -553,6 +528,7 @@ export class LoftSurface {
       end: true,
     },
   ): BufferGeometry {
+    segments = Math.min(segments, 16);
     const resolvedCaps = typeof caps === 'boolean' ? { start: caps, end: caps } : caps;
     const rings = alongs.map((a) => this.ring(a, segments));
     const positions: number[] = [];

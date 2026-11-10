@@ -158,7 +158,7 @@ export function createDeskGaugesAsset(): Object3D {
   recenterCapMat.name = 'RecenterCapMat';
 
   const recenterBase = new Mesh(
-    new CylinderGeometry(0.018, 0.020, 0.006, 20),
+    new CylinderGeometry(0.018, 0.020, 0.006, 10),
     buttonBaseMat,
   );
   recenterBase.name = 'RecenterBaseFlange';
@@ -166,7 +166,7 @@ export function createDeskGaugesAsset(): Object3D {
   recenterGroup.add(recenterBase);
 
   const recenterCap = new Mesh(
-    new CylinderGeometry(0.014, 0.015, 0.008, 20),
+    new CylinderGeometry(0.014, 0.015, 0.008, 10),
     recenterCapMat,
   );
   recenterCap.name = 'PadIlluminatedCap'; // Matches existing press stroke logic!
@@ -190,7 +190,7 @@ export function createDeskGaugesAsset(): Object3D {
   ignitionCapMat.name = 'MasterIgnitionCapMat';
 
   const ignitionBase = new Mesh(
-    new CylinderGeometry(0.016, 0.018, 0.006, 18),
+    new CylinderGeometry(0.016, 0.018, 0.006, 10),
     buttonBaseMat,
   );
   ignitionBase.name = 'MasterIgnitionBase';
@@ -198,7 +198,7 @@ export function createDeskGaugesAsset(): Object3D {
   ignitionGroup.add(ignitionBase);
 
   const ignitionCap = new Mesh(
-    new CylinderGeometry(0.012, 0.013, 0.010, 18),
+    new CylinderGeometry(0.012, 0.013, 0.010, 10),
     ignitionCapMat,
   );
   ignitionCap.name = 'MasterIgnitionCap';
@@ -222,7 +222,7 @@ export function createDeskGaugesAsset(): Object3D {
   beaconCapMat.name = 'AriaBeaconCapMat';
 
   const beaconBase = new Mesh(
-    new CylinderGeometry(0.016, 0.018, 0.006, 18),
+    new CylinderGeometry(0.016, 0.018, 0.006, 10),
     buttonBaseMat,
   );
   beaconBase.name = 'AriaBeaconBase';
@@ -230,7 +230,7 @@ export function createDeskGaugesAsset(): Object3D {
   beaconGroup.add(beaconBase);
 
   const beaconCap = new Mesh(
-    new CylinderGeometry(0.012, 0.013, 0.009, 18),
+    new CylinderGeometry(0.012, 0.013, 0.009, 10),
     beaconCapMat,
   );
   beaconCap.name = 'AriaBeaconCap';

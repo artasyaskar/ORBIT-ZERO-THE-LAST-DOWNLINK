@@ -16,12 +16,67 @@ export interface LiveXRHandSample {
   fingerDir: Vector3;
 }
 
+interface HandScratch {
+  wrist: Vector3;
+  metacarpal: Vector3;
+  distal: Vector3;
+  indexTip: Vector3;
+  thumbTip: Vector3;
+  graspPoint: Vector3;
+  fingerDir: Vector3;
+  sample: LiveXRHandSample;
+}
+
+function createHandScratch(side: HandSide): HandScratch {
+  const wrist = new Vector3();
+  const metacarpal = new Vector3();
+  const distal = new Vector3();
+  const indexTip = new Vector3();
+  const thumbTip = new Vector3();
+  const graspPoint = new Vector3();
+  const fingerDir = new Vector3();
+  return {
+    wrist,
+    metacarpal,
+    distal,
+    indexTip,
+    thumbTip,
+    graspPoint,
+    fingerDir,
+    sample: {
+      device: side === 'left' ? 'hand-left' : 'hand-right',
+      handedness: side,
+      connected: true,
+      poseId: 'default',
+      pinchValue: 0,
+      pressed: false,
+      position: wrist,
+      indexTip,
+      thumbTip,
+      graspPoint,
+      fingerDir,
+    },
+  };
+}
+
+const JOINT_NAMES = [
+  'wrist',
+  'index-finger-metacarpal',
+  'index-finger-phalanx-distal',
+  'index-finger-tip',
+  'thumb-tip',
+] as const;
+
 export class NativeXRHands {
   private sources = new Map<HandSide, XRInputSource>();
   private lastSession: XRSession | null = null;
   private armed = new Set<HandSide>();
   private pinching = new Set<HandSide>();
   private selecting = new WeakMap<XRInputSource, boolean>();
+  private readonly scratch: Record<HandSide, HandScratch> = {
+    left: createHandScratch('left'),
+    right: createHandScratch('right'),
+  };
 
   setSelect(source: XRInputSource, pressed: boolean): void {
     if (source.hand && (source.handedness === 'left' || source.handedness === 'right')) {
@@ -42,6 +97,19 @@ export class NativeXRHands {
     this.pinching.delete(side);
   }
 
+  private findHandSource(side: HandSide, session: XRSession): XRInputSource | undefined {
+    for (const input of session.inputSources) {
+      if (input.handedness === side && input.hand) return input;
+    }
+    const trackedSources = (session as XRSession & { trackedSources?: Iterable<XRInputSource> }).trackedSources;
+    if (trackedSources) {
+      for (const input of trackedSources) {
+        if (input.handedness === side && input.hand) return input;
+      }
+    }
+    return undefined;
+  }
+
   sample(
     side: HandSide,
     session: XRSession | null,
@@ -57,9 +125,7 @@ export class NativeXRHands {
       this.reset(side);
       return null;
     }
-    const trackedSources = (session as XRSession & { trackedSources?: Iterable<XRInputSource> }).trackedSources;
-    const inputs = [...session.inputSources, ...(trackedSources ?? [])];
-    const source = inputs.find((input) => input.handedness === side && input.hand);
+    const source = this.findHandSource(side, session);
     if (!source?.hand) {
       this.reset(side);
       return null;
@@ -73,24 +139,25 @@ export class NativeXRHands {
       this.sources.set(side, source);
     }
 
-    const positions: Vector3[] = [];
+    const sc = this.scratch[side];
+    const jointTargets = [sc.wrist, sc.metacarpal, sc.distal, sc.indexTip, sc.thumbTip];
     try {
-      for (const joint of ['wrist', 'index-finger-metacarpal', 'index-finger-phalanx-distal', 'index-finger-tip', 'thumb-tip'] as const) {
-        const space = source.hand.get(joint);
+      for (let i = 0; i < JOINT_NAMES.length; i++) {
+        const space = source.hand.get(JOINT_NAMES[i]);
         const pose = space ? frame.getJointPose?.(space, referenceSpace) : null;
         const p = pose?.transform.position;
-        if (!p || ![p.x, p.y, p.z].every(Number.isFinite)) {
+        if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) {
           this.reset(side);
           return null;
         }
-        positions.push(new Vector3(p.x, p.y, p.z));
+        jointTargets[i].set(p.x, p.y, p.z);
       }
     } catch {
       this.reset(side);
       return null;
     }
 
-    const [wrist, metacarpal, distal, indexTip, thumbTip] = positions;
+    const { wrist, metacarpal, distal, indexTip, thumbTip, graspPoint, fingerDir, sample } = sc;
     const distance = indexTip.distanceTo(thumbTip);
     const geometricPinch = distance < (this.pinching.has(side) ? 0.028 : 0.018);
     const pressed = source.gamepad?.buttons[0]?.pressed ?? this.selecting.get(source) ?? geometricPinch;
@@ -100,24 +167,18 @@ export class NativeXRHands {
     if (!pressed) this.armed.add(side);
     const indexExtended = indexTip.distanceTo(metacarpal) >= 0.055;
     origin.updateWorldMatrix(true, false);
-    for (const position of positions) position.applyMatrix4(origin.matrixWorld);
-    const fingerDir = indexTip.clone().sub(distal);
+    for (let i = 0; i < jointTargets.length; i++) jointTargets[i].applyMatrix4(origin.matrixWorld);
+    fingerDir.copy(indexTip).sub(distal);
     if (fingerDir.lengthSq() < 1e-8) {
       this.reset(side);
       return null;
     }
-    return {
-      device: side === 'left' ? 'hand-left' : 'hand-right',
-      handedness: side,
-      connected: true,
-      poseId: pressed ? 'pinch' : indexExtended ? 'point' : 'default',
-      pinchValue: Math.max(0, Math.min(1, (0.04 - distance) / 0.03)),
-      pressed: pressed && this.armed.has(side),
-      position: wrist,
-      indexTip,
-      thumbTip,
-      graspPoint: indexTip.clone().add(thumbTip).multiplyScalar(0.5),
-      fingerDir: fingerDir.normalize(),
-    };
+    graspPoint.copy(indexTip).add(thumbTip).multiplyScalar(0.5);
+    fingerDir.normalize();
+    sample.connected = true;
+    sample.poseId = pressed ? 'pinch' : indexExtended ? 'point' : 'default';
+    sample.pinchValue = Math.max(0, Math.min(1, (0.04 - distance) / 0.03));
+    sample.pressed = pressed && this.armed.has(side);
+    return sample;
   }
 }

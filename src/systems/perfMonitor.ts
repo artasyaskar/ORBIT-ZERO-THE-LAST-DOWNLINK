@@ -118,9 +118,31 @@ export class PerfMonitorSystem extends createSystem({}) {
         snapshot: () => this.lastSnapshot ?? this.takeSnapshot(performance.now()),
         summary60: () => this.summary60,
         framebufferScale: () => this.framebufferScale,
+        toggle: (force?: boolean) => this.toggleHud(force),
+        enabled: () => this.hudEnabled,
       };
     }
-    if (this.hudEnabled && typeof document !== 'undefined') {
+    if (this.hudEnabled) this.ensureDomReadout();
+  }
+
+  public toggleHud(force?: boolean): boolean {
+    this.hudEnabled = typeof force === 'boolean' ? force : !this.hudEnabled;
+    if (this.hudEnabled) {
+      this.ensureDomReadout();
+      const now = performance.now();
+      this.lastReadoutAt = now;
+      this.lastSnapshot = this.takeSnapshot(now);
+      this.renderReadout(this.lastSnapshot);
+    } else {
+      if (this.domReadout) this.domReadout.style.display = 'none';
+      if (this.xrPanel) this.xrPanel.visible = false;
+    }
+    return this.hudEnabled;
+  }
+
+  private ensureDomReadout(): void {
+    if (typeof document === 'undefined') return;
+    if (!this.domReadout) {
       const el = document.createElement('div');
       el.id = 'oz-perf-hud';
       el.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:99998;padding:6px 9px;background:rgba(2,6,23,0.82);color:#e2e8f0;font:12px/1.35 ui-monospace,monospace;border:1px solid #38bdf8;border-radius:6px;white-space:pre;pointer-events:none;';
@@ -128,6 +150,7 @@ export class PerfMonitorSystem extends createSystem({}) {
       this.domReadout = el;
       this.cleanups.push(() => el.remove());
     }
+    this.domReadout.style.display = 'block';
   }
 
   destroy(): void {

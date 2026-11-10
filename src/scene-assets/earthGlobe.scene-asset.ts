@@ -453,27 +453,17 @@ export function createEarthGlobeAsset(): Object3D {
   cloudSphere.rotation.copy(GLOBE_EULER);
   root.add(cloudSphere);
 
-  // 3. Multi-Layer Luminous Atmospheric Limb & Fresnel Corona Halo (Concept Images 1 & 2)
-  const innerAtmoGeo = new SphereGeometry(GLOBE_RADIUS * 1.018, 24, 18);
-  const innerAtmoMat = new MeshBasicMaterial({
+  // 3. Luminous Atmospheric Limb & Fresnel Corona Halo (Concept Images 1 & 2 - 1 draw call)
+  const innerAtmoShell = new Group();
+  innerAtmoShell.name = 'GlobeHorizonHalo';
+  root.add(innerAtmoShell);
+
+  const outerAtmoGeo = new SphereGeometry(GLOBE_RADIUS * 1.035, 16, 12);
+  const outerAtmoMat = new MeshBasicMaterial({
     color: 0x38bdf8,
     side: BackSide,
     transparent: true,
-    opacity: 0.88,
-    depthWrite: false,
-    blending: AdditiveBlending,
-  });
-  const innerAtmoShell = new Mesh(innerAtmoGeo, innerAtmoMat);
-  innerAtmoShell.name = 'GlobeHorizonHalo';
-  innerAtmoShell.renderOrder = 4;
-  root.add(innerAtmoShell);
-
-  const outerAtmoGeo = new SphereGeometry(GLOBE_RADIUS * 1.048, 24, 18);
-  const outerAtmoMat = new MeshBasicMaterial({
-    color: 0x0ea5e9,
-    side: BackSide,
-    transparent: true,
-    opacity: 0.58,
+    opacity: 0.68,
     depthWrite: false,
     blending: AdditiveBlending,
   });
@@ -493,16 +483,15 @@ export function createEarthGlobeAsset(): Object3D {
   const orbitalRingsStaticGroup = new Group();
   orbitalRingsStaticGroup.name = 'GlobeOrbitalTrackRingsGroup';
 
-  // A 3.6 mm glowing tube: 6 sides read as round at arm's length (12 cost 860 more triangles).
   const horizonLimbRing = new Mesh(
-    new TorusGeometry(GLOBE_RADIUS * 1.014, 0.0036, 6, 72),
+    new TorusGeometry(GLOBE_RADIUS * 1.014, 0.0036, 5, 36),
     orbitalRingsSharedMat,
   );
   horizonLimbRing.name = 'GlobeHorizonLimbRing';
   orbitalRingsStaticGroup.add(horizonLimbRing);
 
   const orbitalTrackRing = new Mesh(
-    new TorusGeometry(GLOBE_RADIUS * 1.12, 0.0018, 8, 80),
+    new TorusGeometry(GLOBE_RADIUS * 1.12, 0.0018, 5, 36),
     orbitalRingsSharedMat,
   );
   orbitalTrackRing.name = 'GlobeOrbitalTrackRing55';
@@ -510,15 +499,12 @@ export function createEarthGlobeAsset(): Object3D {
   orbitalRingsStaticGroup.add(orbitalTrackRing);
 
   const orbitalTrackRingPolar = new Mesh(
-    new TorusGeometry(GLOBE_RADIUS * 1.15, 0.0015, 8, 80),
+    new TorusGeometry(GLOBE_RADIUS * 1.15, 0.0015, 5, 36),
     orbitalRingsSharedMat,
   );
   orbitalTrackRingPolar.name = 'GlobeOrbitalTrackRingPolar';
   orbitalTrackRingPolar.rotation.set(0.18, Math.PI * 0.42, 0.35);
   orbitalRingsStaticGroup.add(orbitalTrackRingPolar);
-
-  mergeStaticMeshesByMaterial(orbitalRingsStaticGroup);
-  root.add(orbitalRingsStaticGroup);
 
   // 4. Surface-Conforming Spherical Sector Boundary Polygons (Sectors A-F)
   const sectorOverlayGroup = new Group();
@@ -566,7 +552,7 @@ export function createEarthGlobeAsset(): Object3D {
 
   // 6. 3D Orbital Pass Ground-Track Meridian Arc & Sub-Satellite Nadir Pip
   const groundTrackPoints: Vector3[] = [];
-  const trackSteps = 36;
+  const trackSteps = 20;
   const startLat = 40.0;
   const startLon = 77.0;
   const endLat = 14.0;
@@ -580,24 +566,39 @@ export function createEarthGlobeAsset(): Object3D {
     groundTrackPoints.push(latLonToGlobePoint(lat, lon, trackRadius));
   }
 
-  const trackVerts: number[] = [];
-  for (let i = 0; i < groundTrackPoints.length - 1; i++) {
-    const p1 = groundTrackPoints[i];
-    const p2 = groundTrackPoints[i + 1];
-    trackVerts.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+  const trackPositions: number[] = [];
+  const trackNormals: number[] = [];
+  const trackIndices: number[] = [];
+  const trackHalfW = 0.0008;
+  for (let i = 0; i < groundTrackPoints.length; i++) {
+    const curr = groundTrackPoints[i];
+    const next = groundTrackPoints[Math.min(i + 1, groundTrackPoints.length - 1)];
+    const prev = groundTrackPoints[Math.max(i - 1, 0)];
+    const nrm = curr.clone().normalize();
+    const tang = next.clone().sub(prev).normalize();
+    const side = new Vector3().crossVectors(nrm, tang).normalize();
+    const pL = curr.clone().addScaledVector(side, -trackHalfW);
+    const pR = curr.clone().addScaledVector(side, trackHalfW);
+    trackPositions.push(pL.x, pL.y, pL.z, pR.x, pR.y, pR.z);
+    trackNormals.push(nrm.x, nrm.y, nrm.z, nrm.x, nrm.y, nrm.z);
+    if (i < groundTrackPoints.length - 1) {
+      const vi = i * 2;
+      trackIndices.push(vi, vi + 1, vi + 2, vi + 1, vi + 3, vi + 2);
+    }
   }
-
   const trackGeo = new BufferGeometry();
-  trackGeo.setAttribute('position', new Float32BufferAttribute(trackVerts, 3));
-  const trackMat = new LineBasicMaterial({
-    color: 0x38bdf8,
-    transparent: true,
-    opacity: 0.65,
-  });
-  const groundTrackLine = new LineSegments(trackGeo, trackMat);
-  groundTrackLine.name = 'OrbitalGroundTrackArc';
-  root.add(groundTrackLine);
-  groundTrackLine.raycast = () => { };
+  trackGeo.setAttribute('position', new Float32BufferAttribute(trackPositions, 3));
+  trackGeo.setAttribute('normal', new Float32BufferAttribute(trackNormals, 3));
+  trackGeo.setIndex(trackIndices);
+  const groundTrackMesh = new Mesh(trackGeo, orbitalRingsSharedMat);
+  groundTrackMesh.name = 'OrbitalGroundTrackArcMesh';
+  orbitalRingsStaticGroup.add(groundTrackMesh);
+  mergeStaticMeshesByMaterial(orbitalRingsStaticGroup);
+  for (const child of orbitalRingsStaticGroup.children) child.raycast = () => {};
+  root.add(orbitalRingsStaticGroup);
+  const groundTrackMarker = new Group();
+  groundTrackMarker.name = 'OrbitalGroundTrackArc';
+  root.add(groundTrackMarker);
 
   const pipMat = new MeshStandardMaterial({
     color: 0x5eead4,
@@ -727,7 +728,7 @@ export function createEarthGlobeAsset(): Object3D {
 
   // Outer primary targeting ring (r = 46mm, tube = 1.0mm)
   const outerReticleRing = new Mesh(
-    new TorusGeometry(0.046, 0.0010, 8, 48),
+    new TorusGeometry(0.046, 0.0010, 5, 24),
     reticleRingMat,
   );
   outerReticleRing.name = 'ActiveReticleOuterRing';
@@ -735,7 +736,7 @@ export function createEarthGlobeAsset(): Object3D {
 
   // Inner precision targeting ring (r = 0.024mm, tube = 0.7mm)
   const innerReticleRing = new Mesh(
-    new TorusGeometry(0.024, 0.0007, 8, 36),
+    new TorusGeometry(0.024, 0.0007, 5, 20),
     reticleRingMat,
   );
   innerReticleRing.name = 'ActiveReticleInnerRing';
@@ -743,38 +744,33 @@ export function createEarthGlobeAsset(): Object3D {
 
   // Center focal reticle dot
   const focalDot = new Mesh(
-    new CylinderGeometry(0.0018, 0.0018, 0.001, 8),
+    new CylinderGeometry(0.0018, 0.0018, 0.001, 6),
     reticleRingMat,
   );
   focalDot.name = 'ActiveReticleFocalDot';
   focalDot.rotation.set(Math.PI / 2, 0, 0);
   activeReticleGroup.add(focalDot);
 
-  // 4 Crosshairs extending across outer ring
-  const crosshairMat = new LineBasicMaterial({
-    color: 0x38bdf8,
-    transparent: true,
-    opacity: 0.90,
-  });
-  crosshairMat.name = 'ActiveReticleCrosshairMat';
-
-  const chGeo = new BufferGeometry();
-  const chPos = new Float32Array([
-    0, 0.012, 0, 0, 0.052, 0,
-    0, -0.012, 0, 0, -0.052, 0,
-    0.012, 0, 0, 0.052, 0, 0,
-    -0.012, 0, 0, -0.052, 0, 0,
-  ]);
-  chGeo.setAttribute('position', new Float32BufferAttribute(chPos, 3));
-  const crosshairLines = new LineSegments(chGeo, crosshairMat);
-  crosshairLines.name = 'ActiveReticleCrosshairs';
-  activeReticleGroup.add(crosshairLines);
+  // 4 Crosshairs extending across outer ring (share reticleRingMat -> merges into 1 draw call)
+  const chBoxV = bevelBox(0.0012, 0.040, 0.0008, 0.0002, 0.0002, 1);
+  const chBoxH = bevelBox(0.040, 0.0012, 0.0008, 0.0002, 0.0002, 1);
+  for (const [idx, [cx, cy, geo]] of [
+    [0, 0.032, chBoxV],
+    [0, -0.032, chBoxV],
+    [0.032, 0, chBoxH],
+    [-0.032, 0, chBoxH],
+  ].entries() as Iterable<[number, [number, number, BufferGeometry]]>) {
+    const tick = new Mesh(geo, reticleRingMat);
+    tick.name = `ActiveReticleCrosshair_${idx}`;
+    tick.position.set(cx, cy, 0);
+    activeReticleGroup.add(tick);
+  }
 
   // 4 Corner Brackets (share reticleRingMat so mergeStaticMeshesByMaterial merges them into 1 draw call)
   for (let c = 0; c < 4; c++) {
     const bracketAngle = (c * Math.PI) / 2 + Math.PI / 4;
     const bracketMesh = new Mesh(
-      new TorusGeometry(0.050, 0.0008, 6, 16, Math.PI * 0.28),
+      new TorusGeometry(0.050, 0.0008, 5, 10, Math.PI * 0.28),
       reticleRingMat,
     );
     bracketMesh.name = `ActiveReticleBracket_${c}`;
@@ -828,7 +824,7 @@ export function createSectorMarkerAsset(
 
   // 1. Surface Ground Anchor Socket (titanium bevel ring flush with globe surface)
   const anchorSocket = new Mesh(
-    new CylinderGeometry(0.0055, 0.0075, 0.0025, 12),
+    new CylinderGeometry(0.0055, 0.0075, 0.0025, 8),
     beaconMat,
   );
   anchorSocket.name = 'SectorAnchorSocket';
@@ -837,7 +833,7 @@ export function createSectorMarkerAsset(
 
   // 2. Elevated Vertical Tactical Holographic Pylon Shaft (extends 32mm radially outward)
   const pylonHeight = 0.032;
-  const pylonGeo = new CylinderGeometry(0.0009, 0.0013, pylonHeight, 8);
+  const pylonGeo = new CylinderGeometry(0.0009, 0.0013, pylonHeight, 6);
   const pylonMesh = new Mesh(pylonGeo, beaconMat);
   pylonMesh.name = 'SectorPylonShaft';
   pylonMesh.position.set(0, pylonHeight / 2 + 0.002, 0);
@@ -845,7 +841,7 @@ export function createSectorMarkerAsset(
 
   // 3. Floating Tactical Collar Ring (hovers along pylon at y = 22mm)
   const collarRing = new Mesh(
-    new TorusGeometry(0.0095, 0.0009, 6, 24),
+    new TorusGeometry(0.0095, 0.0009, 5, 12),
     beaconMat,
   );
   collarRing.name = 'SectorCollarRing';
@@ -856,7 +852,7 @@ export function createSectorMarkerAsset(
   if (isCloudCovered) {
     // 4a. Hexagonal tactical radar hazard crown atop the pylon (y = 35mm)
     const reticleRing = new Mesh(
-      new TorusGeometry(0.0125, 0.0012, 6, 6),
+      new TorusGeometry(0.0125, 0.0012, 5, 6),
       beaconMat,
     );
     reticleRing.name = 'SectorHaloRing';
@@ -867,7 +863,7 @@ export function createSectorMarkerAsset(
     // Three radiating radar wave arc brackets (120 deg apart)
     for (let b = 0; b < 3; b++) {
       const arc = new Mesh(
-        new TorusGeometry(0.016, 0.0008, 6, 16, Math.PI * 0.42),
+        new TorusGeometry(0.016, 0.0008, 5, 8, Math.PI * 0.42),
         beaconMat,
       );
       arc.name = `SectorBracketArc_${b}`;
@@ -887,7 +883,7 @@ export function createSectorMarkerAsset(
   } else {
     // 4b. Sleek circular optical target reticle crown atop the pylon (y = 35mm)
     const reticleRing = new Mesh(
-      new TorusGeometry(0.0118, 0.001, 8, 32),
+      new TorusGeometry(0.0118, 0.001, 5, 14),
       beaconMat,
     );
     reticleRing.name = 'SectorHaloRing';
@@ -898,7 +894,7 @@ export function createSectorMarkerAsset(
     // Two outer framing arc brackets (opposite quadrants)
     for (let b = 0; b < 2; b++) {
       const arc = new Mesh(
-        new TorusGeometry(0.0155, 0.0007, 6, 18, Math.PI * 0.56),
+        new TorusGeometry(0.0155, 0.0007, 5, 8, Math.PI * 0.56),
         beaconMat,
       );
       arc.name = `SectorBracketArc_${b}`;
@@ -1124,8 +1120,8 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
     'FrontPayloadKaptonMLI',
     busW - 0.011,
     busH - 0.011,
-    18,
-    18,
+    6,
+    6,
     0.0024,
     kaptonGoldMat,
   );
@@ -1136,8 +1132,8 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
     'TopAftKaptonMLI',
     busW - 0.012,
     uStep * 1.35,
-    14,
-    16,
+    5,
+    6,
     0.002,
     kaptonGoldMat,
   );
@@ -1150,8 +1146,8 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
       `SideAvionicsKapton_${sx > 0 ? 'R' : 'L'}`,
       uStep * 0.42,
       busH - 0.016,
-      10,
-      12,
+      4,
+      5,
       0.0016,
       kaptonGoldMat,
     );
@@ -1162,7 +1158,7 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
 
   // 5. Nadir Optical Camera Assembly on Front (+Z) Face
   const camHousing = new Mesh(
-    bevelBox(0.034, 0.034, 0.014, 0.0018, 0.003, 2),
+    bevelBox(0.034, 0.034, 0.014, 0.0018, 0.003, 1),
     blackAnodizedMat,
   );
   camHousing.name = 'OpticalCameraHousing';
@@ -1171,7 +1167,7 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
 
   for (const [bx, by] of cornerSigns) {
     const cBolt = new Mesh(
-      new CylinderGeometry(0.0013, 0.0013, 0.002, 8),
+      new CylinderGeometry(0.0013, 0.0013, 0.002, 6),
       silverBusbarMat,
     );
     cBolt.name = `CameraBezelBolt_${bx}_${by}`;
@@ -1181,7 +1177,7 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
   }
 
   const outerBaffle = new Mesh(
-    new TorusGeometry(0.0115, 0.0022, 12, 28),
+    new TorusGeometry(0.0115, 0.0022, 6, 12),
     blackAnodizedMat,
   );
   outerBaffle.name = 'CameraOuterBaffle';
@@ -1189,7 +1185,7 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
   root.add(outerBaffle);
 
   const innerApertureRing = new Mesh(
-    new TorusGeometry(0.0088, 0.0012, 10, 24),
+    new TorusGeometry(0.0088, 0.0012, 6, 12),
     silverBusbarMat,
   );
   innerApertureRing.name = 'CameraApertureRing';
@@ -1197,7 +1193,7 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
   root.add(innerApertureRing);
 
   const lensDome = new Mesh(
-    new SphereGeometry(0.0086, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.42),
+    new SphereGeometry(0.0086, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.42),
     opticalLensGlassMat,
   );
   lensDome.name = 'CameraObjectiveLens';
@@ -1390,11 +1386,7 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
     root.add(whip);
   }
 
-  mergeStaticMeshesByMaterial(root);
-  // Remaining plain static parts (rails, panels, chassis, lens, fasteners) become one draw with their own looks.
-  mergeStaticMeshesIntoBakedMaterial(root);
-
-  // 9. Dynamic Dual-Mode Payload Telemetry Indicators (attached after static merge for runtime ECS control)
+  // 9. Payload & Avionics Telemetry Indicators (baked into the single CubeSat static draw call)
   const opticalRingMat = new MeshStandardMaterial({
     color: 0x38bdf8,
     emissive: 0x0284c7,
@@ -1404,10 +1396,10 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
   });
   opticalRingMat.name = 'CubeSatOpticalRingMat';
   const opticalRing = new Mesh(
-    new TorusGeometry(0.0092, 0.0011, 8, 24),
+    new TorusGeometry(0.0092, 0.0011, 6, 12),
     opticalRingMat,
   );
-  opticalRing.name = 'CubeSatOpticalApertureRing';
+  opticalRing.name = 'CubeSatOpticalApertureRingMesh';
   opticalRing.position.set(0, -0.001, busL * 0.5 + 0.0135);
   root.add(opticalRing);
 
@@ -1423,9 +1415,46 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
     bevelBox(0.038, 0.006, 0.003, 0.0004, 0.0006, 1),
     sarFeedMat,
   );
-  sarFeed.name = 'CubeSatSarFeedStrip';
+  sarFeed.name = 'CubeSatSarFeedStripMesh';
   sarFeed.position.set(0, -busH * 0.5 + 0.004, busL * 0.5 + 0.002);
   root.add(sarFeed);
+
+  const attitudeLockMat = new MeshStandardMaterial({
+    color: 0x10b981,
+    emissive: 0x059669,
+    emissiveIntensity: 1.0,
+    roughness: 0.2,
+    metalness: 0.5,
+  });
+  const epsTelemetryMat = new MeshStandardMaterial({
+    color: 0x38bdf8,
+    emissive: 0x0284c7,
+    emissiveIntensity: 0.8,
+    roughness: 0.2,
+    metalness: 0.5,
+  });
+  const ledGeo = new SphereGeometry(0.0022, 6, 4);
+  const attitudeLock = new Mesh(ledGeo, attitudeLockMat);
+  attitudeLock.position.set(0.024, 0.045, -0.06);
+  root.add(attitudeLock);
+  const epsHeartbeat = new Mesh(ledGeo, epsTelemetryMat);
+  epsHeartbeat.position.set(-0.024, 0.045, -0.06);
+  root.add(epsHeartbeat);
+
+  mergeStaticMeshesByMaterial(root);
+  // Entire 3U CubeSat (rails, panels, chassis, lens, fasteners, indicators) becomes 1 draw call.
+  mergeStaticMeshesIntoBakedMaterial(root);
+
+  for (const markerName of [
+    'CubeSatOpticalApertureRing',
+    'CubeSatSarFeedStrip',
+    'AdcsAttitudeLockLED',
+    'PowerTelemetryHeartbeatLED',
+  ]) {
+    const marker = new Group();
+    marker.name = markerName;
+    root.add(marker);
+  }
 
   return root;
 }

@@ -18,18 +18,13 @@ import {
   Object3D,
   TorusGeometry,
 } from '@iwsdk/core';
+import { mergeStaticMeshesByMaterial } from './lib/hardsurface';
 
 export function createSwathPlungerAsset(): Object3D {
   const root = new Group();
   root.name = 'SwathPlungerButton';
 
   // Aerospace Hard-Surface Materials
-  const guardHousingMat = new MeshStandardMaterial({
-    color: 0x1e293b,
-    roughness: 0.32,
-    metalness: 0.85,
-  });
-
   const safetyRingMat = new MeshStandardMaterial({
     color: 0x334155,
     roughness: 0.28,
@@ -44,18 +39,9 @@ export function createSwathPlungerAsset(): Object3D {
     metalness: 0.5,
   });
 
-  // 1. Recessed Bezel Mounting Base
-  const baseFlange = new Mesh(
-    new CylinderGeometry(0.038, 0.042, 0.014, 24),
-    guardHousingMat,
-  );
-  baseFlange.name = 'PlungerBaseFlange';
-  baseFlange.position.set(0, 0.007, 0);
-  root.add(baseFlange);
-
-  // 2. Heavy-Duty Safety Guard Ring (raises above cap rim to prevent accidental knocks)
+  // 1. Heavy-Duty Safety Guard Ring (added first so mergeStaticMeshesByMaterial keeps 'PlungerGuardRing' name)
   const guardRing = new Mesh(
-    new TorusGeometry(0.034, 0.0032, 8, 28),
+    new TorusGeometry(0.034, 0.0032, 6, 16),
     safetyRingMat,
   );
   guardRing.name = 'PlungerGuardRing';
@@ -63,15 +49,26 @@ export function createSwathPlungerAsset(): Object3D {
   guardRing.position.set(0, 0.022, 0);
   root.add(guardRing);
 
+  // 2. Recessed Bezel Mounting Base (shares safetyRingMat -> merges into PlungerGuardRing)
+  const baseFlange = new Mesh(
+    new CylinderGeometry(0.038, 0.042, 0.014, 14),
+    safetyRingMat,
+  );
+  baseFlange.name = 'PlungerBaseFlange';
+  baseFlange.position.set(0, 0.007, 0);
+  root.add(baseFlange);
+
   // 3. Spring-Loaded Tactile Plunger Cap (y = 0.018m rest height, -12mm travel stroke)
   // Named 'PadIlluminatedCap' so existing physics and press animations handle it automatically!
   const cap = new Mesh(
-    new CylinderGeometry(0.027, 0.028, 0.016, 24),
+    new CylinderGeometry(0.027, 0.028, 0.016, 14),
     plungerCapMat,
   );
   cap.name = 'PadIlluminatedCap';
   cap.position.set(0, 0.018, 0);
   root.add(cap);
+
+  mergeStaticMeshesByMaterial(root, ['PadIlluminatedCap']);
 
   return root;
 }

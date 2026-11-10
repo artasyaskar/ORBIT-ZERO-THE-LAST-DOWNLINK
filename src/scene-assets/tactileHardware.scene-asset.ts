@@ -40,16 +40,11 @@ export function createScannerToolAsset(): Object3D {
   const titaniumMat = toolBodyMat;
   const gunmetalHousingMat = toolBodyMat;
   const emitterMat = toolBodyMat;
-  const gripPolymerMat = new MeshStandardMaterial({
-    color: 0x0b111d,
-    roughness: 0.68,
-    metalness: 0.25,
-  });
-  gripPolymerMat.userData.tintRole = 'faint';
+  const gripPolymerMat = toolBodyMat;
 
   // 1. Ergonomic Angled Instrument Grip & Titanium Pommel Base
   const pommelBase = new Mesh(
-    bevelBox(0.056, 0.014, 0.072, 0.003, 0.008, 2),
+    bevelBox(0.056, 0.014, 0.072, 0.003, 0.008, 1),
     titaniumMat,
   );
   pommelBase.name = 'ScannerPommelBase';
@@ -57,7 +52,7 @@ export function createScannerToolAsset(): Object3D {
   root.add(pommelBase);
 
   const gripHandle = new Mesh(
-    bevelBox(0.044, 0.074, 0.052, 0.006, 0.012, 3),
+    bevelBox(0.044, 0.074, 0.052, 0.006, 0.012, 1),
     gripPolymerMat,
   );
   gripHandle.name = 'ScannerGripHandle';
@@ -66,7 +61,7 @@ export function createScannerToolAsset(): Object3D {
   root.add(gripHandle);
 
   const triggerGuard = new Mesh(
-    bevelBox(0.014, 0.048, 0.036, 0.002, 0.005, 2),
+    bevelBox(0.014, 0.048, 0.036, 0.002, 0.005, 1),
     titaniumMat,
   );
   triggerGuard.name = 'ScannerTriggerGuard';
@@ -75,7 +70,7 @@ export function createScannerToolAsset(): Object3D {
 
   // 2. Twin-Barrel Upper Sensor Receiver Chassis
   const headHousing = new Mesh(
-    bevelBox(0.088, 0.044, 0.112, 0.006, 0.014, 3),
+    bevelBox(0.088, 0.044, 0.112, 0.006, 0.014, 1),
     gunmetalHousingMat,
   );
   headHousing.name = 'ScannerSensorHead';
@@ -83,7 +78,7 @@ export function createScannerToolAsset(): Object3D {
   root.add(headHousing);
 
   const topRail = new Mesh(
-    bevelBox(0.048, 0.01, 0.088, 0.002, 0.004, 2),
+    bevelBox(0.048, 0.01, 0.088, 0.002, 0.004, 1),
     titaniumMat,
   );
   topRail.name = 'ScannerTopTelemetryRail';
@@ -91,7 +86,7 @@ export function createScannerToolAsset(): Object3D {
   root.add(topRail);
 
   // 3. Dual Front Sensor Barrels (Left: Optical Lens, Right: SAR Radar Feed Horn)
-  const barrelCollarGeo = new CylinderGeometry(0.019, 0.021, 0.022, 20);
+  const barrelCollarGeo = new CylinderGeometry(0.019, 0.021, 0.022, 10);
   const leftBarrel = new Mesh(barrelCollarGeo, titaniumMat);
   leftBarrel.name = 'ScannerOpticalBarrel';
   leftBarrel.rotation.set(Math.PI / 2, 0, 0);
@@ -105,7 +100,7 @@ export function createScannerToolAsset(): Object3D {
   root.add(rightBarrel);
 
   // Glowing Lens Cores & Emitter Rings (tinted dynamically for OPTICAL vs RADAR)
-  const lensCoreGeo = new CylinderGeometry(0.014, 0.014, 0.024, 18);
+  const lensCoreGeo = new CylinderGeometry(0.014, 0.014, 0.024, 10);
   const leftLensCore = new Mesh(lensCoreGeo, emitterMat);
   leftLensCore.name = 'ScannerApertureCore';
   leftLensCore.rotation.set(Math.PI / 2, 0, 0);
@@ -119,7 +114,7 @@ export function createScannerToolAsset(): Object3D {
   root.add(rightLensCore);
 
   const emitterRing = new Mesh(
-    new TorusGeometry(0.018, 0.003, 10, 24),
+    new TorusGeometry(0.018, 0.003, 6, 12),
     emitterMat,
   );
   emitterRing.name = 'ScannerApertureRing';
@@ -128,7 +123,7 @@ export function createScannerToolAsset(): Object3D {
 
   // Rear Operator Status Indicator Bar (visible from seated player camera)
   const rearVisor = new Mesh(
-    bevelBox(0.062, 0.014, 0.008, 0.002, 0.003, 2),
+    bevelBox(0.062, 0.014, 0.008, 0.002, 0.003, 1),
     emitterMat,
   );
   rearVisor.name = 'ScannerOperatorVisor';
@@ -136,7 +131,7 @@ export function createScannerToolAsset(): Object3D {
   root.add(rearVisor);
 
   // 4. Live Forward Proximity Aiming Laser (activated when player grabs the tool)
-  const laserGeo = new CylinderGeometry(0.0018, 0.0035, 0.28, 12);
+  const laserGeo = new CylinderGeometry(0.0018, 0.0035, 0.28, 6);
   const laserMat = new MeshBasicMaterial({
     color: 0x38bdf8,
     transparent: true,
@@ -241,15 +236,8 @@ export function createDataCubeAsset(accentHex = 0x45c9c0): Object3D {
   terrainCore.position.set(0, 0.036, 0);
   root.add(terrainCore);
 
-  // Horizontal Glowing Slit Emitter Bar (front and back aperture). Full white emissive renders pure white
-  // (no tone mapping), like the old 95%-opaque white, and lets the slit join the cube's one static draw.
-  const slitMat = new MeshStandardMaterial({
-    color: 0xffffff,
-    emissive: 0xffffff,
-    emissiveIntensity: 1,
-    roughness: 1,
-    metalness: 0,
-  });
+  // Horizontal Glowing Slit Emitter Bar (front and back aperture) shares coreMat -> merges into CubeConfidenceCore
+  const slitMat = coreMat;
   const frontSlit = new Mesh(
     bevelBox(0.036, 0.006, 0.052, 0.001, 0.002, 1),
     slitMat,
@@ -271,7 +259,7 @@ export function createDataCubeAsset(accentHex = 0x45c9c0): Object3D {
   });
   acrylicMat.name = 'CubeAcrylicMat';
   const acrylicShell = new Mesh(
-    bevelBox(0.058, 0.052, 0.058, 0.003, 0.006, 2),
+    bevelBox(0.058, 0.052, 0.058, 0.003, 0.006, 1),
     acrylicMat,
   );
   acrylicShell.name = 'CubeAcrylicShell';
@@ -281,24 +269,17 @@ export function createDataCubeAsset(accentHex = 0x45c9c0): Object3D {
 
   // 4. Dark Slate Base Substrate Plinth
   const baseSubstrate = new Mesh(
-    bevelBox(0.052, 0.006, 0.052, 0.002, 0.004, 2),
+    bevelBox(0.052, 0.006, 0.052, 0.002, 0.004, 1),
     frameMat,
   );
   baseSubstrate.name = 'CubeBaseSubstrate';
   baseSubstrate.position.set(0, 0.014, 0);
   root.add(baseSubstrate);
 
-  // 5. Indus Flood River Channel (recessed aquatic ribbon winding through relief). In the game this channel
-  // only ever showed a faint glow of the cube's tint (under 0.11 of it); it is now part of the cube's one
-  // static draw, so it carries that look itself: its blue colour, no glow of its own.
-  const waterMat = new MeshStandardMaterial({
-    color: 0x38bdf8,
-    roughness: 0.15,
-    metalness: 0.4,
-  });
-  waterMat.name = 'CubeWaterMat';
+  // 5. Indus Flood River Channel shares coreMat -> merges into CubeConfidenceCore (0 extra draw calls)
+  const waterMat = coreMat;
   const floodChannel = new Mesh(
-    bevelBox(0.052, 0.004, 0.014, 0.001, 0.002, 2),
+    bevelBox(0.052, 0.004, 0.014, 0.001, 0.002, 1),
     waterMat,
   );
   floodChannel.name = 'CubeFloodChannel';
@@ -306,17 +287,8 @@ export function createDataCubeAsset(accentHex = 0x45c9c0): Object3D {
   floodChannel.rotation.set(0, 0.45, 0);
   root.add(floodChannel);
 
-  // 6. Holographic Elevation Contour Rings (hovering above the terrain inside the acrylic)
-  const contourMat = new MeshStandardMaterial({
-    color: 0x67e8f9,
-    emissive: 0x06b6d4,
-    emissiveIntensity: 0.75,
-    transparent: true,
-    opacity: 0.65,
-    depthWrite: false,
-    roughness: 0.2,
-  });
-  contourMat.name = 'CubeContourMat';
+  // 6. Holographic Elevation Contour Rings share acrylicMat -> merges into CubeAcrylicShell (0 extra draw calls)
+  const contourMat = acrylicMat;
 
   const contourCoords = [
     { size: 0.046, y: 0.038 },
@@ -484,15 +456,18 @@ export function createDataCubeAsset(accentHex = 0x45c9c0): Object3D {
   particles.raycast = () => {};
   root.add(particles);
 
-  // Parts the mission system tints, scales, toggles or textures by name keep their own meshes.
+  // Parts the mission system toggles by name keep their own meshes; CubeConfidenceCore and CubeAcrylicShell
+  // absorb their matching sub-meshes in mergeStaticMeshesByMaterial (each stays named by its first mesh).
   const dynamicParts = [
-    'CubeAcrylicShell', 'CubeConfidenceCore', 'CubeContourWireframe_1',
     'CubeBridgeSpan', 'CubeCloudObscurationCap', 'CubeRadarSpikes', 'CubeHighwayVector',
   ];
-  // Frame + collars + plinth + trim + pillars -> one tinted mesh 'CubeOuterFrame'; the two display plates -> one.
+  // Frame + collars + plinth + trim + pillars -> 'CubeOuterFrame';
+  // core + slit + channel -> 'CubeConfidenceCore';
+  // acrylicShell + contourWireframe -> 'CubeAcrylicShell';
+  // the two display plates -> 'CubeFrontDisplay'.
   mergeStaticMeshesByMaterial(root, dynamicParts);
-  // The untinted rest (flood channel, glow slit) becomes one draw that keeps each part's own look.
-  mergeStaticMeshesIntoBakedMaterial(root, [...dynamicParts, 'CubeOuterFrame', 'CubeFrontDisplay', 'CubeTopDisplay']);
+  const mergedAcrylic = root.getObjectByName('CubeAcrylicShell');
+  if (mergedAcrylic) mergedAcrylic.renderOrder = 6;
   return root;
 }
 

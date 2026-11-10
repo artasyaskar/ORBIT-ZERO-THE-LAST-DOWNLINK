@@ -305,15 +305,13 @@ export function createOrbitalConsoleAsset(): Object3D {
     sensorPlate.name = 'SensorSwitchPlate';
     sensorSwitchGroup.add(sensorPlate);
 
-    const sensorStem = new Mesh(new CylinderGeometry(0.004, 0.0055, 0.028, 12), toggleStemChromeMat);
+    const sensorStem = new Mesh(new CylinderGeometry(0.004, 0.0055, 0.028, 8), toggleStemChromeMat);
     sensorStem.name = 'SensorToggleStem';
     sensorStem.position.set(0, 0.012, 0);
     sensorStem.rotation.set(0.38, 0, 0); // Default Optical: +0.38 rad
     sensorSwitchGroup.add(sensorStem);
 
-    const sensorLedMat = new MeshBasicMaterial({ color: 0x38bdf8 });
-    sensorLedMat.name = 'SensorSwitchLedMat';
-    const sensorLed = new Mesh(new CylinderGeometry(0.0028, 0.0028, 0.002, 8), sensorLedMat);
+    const sensorLed = new Mesh(new CylinderGeometry(0.0028, 0.0028, 0.002, 6), indicatorLedMat);
     sensorLed.name = 'SensorSwitchLed';
     sensorLed.position.set(0, 0.0035, 0.014);
     sensorSwitchGroup.add(sensorLed);
@@ -562,34 +560,52 @@ export function createOrbitalConsoleAsset(): Object3D {
         innerOrbitRing.position.set(0, 0.022, 0);
         holoTable.add(innerOrbitRing);
 
-        // 3. Radial Compass Azimuth Lines + Inter-Node Tactical Links merged into 1 LineSegments draw call
-        const radialLineGeo = new BufferGeometry();
-        const linePositions: number[] = [
-            -0.28, 0.022, -0.18,   0.00, 0.023, -0.14,
-            0.00, 0.023, -0.14,   -0.22, 0.022, 0.12,
-            0.00, 0.023, -0.14,    0.22, 0.022, 0.12,
-            0.00, 0.023, -0.14,    0.28, 0.022, -0.18,
-            0.22, 0.022, 0.12,     0.00, 0.022, 0.22,
-            -0.22, 0.022, 0.12,    0.00, 0.022, 0.22,
+        // 3. Radial Compass Azimuth Strips + Inter-Node Tactical Links merged into holoGlowMat (0 extra draw calls)
+        const linePairs: Array<[number, number, number, number, number, number]> = [
+            [-0.28, 0.022, -0.18, 0.00, 0.023, -0.14],
+            [0.00, 0.023, -0.14, -0.22, 0.022, 0.12],
+            [0.00, 0.023, -0.14, 0.22, 0.022, 0.12],
+            [0.00, 0.023, -0.14, 0.28, 0.022, -0.18],
+            [0.22, 0.022, 0.12, 0.00, 0.022, 0.22],
+            [-0.22, 0.022, 0.12, 0.00, 0.022, 0.22],
         ];
         for (let i = 0; i < 12; i++) {
             const angle = (i / 12) * Math.PI * 2;
             const r1 = 0.24;
             const r2 = 0.54;
-            linePositions.push(
+            linePairs.push([
                 Math.cos(angle) * r1, 0.021, Math.sin(angle) * r1,
                 Math.cos(angle) * r2, 0.021, Math.sin(angle) * r2,
-            );
+            ]);
         }
-        radialLineGeo.setAttribute('position', new Float32BufferAttribute(linePositions, 3));
-        const radialLines = new LineSegments(
-            radialLineGeo,
-            new LineBasicMaterial({
-                color: 0x0ea5e9,
-                transparent: true,
-                opacity: 0.55,
-                blending: AdditiveBlending,
-            }),
+        const stripPositions: number[] = [];
+        const stripNormals: number[] = [];
+        const stripIndices: number[] = [];
+        const halfW = 0.0012;
+        let stripV = 0;
+        for (const [x1, y1, z1, x2, y2, z2] of linePairs) {
+            const dx = x2 - x1;
+            const dz = z2 - z1;
+            const len = Math.hypot(dx, dz) || 1;
+            const nx = (-dz / len) * halfW;
+            const nz = (dx / len) * halfW;
+            stripPositions.push(
+                x1 - nx, y1, z1 - nz,
+                x1 + nx, y1, z1 + nz,
+                x2 + nx, y2, z2 + nz,
+                x2 - nx, y2, z2 - nz,
+            );
+            stripNormals.push(0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0);
+            stripIndices.push(stripV, stripV + 1, stripV + 2, stripV, stripV + 2, stripV + 3);
+            stripV += 4;
+        }
+        const radialLineGeo = new BufferGeometry();
+        radialLineGeo.setAttribute('position', new Float32BufferAttribute(stripPositions, 3));
+        radialLineGeo.setAttribute('normal', new Float32BufferAttribute(stripNormals, 3));
+        radialLineGeo.setIndex(stripIndices);
+        const radialLines = new Mesh(
+            holoGlowGeometry(radialLineGeo, 0x0ea5e9, 0.55),
+            holoGlowMat,
         );
         radialLines.name = 'HoloCompassRadialLines';
         holoTable.add(radialLines);
@@ -631,7 +647,7 @@ export function createOrbitalConsoleAsset(): Object3D {
         holoTable.add(nodeGroup);
 
         // 5. Rotating Holographic Radar Sweep Blade
-        const sweepGeo = new RingGeometry(0.04, 0.54, 32, 1, 0, Math.PI / 4);
+        const sweepGeo = new RingGeometry(0.04, 0.54, 12, 1, 0, Math.PI / 4);
         const sweepMat = new MeshBasicMaterial({
             color: 0x00f0ff,
             transparent: true,
@@ -1014,7 +1030,7 @@ export function createOrbitalConsoleAsset(): Object3D {
     leverArmGroup.rotation.set(-0.35, 0, 0);
 
     const leverStem = new Mesh(
-        new CylinderGeometry(0.006, 0.007, 0.11, 14),
+        new CylinderGeometry(0.006, 0.007, 0.11, 8),
         titaniumRimMat,
     );
     leverStem.name = 'LeverStem';
@@ -1022,7 +1038,7 @@ export function createOrbitalConsoleAsset(): Object3D {
     leverArmGroup.add(leverStem);
 
     const leverGrip = new Mesh(
-        new CylinderGeometry(0.014, 0.014, 0.072, 18),
+        new CylinderGeometry(0.014, 0.014, 0.072, 10),
         hullDarkMat,
     );
     leverGrip.name = 'LeverGrip';
@@ -1031,12 +1047,13 @@ export function createOrbitalConsoleAsset(): Object3D {
     leverArmGroup.add(leverGrip);
 
     const handleTip = new Mesh(
-        new SphereGeometry(0.010, 12, 12),
+        new SphereGeometry(0.010, 8, 6),
         emeraldWaveguideMat,
     );
     handleTip.name = 'LeverTipBeacon';
     handleTip.position.set(0.038, 0.11, 0);
     leverArmGroup.add(handleTip);
+    mergeStaticMeshesIntoBakedMaterial(leverArmGroup);
 
     throttleGroup.add(leverArmGroup);
     deckGroup.add(throttleGroup);
@@ -1168,7 +1185,7 @@ export function createOrbitalConsoleAsset(): Object3D {
 
     // 9b. Breathtaking Planetary Earth Orbital Horizon Vista in Right & Overhead Viewports (Concept Images 1 & 2)
     // Repositioned so sunlit Earth face sweeps cleanly across lower right window — leaving upper window open to CubeSat & stars
-    const planetVistaGeo = new SphereGeometry(5.2, 64, 48);
+    const planetVistaGeo = new SphereGeometry(5.2, 24, 16);
     const planetVistaMat = new MeshStandardMaterial({
         color: 0xffffff,
         roughness: 0.35,
@@ -1181,20 +1198,18 @@ export function createOrbitalConsoleAsset(): Object3D {
     planetVista.rotation.set(0.12, -1.22, 0.05);
     cupolaGroup.add(planetVista);
 
-    // 8 sides around a 6.5 cm glow tube 5 m away read as round; 16 cost 1.5k more triangles per eye.
+    const atmoGlowSharedMat = new MeshBasicMaterial({
+        color: 0x38bdf8,
+        transparent: true,
+        opacity: 0.85,
+        blending: AdditiveBlending,
+        side: DoubleSide,
+        forceSinglePass: true,
+        depthWrite: false,
+    });
     const horizonLimbGlow = new Mesh(
-        new TorusGeometry(5.25, 0.065, 8, 96, Math.PI * 0.45),
-        new MeshBasicMaterial({
-            color: 0x38bdf8,
-            transparent: true,
-            opacity: 0.85,
-            blending: AdditiveBlending,
-            side: DoubleSide,
-            // One pass instead of back+front. Without depth writes every face still adds its glow, so the
-            // additive result matches the two-pass look (one draw per eye saved on a 3k-triangle arc).
-            forceSinglePass: true,
-            depthWrite: false,
-        }),
+        new TorusGeometry(5.25, 0.065, 6, 32, Math.PI * 0.45),
+        atmoGlowSharedMat,
     );
     horizonLimbGlow.name = 'StarboardAtmosphereGlowArc';
     horizonLimbGlow.position.set(5.5, -2.0, -3.4);
@@ -1320,7 +1335,7 @@ export function createOrbitalConsoleAsset(): Object3D {
         pGroup.add(rightBar);
 
         // 4 Smooth Rounded Corner Fillets
-        const cornerTorus = new TorusGeometry(cornerR, windowBeamThick * 0.5, 12, 24, Math.PI / 2);
+        const cornerTorus = new TorusGeometry(cornerR, windowBeamThick * 0.5, 6, 8, Math.PI / 2);
         const cTL = new Mesh(cornerTorus, gunmetalBezelMat);
         cTL.position.set(-wSpan * 0.5, hSpan * 0.5, 0);
         cTL.rotation.set(0, 0, Math.PI / 2);
@@ -1373,10 +1388,10 @@ export function createOrbitalConsoleAsset(): Object3D {
 
     function buildCurvedGrabRail(length = 0.46): Group {
         const railGroup = new Group();
-        const shaft = new Mesh(new CylinderGeometry(0.011, 0.011, length, 16), grabRailMat);
+        const shaft = new Mesh(new CylinderGeometry(0.011, 0.011, length, 8), grabRailMat);
         railGroup.add(shaft);
 
-        const elbowGeo = new TorusGeometry(0.024, 0.011, 8, 14, Math.PI / 2);
+        const elbowGeo = new TorusGeometry(0.024, 0.011, 5, 6, Math.PI / 2);
         const topElbow = new Mesh(elbowGeo, grabRailMat);
         topElbow.position.set(0, length * 0.5, -0.024);
         topElbow.rotation.set(-Math.PI / 2, 0, 0);
@@ -1387,7 +1402,7 @@ export function createOrbitalConsoleAsset(): Object3D {
         botElbow.rotation.set(Math.PI / 2, 0, 0);
         railGroup.add(botElbow);
 
-        const standoffGeo = new CylinderGeometry(0.014, 0.016, 0.016, 12);
+        const standoffGeo = new CylinderGeometry(0.014, 0.016, 0.016, 6);
         const topStandoff = new Mesh(standoffGeo, titaniumRimMat);
         topStandoff.position.set(0, length * 0.5 + 0.024, -0.026);
         topStandoff.rotation.set(Math.PI / 2, 0, 0);
@@ -1457,9 +1472,8 @@ export function createOrbitalConsoleAsset(): Object3D {
     cupolaGroup.add(brandGlowStrip);
 
     // 13. Overhead Circular Cupola Cap Skylight (Flush Ceiling Mounting — Concept Images 1 & 2)
-    // Overhead rings, 1.4 m above the eye: 8 sides around the tube are enough (was 16 and 14).
     const domeRing = new Mesh(
-        new TorusGeometry(0.62, 0.024, 8, 64),
+        new TorusGeometry(0.62, 0.024, 6, 28),
         titaniumRimMat,
     );
     domeRing.name = 'CupolaSkylightRing';
@@ -1468,7 +1482,7 @@ export function createOrbitalConsoleAsset(): Object3D {
     cupolaGroup.add(domeRing);
 
     const innerDomeRing = new Mesh(
-        new TorusGeometry(0.66, 0.018, 8, 64),
+        new TorusGeometry(0.66, 0.018, 6, 28),
         gunmetalBezelMat,
     );
     innerDomeRing.name = 'CupolaInnerSkylightRing';
@@ -1476,22 +1490,18 @@ export function createOrbitalConsoleAsset(): Object3D {
     innerDomeRing.rotation.set(Math.PI / 2, 0, 0);
     cupolaGroup.add(innerDomeRing);
 
-    // Luminous Earth-atmosphere limb visible through the overhead cupola skylight
-    const skylightLimbMat = new MeshBasicMaterial({
-        color: 0x38bdf8,
-        transparent: true,
-        opacity: 0.88,
-        side: DoubleSide,
-        forceSinglePass: true,
-    });
+    // Luminous Earth-atmosphere limb visible through the overhead cupola skylight (shares atmoGlowSharedMat -> 0 extra draws)
     const skylightAtmoArc = new Mesh(
-        new TorusGeometry(0.60, 0.035, 8, 48, Math.PI * 0.85),
-        skylightLimbMat,
+        new TorusGeometry(0.60, 0.035, 6, 24, Math.PI * 0.85),
+        atmoGlowSharedMat,
     );
-    skylightAtmoArc.name = 'CupolaSkylightAtmosphereArc';
+    skylightAtmoArc.name = 'CupolaSkylightAtmosphereArcMesh';
     skylightAtmoArc.position.set(0, 2.23, -0.15);
     skylightAtmoArc.rotation.set(Math.PI / 2, 0, Math.PI * 0.08);
     cupolaGroup.add(skylightAtmoArc);
+    const skylightAtmoMarker = new Group();
+    skylightAtmoMarker.name = 'CupolaSkylightAtmosphereArc';
+    cupolaGroup.add(skylightAtmoMarker);
 
 
     // Upper Brow Strut for test contract verification (Positioned flush at top of canopy)
@@ -1541,7 +1551,6 @@ export function createOrbitalConsoleAsset(): Object3D {
     consoleDesk.add(baseGroup, deckGroup);
     const consoleDeskKeep = [
         'SensorToggleStem',
-        'SensorSwitchLed',
         // Desktop-only click targets; kept out of the merge (bezels too) so the headset can hide them.
         'TactileBtn_SensorMode',
         'TactileBtn_ScanTrigger',
@@ -1555,7 +1564,6 @@ export function createOrbitalConsoleAsset(): Object3D {
         'ProcessingCradleAssembly',
         'CradleClampLeft',
         'CradleClampRight',
-        'CradleInductionRing',
         'DownlinkSlotWaveguide_1',
         'DownlinkSlotWaveguide_2',
         'DownlinkSlotWaveguide_3',
@@ -1563,6 +1571,7 @@ export function createOrbitalConsoleAsset(): Object3D {
         'DownlinkSlotProgress_2',
         'DownlinkSlotProgress_3',
         'LeverArmAssembly',
+        'BakedStatic_LeverArmAssembly_0',
     ];
     mergeStaticMeshesByMaterial(consoleDesk, consoleDeskKeep);
     // Then the remaining plain static parts become one draw; each keeps its own colour, glow, roughness and
@@ -1570,8 +1579,6 @@ export function createOrbitalConsoleAsset(): Object3D {
     mergeStaticMeshesIntoBakedMaterial(consoleDesk, [
         ...consoleDeskKeep,
         'TactileDeckControls',
-        'SBandTransmissionLever',
-        'SensorToggleSwitch',
     ]);
     root.add(consoleDesk);
 
