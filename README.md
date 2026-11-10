@@ -24,47 +24,38 @@
 | **2. Seated & Stationary Ergonomics** | Verified | Automatic seated head-fit (`SEATED_EYE = [0, 1.25, 0.10]`) centers the cockpit to the player's actual seated or standing posture on XR entry and after 3s height shifts, with one-tap `RECENTER` on the desk and briefing panel. |
 | **3. Fast Cold Start & Clean Pause/Resume** | Verified | Headset lobby (`src/ui/xrEntryOverlay.ts`) opens straight into a single `ENTER VR` button on Quest Browser (`OculusBrowser` / `Quest`). Quest system menu (`visibilityState: 'visible-blurred' / 'hidden'`), headset removal, and tab switches immediately pause the mission clock, timers, Web Audio, and speech synthesis (`0.00s` clock drift). |
 | **4. 100% Original, Zero External Service Dependency** | Verified | Deterministic TypeScript simulation engine (`src/mission/`), procedural 3D hardware (`src/scene-assets/`), procedural Web Audio (`src/systems/orbitalAudio.ts`), and local Web Speech + radio DSP (`src/systems/voiceCommander.ts`). Zero external AI/LLM/satellite APIs required. |
-| **5. Quest 3 72 FPS Budget** | Verified | Live XR scene cut from `85–104` draw calls/eye (`170–208` stereo) and `84k–98k` triangles/eye (`169k–196k` stereo) down to **`41–49` draw calls and `29,480–34,330` triangles per eye** (`<= 50` draws / `<= 35k` tris budget), zero per-frame allocations in the XR hand loop, fixed foveation (`setFoveation(1)`), and automatic frame-rate/pixel-ratio fallback (`src/systems/perfMonitor.ts`). |
-| **6. No Fake Eye Tracking / Haptics** | Verified | Head-direction (`gazeAssist`) uses `camera` world quaternion; hand interactions rely on visual scale/emissive feedback + procedural spatial audio ticks, chirps, magnetic snaps, and combo stingers. |
+| **5. Quest 3 72 FPS Budget** | Verified (IWER) | Live XR scene tuned from `85–104` draw calls/eye and `84k–98k` tris/eye down to **`39–50` draw calls and `22,934–34,528` triangles per eye** (`<= 50` draws / `<= 35k` tris ceiling across card/play/downlink), zero per-frame allocations in the XR hand loop, fixed foveation (`setFoveation(1)`), and automatic frame-rate/resolution governor (`src/systems/perfMonitor.ts`). **Physical headset FPS requires Quest 3 testing.** |
+| **6. No Fake Eye Tracking / Haptics** | Verified | Head-direction (`gazeAssist`) uses `camera` world quaternion; hand interactions rely on visual scale/emissive feedback (including cube hover rim highlights, red `[X]` blocked scan thuds, and `0.65s` cradle follow-through glow) + procedural Web Audio cues. |
+| **7. Zero-Backend Retention & Skins** | Verified | Deterministic Daily Seeded Challenge (`DAILY-YYYY-MM-DD`) with bundled offline seasonal Earth context (`src/mission/proceduralCrisis.ts`), local mastery + `bestStreak` persistence (`src/systems/missionProfile.ts`), 4 zero-draw-cost console trim skins (`CYAN`, `AMBER`, `EMERALD`, `CRIMSON`), and shareable debrief Run Codes (`src/ui/debriefText.ts`). |
 
 ---
 
-## 3. Quick Start & Verification Commands
+## 3. Controls & Quick Start
 
-### Install & Run Locally
+- **Meta Quest 3 / Quest Browser:** Open the hosted HTTPS link directly in Quest Browser (`OculusBrowser`), tap **ENTER VR** once, point the hand laser at any glowing sector, and pinch to select/scan/grab.
+- **Desktop (Mouse & Keyboard):** Click **Play Desktop**, or append `?game` to skip the landing scene. Keys: `[1-3]` Sensor (`RADAR`/`OPTICAL`/`THERMAL`), click globe to select sector, `[Space]` Scan, `[P]` Compress, `[Q]` Load Bay, `[T]` Transmit, `[V]` Tactical Recon card, `[C]` Campaign / Daily Pass / Console Skins, `[R]` Instant Retry, `[Esc]` Pause.
+
+### Install, Test & Build Locally
 ```powershell
 npm install
 npm run dev:runtime
-```
-
-### Typecheck, Unit Tests & Production Build
-```powershell
 npm run typecheck
-npm test
+npm test              # 354 Vitest unit/simulation tests
 npm run build
+npm run test:release  # Runs all 9 Playwright + IWER Quest 3 E2E suites
+node tests/profile-xr-budget.mjs
 ```
 
-### Automated Playwright + IWER Quest 3 E2E Verification Suites
-```powershell
-npm run test:hands-first   # Completes full mission pass via visible hand laser + pinch + scanner + cube carry
-npm run test:enter-vr      # Verifies Quest Browser lobby, 1-tap VR entry, permission retry, and re-entry
-npm run test:judge-fit     # Verifies seated/standing auto-fit, RECENTER, and 0.00s pause clock drift
-npm run test:controllers   # Verifies full controller ray + trigger fallback playability
-npm run test:desktop       # Verifies desktop HUD, keyboard/mouse controls, and debrief consistency
-npm run test:deploy        # Verifies built dist/ at root and GitHub Pages sub-path
-```
-
-### Live Performance HUD (`?perf=1` or Two-Hand Pinch Hold)
-Append `?perf=1` to the URL (or hold **both hands pinched for 1.2 seconds** with empty hands inside VR) to toggle the live telemetry readout showing:
-- Average FPS, 1% low FPS, and frame time (ms)
-- Draw calls and triangles **per eye** (with multiview status)
-- Active shader programs, textures, JS heap (MB), and 60-second `[perf] 60s summary` console line.
+### Live Performance & Diagnostics HUD (`?perf=1` or Two-Hand Pinch Hold)
+Append `?perf=1` to the URL (or hold **both hands pinched for 1.2 seconds** with empty hands inside VR) to toggle the telemetry panel showing FPS avg / 1% low / frame ms, per-eye draws/triangles, active XR input/reference space/features (`XR:` / `FEAT:`), Web Audio state (`AUD:`), heap/textures, and the 60-second summary line.
 
 ---
 
 ## 4. Key Documentation
-- [`docs/AUDIT.md`](docs/AUDIT.md) — Ranked audit findings, before/after scorecard, per-frame allocation fixes, and full `input -> gameplay state -> UI -> audio -> save -> feedback` Connection Map.
-- [`docs/HEADSET_SESSION_CHECKLIST.md`](docs/HEADSET_SESSION_CHECKLIST.md) — Step-by-step 60–90 minute physical Meta Quest 3 verification checklist.
-- [`docs/DEPLOY.md`](docs/DEPLOY.md) — GitHub Pages deployment setup (`Settings -> Pages -> Source: GitHub Actions`) and live URL smoke test.
-- [`docs/DEVPOST_SUBMISSION.md`](docs/DEVPOST_SUBMISSION.md) — Submission tagline, description, and 2:30 real-footage demo video script.
+- [`docs/PRODUCT_PLAN.md`](docs/PRODUCT_PLAN.md) — Product pitch, friction audit, retention design, desktop/VR parity matrix, and implementation plan.
+- [`docs/AUDIT.md`](docs/AUDIT.md) — Ranked audit findings, before/after scorecard, per-frame allocation fixes, and full Connection Map.
+- [`docs/HEADSET_SESSION_CHECKLIST.md`](docs/HEADSET_SESSION_CHECKLIST.md) — Risk-prioritized 60–90 minute physical Meta Quest 3 verification checklist.
+- [`docs/DEPLOY.md`](docs/DEPLOY.md) — GitHub Pages / Vercel static deployment setup and smoke verification.
+- [`docs/DEVPOST_SUBMISSION.md`](docs/DEVPOST_SUBMISSION.md) — Competition submission copy and 2:30 real-footage video script.
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — Tier 2 post-competition Horizon Store & cloud expansion roadmap.
 

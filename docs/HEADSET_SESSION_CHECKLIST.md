@@ -68,13 +68,13 @@ pads do the same jobs (`tests/e2e-controllers.mjs` plays a whole pass that way i
 - [ ] Take the headset off for 10 s mid-pass, put it back: paused, 0 s of clock used, resume works.
 - [ ] Quest menu -> Exit mid-pass, then re-enter: the pass is paused with its clock, resume works.
 
-## 4. Frame rate and render budget (45-60 min)
+## 4. Frame rate, diagnostics and render budget (45-60 min)
 Read the `?perf=1` panel (lower left of the view, or hold a two-hand pinch with empty hands for 1.2 s to toggle it in VR). Hold each view about 60 s for the summary line.
 - [ ] Mission Card, live play with three cubes, and the open downlink window: FPS avg >= 70 and 1% low >= 60
-      at 72 Hz (if the headset runs 90 Hz: avg >= 85).
-- [ ] Panel says "multiview". If it says "no multiview", record it: the GPU then draws twice the numbers below.
-- [ ] Draws and triangles per eye match the verified emulator budget (`<= 50` draws/eye, `<= 35,000` tris/eye):
-      card `41-43` draws (`29.7k-32.2k` tris), live `46-50` draws (`32.0k-34.6k` tris), downlink `44-48` draws (`30.9k-33.5k` tris).
+      at 72 Hz (if the headset runs 90 Hz: avg >= 85). Record avg FPS: `____` | 1% low: `____`.
+- [ ] Panel says `multiview`. If it says `no multiview`, record it: the GPU then draws twice the numbers below.
+- [ ] Check `?perf=1` bottom diagnostic lines: `XR:` reports `hands(LR)(visible)`, `ref: local-floor`, `FEAT:` includes `hand-tracking`, and `AUD:` reports `running` (never stuck `suspended`).
+- [ ] Draws and triangles per eye stay strictly within `<= 50` draws/eye and `<= 35,000` tris/eye (verified IWER emulator baseline: card `39-43` draws / `22.9k-32.2k` tris, live `46-50` draws / `32.0k-34.5k` tris, downlink `44-48` draws / `30.9k-33.5k` tris). Record observed max draws/tris: `____ / ____`.
 - [ ] No visible judder when turning the head quickly over the globe.
 - [ ] If FPS stays low at 90/120 Hz, a `[perf] ... asking for 72 Hz` log line appears (USB inspect) and the
       rate drops once. After exiting a slow session, the next ENTER VR logs the 0.8 resolution step.
