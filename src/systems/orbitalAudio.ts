@@ -10,6 +10,7 @@ export type OrbitalSoundCue =
   | 'TOGGLE_SENSOR'
   | 'SCAN_OPTICAL'
   | 'SCAN_RADAR'
+  | 'SCAN_UNVERIFIED'
   | 'PROCESS_SUCCESS'
   | 'QUEUE_SLOT'
   | 'DISCARD_CUBE'
@@ -182,6 +183,10 @@ export class OrbitalAudioController {
         this.tone(ctx, 240, 680, 0.22, 'sawtooth', 0.09, now);
         this.tone(ctx, 580, 880, 0.14, 'triangle', 0.08, now + 0.14);
         break;
+      case 'SCAN_UNVERIFIED':
+        // Distinct dull low-pass thud when thick cloud/smoke blocks the observation
+        this.playLowPassThud(ctx, now);
+        break;
       case 'PROCESS_SUCCESS':
         this.tone(ctx, 360, 540, 0.12, 'triangle', 0.1, now);
         this.tone(ctx, 540, 810, 0.16, 'sine', 0.11, now + 0.1);
@@ -219,11 +224,13 @@ export class OrbitalAudioController {
         this.tone(ctx, 880, 960, 0.06, 'sine', 0.08, now + 0.04);
         break;
       case 'OPTIMAL_VICTORY':
-        // Warm 4-note aerospace commendation chord: C5 + E5 + G5 + C6
-        this.tone(ctx, 523.25, 523.25, 0.45, 'sine', 0.09, now);
-        this.tone(ctx, 659.25, 659.25, 0.45, 'sine', 0.09, now + 0.08);
-        this.tone(ctx, 783.99, 783.99, 0.5, 'sine', 0.09, now + 0.16);
-        this.tone(ctx, 1046.5, 1046.5, 0.65, 'triangle', 0.11, now + 0.24);
+        // Rich major-9th aerospace celebration chord: C5 + E5 + G5 + B5 + D6 + octave shimmer C6
+        this.tone(ctx, 523.25, 523.25, 0.55, 'sine', 0.1, now);
+        this.tone(ctx, 659.25, 659.25, 0.55, 'sine', 0.09, now + 0.07);
+        this.tone(ctx, 783.99, 783.99, 0.58, 'sine', 0.09, now + 0.14);
+        this.tone(ctx, 987.77, 987.77, 0.6, 'triangle', 0.08, now + 0.21);
+        this.tone(ctx, 1046.5, 1046.5, 0.72, 'triangle', 0.11, now + 0.27);
+        this.tone(ctx, 1174.66, 1174.66, 0.65, 'sine', 0.07, now + 0.34);
         break;
       case 'SCENARIO_CYCLE':
         // Upward aerospace scenario sequence transition sweep
@@ -797,6 +804,46 @@ export class OrbitalAudioController {
       });
     } catch {}
   }
+  private playLowPassThud(ctx: AudioContext, now: number): void {
+    try {
+      const osc = ctx.createOscillator();
+      const sub = ctx.createOscillator();
+      const filter = ctx.createBiquadFilter();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(195, now);
+      osc.frequency.exponentialRampToValueAtTime(84, now + 0.19);
+      sub.type = 'triangle';
+      sub.frequency.setValueAtTime(112, now);
+      sub.frequency.exponentialRampToValueAtTime(62, now + 0.22);
+
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(340, now);
+      filter.Q.setValueAtTime(1.8, now);
+
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.linearRampToValueAtTime(0.14 * this.volume, now + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
+
+      osc.connect(filter);
+      sub.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.master ?? ctx.destination);
+      osc.start(now);
+      sub.start(now);
+      osc.stop(now + 0.25);
+      sub.stop(now + 0.25);
+      osc.onended = () => {
+        try {
+          osc.disconnect();
+          sub.disconnect();
+          filter.disconnect();
+          gain.disconnect();
+        } catch {}
+      };
+    } catch {}
+  }
+
   private tone(
     ctx: AudioContext,
     startHz: number,

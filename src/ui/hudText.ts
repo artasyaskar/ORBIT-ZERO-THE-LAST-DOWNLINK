@@ -20,7 +20,7 @@ import {
 } from '../mission/missionConfig';
 import { resultHeadline } from '../mission/resultLabels';
 import type { GroundRequestId, MissionScenarioConfig, MissionState } from '../mission/types';
-import { retryGuidanceFor } from './debriefText';
+import { bottleneckCauseTag, retryGuidanceFor } from './debriefText';
 
 export type RequestStatus = 'NEEDED' | 'WEAK' | 'ON BOARD' | 'LOADED' | 'SENT' | 'CUT OFF';
 
@@ -133,6 +133,7 @@ export function resultModel(state: MissionState, custom?: MissionScenarioConfig 
   const hintCost = (d.hintsUsed ?? 0) * (d.hintPenalty ?? SCORING.hintPenalty);
   const requests = getScenarioRequests(state.scenarioId, custom);
   const guidance = d.outcome === 'SUCCESS' ? null : retryGuidanceFor(d);
+  const cause = d.outcome === 'SUCCESS' ? null : bottleneckCauseTag(d);
   return {
     title: resultHeadline(d.outcome, d.efficiencyGrade, isAcademy),
     tone,
@@ -142,6 +143,6 @@ export function resultModel(state: MissionState, custom?: MissionScenarioConfig 
       : d.evaluations.map((ev) => `${requests[ev.requestId].targetSectorId} ${shortRequestLabel(ev.shortLabel, ev.title)}: ${ev.status} ${ev.scorePoints}/${ev.maxPoints}`),
     tip: isAcademy
       ? 'You are ready. Operation 01 has a real pass clock.'
-      : guidance ? `${guidance.title}. ${guidance.body}` : d.deterministicRecommendation,
+      : guidance ? `WHY: ${cause}. ${guidance.title}. ${guidance.body}` : d.deterministicRecommendation,
   };
 }

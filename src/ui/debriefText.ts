@@ -75,6 +75,27 @@ export function retryGuidanceFor(
   return describeRetryGuidance(d.failureReasonCode ?? 'INSUFFICIENT_VERIFIED_EVIDENCE', d.failureExplanation, d.deterministicRecommendation);
 }
 
+/** Crisp plain-language bottleneck tag derived strictly from the mission outcome and live telemetry. */
+export function bottleneckCauseTag(d: {
+  outcome?: DebriefOutcome;
+  failureReasonCode?: string;
+  droppedPacketIds?: string[];
+  powerRemaining?: number;
+}): string {
+  if (d.outcome === 'SUCCESS') return 'All priority evidence delivered within link budget';
+  const code = d.failureReasonCode ?? 'INSUFFICIENT_VERIFIED_EVIDENCE';
+  if (code === 'WINDOW_CUTOFF_DROPPED_PACKETS') {
+    const cut = d.droppedPacketIds?.length ?? 0;
+    return cut > 0 ? `Window cutoff (${cut} uncompressed cube${cut === 1 ? '' : 's'} dropped)` : 'Window cutoff before downlink finished';
+  }
+  if (code === 'WRONG_SENSOR_FOR_WEATHER') return 'Cloud or smoke blocked optical scan';
+  if (code === 'UNPROCESSED_STORAGE_BOTTLENECK') return 'Memory tray filled with large raw cubes';
+  if (code === 'PASS_CLOCK_EXPIRED') return 'Pass clock expired before launch';
+  if (code === 'MISSION_ABORTED') return 'Pass aborted early';
+  if ((d.powerRemaining ?? 99) < 8) return `Battery too low (${d.powerRemaining ?? 0} Wh remaining)`;
+  return 'Not enough verified requests sent';
+}
+
 export function requestStatusChip(status: 'VERIFIED' | 'PARTIAL' | 'UNVERIFIED'): { label: string; color: string } {
   if (status === 'VERIFIED') return { label: 'VERIFIED', color: '#34d399' };
   if (status === 'PARTIAL') return { label: 'PARTIAL', color: '#f59e0b' };

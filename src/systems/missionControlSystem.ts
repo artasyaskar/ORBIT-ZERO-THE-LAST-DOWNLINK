@@ -376,6 +376,7 @@ export class MissionControlSystem extends createSystem({
   private scanBeamPulseTimer = 0;
   private scanBeamSectorId: SectorId = 'B';
   private scanBeamMode: SensorMode = 'OPTICAL';
+  private scanBeamUnverified = false;
   private padPressTimers = new Map<string, number>();
   private lastDownlinkTickSecond = -1;
   private profile = loadMissionProfile();
@@ -686,7 +687,31 @@ export class MissionControlSystem extends createSystem({
     // each is hit-tested through one representative mesh instead: ARIA's portrait plate (what the laser
     // aims at) and the cube's acrylic shell (the box around its core). Events still bubble to the entity.
     this.limitPointerHitTest(this.sceneObject('avatar-aria'), 'AriaPortraitPlate');
-    for (const cubeEntity of this.queries.cubes.entities) this.limitPointerHitTest(cubeEntity.object3D, 'CubeOuterFrame', 'CubeAcrylicShell');
+    for (const cubeEntity of this.queries.cubes.entities) {
+      this.limitPointerHitTest(cubeEntity.object3D, 'CubeOuterFrame', 'CubeAcrylicShell');
+      const slotIndex = cubeEntity.getValue(EvidenceCubeNode, 'slotIndex') ?? 0;
+      const target = cubeEntity.object3D as unknown as PointerEventTarget | undefined;
+      if (target) {
+        const hoverKey = `cube-${slotIndex}`;
+        const onEnter = (event: ScenePointerEvent) => {
+          const pointerId = typeof event.pointerId === 'number' ? event.pointerId : 0;
+          if (!this.isLaserHovered(hoverKey) && event.pointerType === 'ray' && this.isLiveXRHandActive()) {
+            // setLaserHover handles throttled HOVER_TICK automatically
+          }
+          this.setLaserHover(hoverKey, pointerId, true);
+        };
+        const onLeave = (event: ScenePointerEvent) => {
+          const pointerId = typeof event.pointerId === 'number' ? event.pointerId : 0;
+          this.setLaserHover(hoverKey, pointerId, false);
+        };
+        target.addEventListener('pointerenter', onEnter);
+        target.addEventListener('pointerleave', onLeave);
+        this.cleanupFuncs.push(() => {
+          target.removeEventListener('pointerenter', onEnter);
+          target.removeEventListener('pointerleave', onLeave);
+        });
+      }
+    }
 
     // 3. Subscribe to 3D Evidence Cube activations (poke/click selects cube)
     this.queries.cubeActivated.subscribe('qualify', (entity) => {
@@ -1930,8 +1955,9 @@ export class MissionControlSystem extends createSystem({
             this.scanBeamPulseTimer = Math.max(0, this.scanBeamPulseTimer - delta);
             const progress = 1.0 - this.scanBeamPulseTimer / 0.85;
             const opacity = Math.sin(progress * Math.PI) * 0.75;
-            const beamHex =
-              this.scanBeamMode === 'OPTICAL'
+            const beamHex = this.scanBeamUnverified
+              ? 0xef4444
+              : this.scanBeamMode === 'OPTICAL'
                 ? 0x38bdf8
                 : this.scanBeamMode === 'THERMAL'
                   ? 0xff6b2b
@@ -2068,6 +2094,15 @@ export class MissionControlSystem extends createSystem({
         }
         if (ring instanceof Mesh && ring.material instanceof MeshStandardMaterial) {
           ring.material.emissiveIntensity = 0.6 + squeeze * 1.4;
+        }
+        const cradlePad = this.sceneObject('pad-process-cradle');
+        if (cradlePad) {
+          if (this.cradlePulseTimer > 0) {
+            const padHex = progress < 0.6 ? 0x10b981 : 0xf59e0b;
+            this.setObjectTint(cradlePad, padHex, 1.15 + squeeze * 0.95);
+          } else {
+            this.setObjectTint(cradlePad, 0xf59e0b, 0.85);
+          }
         }
       }
     }
@@ -4310,24 +4345,30 @@ export class MissionControlSystem extends createSystem({
     const res = this.applyAction({ type: 'SCAN', sectorId: state.selectedSectorId, sensorMode: state.activeSensorMode });
     if (res.ok) {
       if (res.packet) this.cubeTransitions.set(res.packet.id, { kind: 'SCAN', remaining: 0.85 });
+      const scanned = this.engine.getState().packets.find((p) => p.id === res.packet?.id);
+      const isUnverified = scanned?.confidence === 'UNVERIFIED';
       this.scanBeamPulseTimer = 0.85;
       this.scanBeamSectorId = this.engine.getState().selectedSectorId;
       this.scanBeamMode = mode;
-      this.playCue(mode === 'OPTICAL' ? 'SCAN_OPTICAL' : 'SCAN_RADAR');
-      // Thermal shares the radar sweep sound; its caption must not claim a radar image.
-      if (mode === 'THERMAL') this.caption = 'THERMAL SCAN: heat image acquired; thermal infrared sees through smoke, not thick cloud.';
+      this.scanBeamUnverified = isUnverified;
+      this.playCue(isUnverified ? 'SCAN_UNVERIFIED' : mode === 'OPTICAL' ? 'SCAN_OPTICAL' : 'SCAN_RADAR');
+      if (isUnverified) {
+        this.caption = 'SCAN BLOCKED: cloud/smoke obscured this band — try another sensor or DISCARD cube.';
+      } else if (mode === 'THERMAL') {
+        // Thermal shares the radar sweep sound; its caption must not claim a radar image.
+        this.caption = 'THERMAL SCAN: heat image acquired; thermal infrared sees through smoke, not thick cloud.';
+      }
       this.audio.playSubBassPulse();
 
       // Achievement & Streak Callout: the chosen sensor saw through this sector's weather well enough for its request.
-      const scanned = this.engine.getState().packets.find((p) => p.id === res.packet?.id);
       const scannedReq = scanned?.satisfiesRequestId
         ? getScenarioRequests(state.scenarioId, this.engine.getActiveCustomScenario())[scanned.satisfiesRequestId]
         : undefined;
-      if (scanned && scannedReq && (scannedReq.minimumConfidence === 'PROBABLE' || scanned.confidence === 'CONFIRMED') && scanned.confidence !== 'UNVERIFIED') {
+      if (scanned && scannedReq && (scannedReq.minimumConfidence === 'PROBABLE' || scanned.confidence === 'CONFIRMED') && !isUnverified) {
         const weather = describeWeather(getScenarioSector(state.scenarioId, scanned.sectorId, this.engine.getActiveCustomScenario()).cloudCover);
         const badge = this.comboStreak >= 1 ? `STREAK x${this.comboStreak + 1}: SENSOR LOCK` : 'FIRST-TRY LOCK';
         this.triggerComboCallout(badge, `${SENSOR_PLAIN_GUIDE[mode].label} read Sector ${scanned.sectorId} through: ${weather.toLowerCase()}`);
-      } else if (scanned?.confidence === 'UNVERIFIED') {
+      } else if (isUnverified) {
         this.comboStreak = 0;
       }
 
@@ -4338,9 +4379,9 @@ export class MissionControlSystem extends createSystem({
       const swath = globe?.getObjectByName('OrbitalScanSwathCone');
       if (swath instanceof Mesh && swath.material instanceof MeshBasicMaterial) {
         swath.material.color.setHex(
-          mode === 'OPTICAL' ? 0x38bdf8 : mode === 'THERMAL' ? 0xff6b2b : 0xf59e0b,
+          isUnverified ? 0xef4444 : mode === 'OPTICAL' ? 0x38bdf8 : mode === 'THERMAL' ? 0xff6b2b : 0xf59e0b,
         );
-        swath.material.opacity = 0.58;
+        swath.material.opacity = isUnverified ? 0.68 : 0.58;
         swath.visible = true;
       }
     } else {
@@ -5320,7 +5361,7 @@ export class MissionControlSystem extends createSystem({
     const queuePad = this.sceneObject('pad-queue-downlink');
     const discardPad = this.sceneObject('pad-discard-chute');
 
-    if (processPad) {
+    if (processPad && (active || this.cradlePulseTimer <= 0)) {
       this.setObjectTint(processPad, 0xf59e0b, selected('PROCESS') ? 1.45 : 0.85);
     }
     if (queuePad) {
@@ -5515,7 +5556,10 @@ export class MissionControlSystem extends createSystem({
     }
     // HUD buttons restyle themselves (UIKit :hover rules in public/ui/*.uikitml).
     if (id.startsWith('sector-')) this.syncSectorBeacons(this.engine.getState(), this.sceneObject('earth-globe'));
-    else if (!id.startsWith('ui:')) this.syncPadHover();
+    else if (id.startsWith('cube-')) {
+      const s = this.engine.getState();
+      this.syncCubeTransforms(s.packets, s);
+    } else if (!id.startsWith('ui:')) this.syncPadHover();
   }
 
   private syncAll(): void {
@@ -5760,8 +5804,10 @@ export class MissionControlSystem extends createSystem({
           terrainCore.position.y = 0.026;
         }
 
+        const isCubeHovered = this.isLaserHovered(`cube-${slotIndex}`);
+        if (isCubeHovered) obj.scale.setScalar(0.92 * 1.05);
         const standbyHex = STANDBY_CUBE_COLORS[slotIndex] ?? 0x38bdf8;
-        this.setObjectTint(obj, standbyHex, 0.55);
+        this.setObjectTint(obj, standbyHex, isCubeHovered ? 0.95 : 0.55);
         this.updateCubeTelemetryCanvas(obj, slotIndex, undefined);
         continue;
       }
@@ -5826,9 +5872,10 @@ export class MissionControlSystem extends createSystem({
       }
 
       const isSelected = state.selectedPacketId === pkt.id;
+      const isCubeHovered = this.isLaserHovered(`cube-${slotIndex}`);
       // Phase 4: 70% scale for compressed feature cubes
       const baseScale = pkt.processed ? 0.70 : 1.04;
-      const selectBoost = isSelected ? 1.15 : 1.0;
+      const selectBoost = isSelected ? 1.15 : isCubeHovered ? 1.06 : 1.0;
       obj.scale.set(
         baseScale * selectBoost,
         (pkt.processed ? 0.65 : 1.04) * selectBoost,
@@ -5843,8 +5890,21 @@ export class MissionControlSystem extends createSystem({
             : 0xef4444;
       // Live window: tray cubes that can still be docked pulse so "dock now!" is obvious.
       const dockableLive = this.engine.getState().phase === 'DOWNLINK' && !pkt.queued && pkt.confidence !== 'UNVERIFIED';
-      const liveIntensity = dockableLive ? 1.1 + 0.9 * Math.abs(Math.sin(this.elapsedTime * 6)) : isSelected ? 1.35 : 0.95;
+      const liveIntensity = dockableLive
+        ? 1.1 + 0.9 * Math.abs(Math.sin(this.elapsedTime * 6))
+        : isSelected
+          ? 1.35
+          : isCubeHovered
+            ? 1.3
+            : 0.95;
       this.setObjectTint(obj, confidenceHex, liveIntensity);
+      if (isCubeHovered && !isSelected) {
+        const frame = this.childByName(obj, 'CubeOuterFrame');
+        if (frame instanceof Mesh && frame.material instanceof MeshStandardMaterial) {
+          frame.material.emissive.setHex(0x7dd3fc);
+          frame.material.emissiveIntensity = 1.45;
+        }
+      }
       this.updateCubeTelemetryCanvas(obj, slotIndex, pkt);
     }
   }

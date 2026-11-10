@@ -12,7 +12,7 @@
  * 6. Zero XR Conflict: Automatically hides when presenting in an immersive WebXR headset session.
  */
 
-import { OUTCOME_LABELS, retryGuidanceFor, escapeHtml, clipText, requestStatusChip, type DebriefOutcome } from '../ui/debriefText';
+import { bottleneckCauseTag, OUTCOME_LABELS, retryGuidanceFor, escapeHtml, clipText, requestStatusChip, type DebriefOutcome } from '../ui/debriefText';
 import {
   Camera,
   Object3D,
@@ -2082,9 +2082,12 @@ export class DesktopControlsManager {
           })
           .join('');
       const g = debrief.outcome === 'SUCCESS' ? null : retryGuidanceFor(debrief);
+      const causeTag = bottleneckCauseTag(debrief);
       const tip = isAcademyPass
         ? 'You are qualified. Operation 01 has a real pass clock and three requests with different values.'
-        : g ? `<b style="color: ${outcomeColor};">${escapeHtml(g.title)}.</b> ${escapeHtml(clipText(g.body, 340))}` : escapeHtml(clipText(debrief.deterministicRecommendation, 300));
+        : g
+          ? `<b style="color: ${outcomeColor};">Why: ${escapeHtml(causeTag)}.</b> ${escapeHtml(g.title)}. ${escapeHtml(clipText(g.body, 320))}`
+          : escapeHtml(clipText(debrief.deterministicRecommendation, 300));
       this.bannerEl.style.borderColor = outcomeColor;
       this.bannerEl.style.maxWidth = '780px';
       this.bannerEl.style.minWidth = '620px';
