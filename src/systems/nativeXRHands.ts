@@ -72,6 +72,7 @@ export class NativeXRHands {
   private lastSession: XRSession | null = null;
   private armed = new Set<HandSide>();
   private pinching = new Set<HandSide>();
+  private readonly lastPinchEdgeMs: Record<HandSide, number> = { left: -Infinity, right: -Infinity };
   private selecting = new WeakMap<XRInputSource, boolean>();
   private readonly scratch: Record<HandSide, HandScratch> = {
     left: createHandScratch('left'),
@@ -95,6 +96,7 @@ export class NativeXRHands {
     this.sources.delete(side);
     this.armed.delete(side);
     this.pinching.delete(side);
+    this.lastPinchEdgeMs[side] = -Infinity;
   }
 
   private findHandSource(side: HandSide, session: XRSession): XRInputSource | undefined {
@@ -159,10 +161,27 @@ export class NativeXRHands {
 
     const { wrist, metacarpal, distal, indexTip, thumbTip, graspPoint, fingerDir, sample } = sc;
     const distance = indexTip.distanceTo(thumbTip);
-    const geometricPinch = distance < (this.pinching.has(side) ? 0.028 : 0.018);
-    const pressed = source.gamepad?.buttons[0]?.pressed ?? this.selecting.get(source) ?? geometricPinch;
-    if (pressed) this.pinching.add(side);
-    else this.pinching.delete(side);
+    const wasPinching = this.pinching.has(side);
+    const runtimeSelect = source.gamepad?.buttons[0]?.pressed ?? this.selecting.get(source);
+    let pressed: boolean;
+    if (runtimeSelect !== undefined) {
+      pressed = runtimeSelect;
+    } else {
+      // Spatial hysteresis (18mm enter / 28mm exit) plus a 45ms temporal guard in the ambiguous
+      // 28–36mm boundary zone so camera noise on Quest cannot drop or double-tap mid-pinch.
+      const nowMs = typeof performance !== 'undefined' ? performance.now() : 0;
+      const elapsed = nowMs - this.lastPinchEdgeMs[side];
+      if (!wasPinching) {
+        pressed = distance < 0.018;
+      } else {
+        pressed = distance < 0.028 || (this.armed.has(side) && distance < 0.036 && elapsed < 45);
+      }
+    }
+    if (pressed !== wasPinching) {
+      this.lastPinchEdgeMs[side] = typeof performance !== 'undefined' ? performance.now() : 0;
+      if (pressed) this.pinching.add(side);
+      else this.pinching.delete(side);
+    }
     // A held pinch at connection/recovery must open before it can acquire anything.
     if (!pressed) this.armed.add(side);
     const indexExtended = indexTip.distanceTo(metacarpal) >= 0.055;

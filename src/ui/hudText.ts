@@ -68,7 +68,7 @@ export function rulesLine(state: MissionState, custom?: MissionScenarioConfig | 
 }
 
 /** How to start, for every operation: the laser and the pinch. The Next Step strip guides the rest. */
-export const CARD_HOW_LINE = 'HOW: point your hand laser at a glowing sector and pinch. Then follow the strip above the globe.';
+export const CARD_HOW_LINE = 'HOW: press START PASS, or aim your laser at a glowing sector and pinch to begin.';
 
 /** When you win and when you lose, in one line. */
 export function winLine(state: MissionState, custom?: MissionScenarioConfig | null): string {

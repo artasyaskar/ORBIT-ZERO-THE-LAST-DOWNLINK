@@ -175,4 +175,16 @@ describe('Native WebXR hand contract', () => {
     h.adapter.reset();
     expect(h.sample('left')?.pressed).toBe(false);
   });
+
+  it('holds an armed geometric pinch through brief 30mm boundary wobble but releases when clearly opened', () => {
+    const h = harness();
+    h.sample('left');
+    const tip = h.sources[0].poses.get('index-finger-tip')!;
+    h.sources[0].poses.set('thumb-tip', tip.clone().add(new Vector3(0.012, 0, 0))); // 12mm enter
+    expect(h.sample('left')?.pressed).toBe(true);
+    h.sources[0].poses.set('thumb-tip', tip.clone().add(new Vector3(0.031, 0, 0))); // 31mm boundary wobble < 45ms
+    expect(h.sample('left')?.pressed).toBe(true);
+    h.sources[0].poses.set('thumb-tip', tip.clone().add(new Vector3(0.05, 0, 0))); // 50mm clearly opened
+    expect(h.sample('left')?.pressed).toBe(false);
+  });
 });

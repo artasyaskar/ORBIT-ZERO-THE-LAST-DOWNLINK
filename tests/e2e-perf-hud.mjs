@@ -15,7 +15,7 @@ try {
   await page.waitForFunction(() => document.querySelector('#oz-xr-entry')?.dataset.phase === 'ready', null, { timeout: 120000 });
   await page.waitForFunction(() => Boolean(document.querySelector('#oz-perf-hud')?.textContent), null, { timeout: 10000 });
   const flat = await page.evaluate(() => document.querySelector('#oz-perf-hud').textContent);
-  check(/FPS \d+ avg \| \d+ 1% low/.test(flat) && /PER EYE \d+ draws/.test(flat) && /HEAP/.test(flat) && /TEX \d+ MB/.test(flat), 'flat page: readout shows fps avg + 1% low, draws/tris, heap, texture memory', flat.replace(/\n/g, ' / '));
+  check(/FPS \d+ avg \| \d+ 1% low/.test(flat) && /PER EYE \d+ draws/.test(flat) && /HEAP/.test(flat) && /TEX \d+ MB/.test(flat) && /XR:/.test(flat) && /AUD:/.test(flat), 'flat page: readout shows fps avg + 1% low, draws/tris, heap, texture memory, XR + audio diagnostics', flat.replace(/\n/g, ' / '));
   await page.click('#oz-xr-enter');
   await page.waitForFunction(() => window.__ORBIT_ZERO__.getRuntimeStatus().immersive, null, { timeout: 30000 });
   await page.waitForTimeout(2500);
@@ -28,7 +28,7 @@ try {
     return { snap: window.__ORBIT_PERF__.snapshot(), panel };
   });
   check(xr.panel?.visible === true, 'headset: head-locked perf panel is shown', JSON.stringify(xr.panel));
-  check(xr.snap.presenting && xr.snap.fpsAvg > 0 && xr.snap.drawsPerEye > 20 && xr.snap.trisPerEye > 10000, 'headset: snapshot reports fps and per-eye draws/tris', JSON.stringify(xr.snap));
+  check(xr.snap.presenting && xr.snap.fpsAvg > 0 && xr.snap.drawsPerEye > 20 && xr.snap.trisPerEye > 10000 && Boolean(xr.snap.diagnostics?.xrRefSpace) && Boolean(xr.snap.diagnostics?.audioState), 'headset: snapshot reports fps, per-eye draws/tris, and XR/audio diagnostics', JSON.stringify(xr.snap));
   if (process.env.ORBIT_PERF_SUMMARY !== '0') {
     const summary = await page.waitForFunction(() => window.__ORBIT_PERF__.summary60(), null, { timeout: 75000, polling: 1000 }).then((h) => h.jsonValue(), () => null);
     check(summary && summary.frames > 100 && summary.fpsAvg > 0 && summary.fpsLow1 > 0, '60 s summary arrives with avg, 1% low and worst frame', JSON.stringify(summary));

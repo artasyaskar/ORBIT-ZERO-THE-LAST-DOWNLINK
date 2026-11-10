@@ -63,8 +63,38 @@ export class OrbitalAudioController {
     this.applyMasterGain(0.02);
   }
 
-  public getState(): { held: boolean; context: AudioContextState | 'none' } {
-    return { held: this.held, context: this.ctx?.state ?? 'none' };
+  public getState(): { held: boolean; volume: number; context: AudioContextState | 'none' } {
+    return { held: this.held, volume: this.volume, context: this.ctx?.state ?? 'none' };
+  }
+
+  /** Synchronously creates and resumes AudioContext inside a browser user-gesture handler. */
+  public unlockFromGesture(): boolean {
+    if (typeof window === 'undefined') return false;
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return false;
+    if (!this.ctx) {
+      try {
+        this.ctx = new AudioCtx();
+        const limiter = this.ctx.createDynamicsCompressor();
+        limiter.threshold.value = -2.5;
+        limiter.knee.value = 4.0;
+        limiter.ratio.value = 16.0;
+        limiter.attack.value = 0.002;
+        limiter.release.value = 0.04;
+        limiter.connect(this.ctx.destination);
+        this.master = this.ctx.createGain();
+        this.master.gain.value = this.held ? 0 : this.volume;
+        this.master.connect(limiter);
+      } catch {
+        return false;
+      }
+    }
+    if (this.ctx.state === 'suspended') {
+      void this.ctx.resume().catch(() => {});
+    }
+    return this.ctx.state === 'running';
   }
 
   private applyMasterGain(rampTime = 0.03): void {

@@ -566,7 +566,34 @@ export class MissionControlSystem extends createSystem({
       }
     });
     this.audio.setVolume(this.profile.preferences.audioLevel);
-    this.cleanupFuncs.push(() => this.audio.dispose());
+    const unlockAudio = () => { this.audio.unlockFromGesture(); };
+    window.addEventListener('pointerdown', unlockAudio, { capture: true, passive: true });
+    window.addEventListener('keydown', unlockAudio, { capture: true, passive: true });
+    this.cleanupFuncs.push(() => {
+      window.removeEventListener('pointerdown', unlockAudio, { capture: true });
+      window.removeEventListener('keydown', unlockAudio, { capture: true });
+      this.audio.dispose();
+    });
+    const perfApi = (window as unknown as {
+      __ORBIT_PERF__?: { setDiagnosticsProvider?: (fn: () => { xrInput: string; xrRefSpace: string; xrFeatures: string; audioState: string }) => void };
+    }).__ORBIT_PERF__;
+    perfApi?.setDiagnosticsProvider?.(() => {
+      const xr = this.world.renderer?.xr as { isPresenting?: boolean; getSession?: () => (XRSession & { enabledFeatures?: Iterable<string> }) | null; getReferenceSpace?: () => XRReferenceSpace | null };
+      const session = xr?.getSession?.() ?? null;
+      const hands = `${this.lastHandConnected.left ? (this.lastHandPressed.left ? 'L*' : 'L') : '-'}${this.lastHandConnected.right ? (this.lastHandPressed.right ? 'R*' : 'R') : '-'}`;
+      const mode = xr?.isPresenting ? (this.isLiveXRHandActive() ? `hands(${hands})` : 'ctrl') : 'flat';
+      const refObj = xr?.getReferenceSpace?.() as (XRReferenceSpace & { boundsGeometry?: unknown }) | null;
+      const refSpace = !refObj ? 'none' : refObj.boundsGeometry ? 'bounded' : 'local-floor';
+      const visState = (session as (XRSession & { visibilityState?: string }) | null)?.visibilityState;
+      const feats = session?.enabledFeatures ? Array.from(session.enabledFeatures).slice(0, 3).join(',') : (session ? 'n/a' : 'none');
+      const audio = this.audio.getState();
+      return {
+        xrInput: visState ? `${mode}(${visState})` : mode,
+        xrRefSpace: refSpace,
+        xrFeatures: feats || 'none',
+        audioState: `${audio.context}${audio.held ? '(held)' : ''}`,
+      };
+    });
 
     // Phase 5: Initialize In-Engine VR Hand & Seated Ergonomic Simulator
     this.vrHandSimulator = new VRHandSimulator();
@@ -3765,12 +3792,14 @@ export class MissionControlSystem extends createSystem({
 
     // Forward Mission HUD (headset-first)
     bindClick(this.missionHud, 'Btn_StartPass', () => {
+      this.audio.unlockFromGesture();
       this.xrCardOpen = false;
       this.playCue('SELECT_SECTOR');
       this.voiceCommander?.speakDirect('Pass armed. Choose your first target.', '[ARIA-7] Pass armed. Point at a sector and pinch to select it.', 'HIGH');
       this.syncAll();
     });
     bindClick(this.missionHud, 'Btn_StartTraining', () => {
+      this.audio.unlockFromGesture();
       this.xrCardOpen = false;
       this.launchScenario('ORBITAL_ACADEMY');
     });
@@ -4159,6 +4188,9 @@ export class MissionControlSystem extends createSystem({
   }
 
   private handleSelectSector(sectorId: SectorId): void {
+    if (this.xrCardOpen && !this.tutorial.isActive()) {
+      this.xrCardOpen = false;
+    }
     this.desktopControls?.onSectorSelected(sectorId);
     this.applyAction({ type: 'SELECT_SECTOR', sectorId });
     this.playCue('SELECT_SECTOR');

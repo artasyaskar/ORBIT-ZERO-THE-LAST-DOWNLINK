@@ -37,6 +37,13 @@ interface XRSessionRates {
   updateTargetFrameRate?: (rate: number) => Promise<void>;
 }
 
+export interface PerfDiagnostics {
+  xrInput: string;
+  xrRefSpace: string;
+  xrFeatures: string;
+  audioState: string;
+}
+
 export interface PerfSnapshot {
   fpsAvg: number;
   fpsLow1: number;
@@ -51,6 +58,7 @@ export interface PerfSnapshot {
   textureMb: number;
   textures: number;
   framebufferScale: number;
+  diagnostics?: PerfDiagnostics;
 }
 
 export class PerfMonitorSystem extends createSystem({}) {
@@ -72,6 +80,7 @@ export class PerfMonitorSystem extends createSystem({}) {
   private xrCanvas: HTMLCanvasElement | null = null;
   private xrTexture: CanvasTexture | null = null;
   private lastSnapshot: PerfSnapshot | null = null;
+  private diagnosticsProvider: (() => PerfDiagnostics) | null = null;
   private readonly seenTextures = new Set<Texture>();
   private cleanups: Array<() => void> = [];
   /** Counts of the last main-scene render. Systems update before it, and other passes reset renderer.info. */
@@ -120,6 +129,15 @@ export class PerfMonitorSystem extends createSystem({}) {
         framebufferScale: () => this.framebufferScale,
         toggle: (force?: boolean) => this.toggleHud(force),
         enabled: () => this.hudEnabled,
+        setDiagnosticsProvider: (fn: () => PerfDiagnostics) => {
+          this.diagnosticsProvider = fn;
+          const now = performance.now();
+          this.lastSnapshot = this.takeSnapshot(now);
+          if (this.hudEnabled) {
+            this.lastReadoutAt = now;
+            this.renderReadout(this.lastSnapshot);
+          }
+        },
       };
     }
     if (this.hudEnabled) this.ensureDomReadout();
@@ -235,6 +253,7 @@ export class PerfMonitorSystem extends createSystem({}) {
       textureMb: this.textureMb,
       textures: r.info.memory.textures,
       framebufferScale: this.framebufferScale,
+      diagnostics: this.diagnosticsProvider ? this.diagnosticsProvider() : undefined,
     };
   }
 
@@ -267,6 +286,12 @@ export class PerfMonitorSystem extends createSystem({}) {
       this.summary60
         ? `60s: ${this.summary60.fpsAvg.toFixed(1)} avg | ${this.summary60.fpsLow1.toFixed(1)} 1% low | ${this.summary60.frameMsMax.toFixed(0)} ms worst`
         : `60s summary in ${Math.max(0, Math.ceil(SUMMARY_WINDOW_SEC - (performance.now() - this.summaryStartAt) / 1000))} s`,
+      ...(s.diagnostics
+        ? [
+          `XR: ${s.diagnostics.xrInput} | ref: ${s.diagnostics.xrRefSpace}`,
+          `FEAT: ${s.diagnostics.xrFeatures} | AUD: ${s.diagnostics.audioState}`,
+        ]
+        : []),
     ];
     if (this.domReadout) this.domReadout.textContent = lines.join('\n');
     if (s.presenting) this.drawXrPanel(lines);
@@ -277,11 +302,11 @@ export class PerfMonitorSystem extends createSystem({}) {
     if (!this.xrPanel) {
       const canvas = document.createElement('canvas');
       canvas.width = 512;
-      canvas.height = 200;
+      canvas.height = 256;
       const texture = new CanvasTexture(canvas);
       texture.colorSpace = SRGBColorSpace;
       const material = new MeshBasicMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false });
-      const panel = new Mesh(new PlaneGeometry(0.2, 0.078), material);
+      const panel = new Mesh(new PlaneGeometry(0.22, 0.11), material);
       panel.name = 'PerfHudPanel';
       panel.renderOrder = 10000;
       panel.raycast = () => {};
@@ -294,15 +319,15 @@ export class PerfMonitorSystem extends createSystem({}) {
     this.xrPanel.visible = true;
     const ctx = this.xrCanvas!.getContext('2d');
     if (!ctx) return;
-    ctx.clearRect(0, 0, 512, 200);
+    ctx.clearRect(0, 0, 512, 256);
     ctx.fillStyle = 'rgba(2,6,23,0.85)';
-    ctx.fillRect(0, 0, 512, 200);
+    ctx.fillRect(0, 0, 512, 256);
     ctx.strokeStyle = '#38bdf8';
     ctx.lineWidth = 3;
-    ctx.strokeRect(2, 2, 508, 196);
+    ctx.strokeRect(2, 2, 508, 252);
     ctx.fillStyle = '#e2e8f0';
-    ctx.font = 'bold 22px monospace';
-    lines.forEach((line, i) => ctx.fillText(line.slice(0, 40), 12, 34 + i * 36));
+    ctx.font = 'bold 20px monospace';
+    lines.forEach((line, i) => ctx.fillText(line.slice(0, 44), 12, 32 + i * 34));
     this.xrTexture!.needsUpdate = true;
   }
 }

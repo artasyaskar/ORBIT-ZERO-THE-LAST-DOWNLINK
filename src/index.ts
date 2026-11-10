@@ -73,10 +73,11 @@ export async function initOrbitZeroGame(
     grabSystem.config.useHandPinchForGrab.value = true;
   }
 
-  world.registerSystem(MissionControlSystem);
   // Frame-time monitor + adaptive quality (refresh-rate fallback, lower resolution after a slow session).
+  // Register before MissionControlSystem so window.__ORBIT_PERF__.setDiagnosticsProvider is available in init().
   // `?perf=1` adds the readout and the 60 s summary.
   world.registerSystem(PerfMonitorSystem);
+  world.registerSystem(MissionControlSystem);
 
   if (overlay) {
     // requestSession() needs a live user gesture. World.create() above loads every critical asset first,
