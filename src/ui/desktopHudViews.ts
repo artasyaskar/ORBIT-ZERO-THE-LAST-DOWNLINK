@@ -105,6 +105,7 @@ export function missionCardHtml(state: MissionState, custom?: MissionScenarioCon
     ${sensorRows}
     <div style="font-size:12px;color:#cbd5e1;line-height:1.5;margin-top:10px;background:rgba(15,23,42,.7);border-left:3px solid #38bdf8;padding:8px 10px;border-radius:0 6px 6px 0;">
       <b>HOW TO PLAY:</b> 1) Click a sector on the globe. 2) Pick a sensor and SCAN. 3) Compress big cubes if they won't fit. 4) Load the Downlink Bay, most valuable first. 5) TRANSMIT before the window closes.<br>
+      <span style="color:#94a3b8;">Keys: Click globe to aim · [1-3] Sensor · [Space] Scan · [P] Compress · [Q] Load · [T] Transmit · [R] Retry</span><br>
       Battery ${budget.initialPower} Wh | Memory ${budget.maxStorage} blocks | Transmit window ${budget.downlinkDurationSec.toFixed(1)}s | ${clock}
     </div>
     <div style="font-size:12px;color:#fde68a;margin-top:8px;font-weight:700;">${escapeHtml(rulesText(state, custom))}</div>

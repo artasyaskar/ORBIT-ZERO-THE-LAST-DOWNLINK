@@ -13,6 +13,7 @@ import { GrabSystem, World } from '@iwsdk/core';
 import projectOptions from 'virtual:iwsdk-project';
 import type { MissionScenarioId } from './mission/types';
 import { MissionControlSystem } from './systems/missionControlSystem';
+import { unlockOrbitalAudioGesture } from './systems/orbitalAudio';
 import { PerfMonitorSystem } from './systems/perfMonitor';
 import { LandingController } from './landing/landingController';
 import { defaultCampaignCard } from './landing/landingUI';
@@ -24,6 +25,7 @@ export interface OrbitZeroLaunchConfig {
   launchXR?: boolean;
   initialScenarioId?: MissionScenarioId;
   startTutorial?: boolean;
+  onProgress?: (stage: string) => void;
 }
 
 /**
@@ -56,8 +58,10 @@ export async function initOrbitZeroGame(
   // while World.create() downloads and builds the 3D cockpit and UIKitML panels.
   const overlay = config.launchXR ? getXrEntryOverlay() : null;
   if (overlay) {
-    overlay.showLoading();
+    unlockOrbitalAudioGesture();
+    overlay.showLoading('Loading 3D cockpit & orbital globe...');
   }
+  config.onProgress?.('Loading 3D cockpit & orbital globe...');
 
   let world: World;
   try {
@@ -66,6 +70,10 @@ export async function initOrbitZeroGame(
     if (overlay) overlay.showLoadFailed(err);
     throw err;
   }
+
+  const stageText = 'Loading mission console & hand tracking...';
+  if (overlay) overlay.setLoadingStage(stageText);
+  config.onProgress?.(stageText);
 
   // Ensure hands-first pinch grabbing signal is enabled on IWSDK GrabSystem
   const grabSystem = world.getSystem(GrabSystem);
@@ -99,13 +107,14 @@ export async function initOrbitZeroGame(
  */
 function startHeadsetLobby(scenarioId: MissionScenarioId | null, tutorial: boolean): void {
   const overlay = getXrEntryOverlay();
-  overlay.showLoading();
+  overlay.showLoading('Loading 3D cockpit & orbital globe...');
   const support = detectImmersiveVr(navigator.xr, window.isSecureContext);
   const card = defaultCampaignCard();
   initOrbitZeroGame({
     launchXR: false,
     initialScenarioId: scenarioId ?? card.scenarioId,
     startTutorial: scenarioId ? tutorial : card.startTutorial,
+    onProgress: (stage) => overlay.setLoadingStage(stage),
   })
     .then(async (world) => {
       overlay.attach(world, { promptOnReturn: true });

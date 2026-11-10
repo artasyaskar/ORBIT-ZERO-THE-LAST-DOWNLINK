@@ -36,6 +36,34 @@ export type OrbitalSoundCue =
   | 'HOVER_TICK'
   | 'COMBO_STREAK';
 
+let sharedPreUnlockedCtx: AudioContext | null = null;
+
+/** Synchronously creates/resumes a shared Web Audio context inside a user tap/click before World.create finishes. */
+export function unlockOrbitalAudioGesture(): boolean {
+  if (typeof window === 'undefined') return false;
+  const AudioCtx =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioCtx) return false;
+  if (!sharedPreUnlockedCtx || sharedPreUnlockedCtx.state === 'closed') {
+    try {
+      sharedPreUnlockedCtx = new AudioCtx();
+    } catch {
+      return false;
+    }
+  }
+  if (sharedPreUnlockedCtx.state === 'suspended') {
+    void sharedPreUnlockedCtx.resume().catch(() => {});
+  }
+  return sharedPreUnlockedCtx.state === 'running';
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('orbit:audio-unlock', () => {
+    unlockOrbitalAudioGesture();
+  });
+}
+
 export class OrbitalAudioController {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
@@ -67,16 +95,21 @@ export class OrbitalAudioController {
     return { held: this.held, volume: this.volume, context: this.ctx?.state ?? 'none' };
   }
 
-  /** Synchronously creates and resumes AudioContext inside a browser user-gesture handler. */
-  public unlockFromGesture(): boolean {
-    if (typeof window === 'undefined') return false;
-    const AudioCtx =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioCtx) return false;
-    if (!this.ctx) {
+  private initAudioGraph(): AudioContext | null {
+    if (typeof window === 'undefined') return null;
+    if (!this.ctx || this.ctx.state === 'closed') {
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return null;
       try {
-        this.ctx = new AudioCtx();
+        const ctx =
+          sharedPreUnlockedCtx && sharedPreUnlockedCtx.state !== 'closed'
+            ? sharedPreUnlockedCtx
+            : new AudioCtx();
+        sharedPreUnlockedCtx = ctx;
+        this.ctx = ctx;
+        // Master Dynamics Compressor / Safety Brickwall Limiter prevents digital clipping (0 dBFS)
         const limiter = this.ctx.createDynamicsCompressor();
         limiter.threshold.value = -2.5;
         limiter.knee.value = 4.0;
@@ -84,17 +117,24 @@ export class OrbitalAudioController {
         limiter.attack.value = 0.002;
         limiter.release.value = 0.04;
         limiter.connect(this.ctx.destination);
+
         this.master = this.ctx.createGain();
         this.master.gain.value = this.held ? 0 : this.volume;
         this.master.connect(limiter);
       } catch {
-        return false;
+        return null;
       }
     }
     if (this.ctx.state === 'suspended') {
       void this.ctx.resume().catch(() => {});
     }
-    return this.ctx.state === 'running';
+    return this.ctx;
+  }
+
+  /** Synchronously creates and resumes AudioContext inside a browser user-gesture handler. */
+  public unlockFromGesture(): boolean {
+    const ctx = this.initAudioGraph();
+    return Boolean(ctx && ctx.state === 'running');
   }
 
   private applyMasterGain(rampTime = 0.03): void {
@@ -108,6 +148,9 @@ export class OrbitalAudioController {
   }
 
   public dispose(): void {
+    if (this.ctx && this.ctx === sharedPreUnlockedCtx) {
+      sharedPreUnlockedCtx = null;
+    }
     void this.ctx?.close().catch(() => {});
     this.ctx = null;
     this.master = null;
@@ -115,34 +158,7 @@ export class OrbitalAudioController {
 
   private ensureContext(): AudioContext | null {
     if (typeof window === 'undefined' || this.held) return null;
-    const AudioCtx =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext?: typeof AudioContext })
-        .webkitAudioContext;
-    if (!AudioCtx) return null;
-    if (!this.ctx) {
-      try {
-        this.ctx = new AudioCtx();
-        // Master Dynamics Compressor / Safety Brickwall Limiter prevents digital clipping (0 dBFS)
-        const limiter = this.ctx.createDynamicsCompressor();
-        limiter.threshold.value = -2.5;
-        limiter.knee.value = 4.0;
-        limiter.ratio.value = 16.0;
-        limiter.attack.value = 0.002;
-        limiter.release.value = 0.040;
-        limiter.connect(this.ctx.destination);
-
-        this.master = this.ctx.createGain();
-        this.master.gain.value = this.volume;
-        this.master.connect(limiter);
-      } catch {
-        return null;
-      }
-    }
-    if (this.ctx.state === 'suspended') {
-      void this.ctx.resume().catch(() => {});
-    }
-    return this.ctx;
+    return this.initAudioGraph();
   }
 
   public playCue(cue: OrbitalSoundCue): void {

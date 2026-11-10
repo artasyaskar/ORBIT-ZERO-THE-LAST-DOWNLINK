@@ -310,7 +310,7 @@ describe('Desktop Controls & First-Time Player Experience', () => {
     manager.dispose();
   });
 
-  it('separates optical atmospheric profile from SAR microwave backscatter in recon HUD', () => {
+  it('separates optical atmospheric profile from SAR microwave backscatter in recon HUD without spoiling unscanned outcomes', () => {
     const { engine, manager } = createTestHarness();
     engine.selectSector('B');
     manager.updateHud();
@@ -320,19 +320,26 @@ describe('Desktop Controls & First-Time Player Experience', () => {
     expect(reconHtml).toContain('📡 SEC-B');
     expect(reconHtml).toContain('+ EXPAND [V]');
 
-    // Press 'V' to expand full telemetry
+    // Press 'V' to expand telemetry BEFORE scanning: shows physics & costs without spoiling CONFIRMED/finding
     manager.toggleHud();
     reconHtml = (manager as any).reconEl?.innerHTML || '';
 
-    // Must contain Optical domain
     expect(reconHtml).toContain('ATMOSPHERIC PROFILE (VIS/NIR OPTICAL');
     expect(reconHtml).toContain('Sky over the sector');
     expect(reconHtml).toContain('Optical result');
-    // Must contain Radar domain, read from this operation's sector data (Indus pass, Sector B: flooded road)
+    expect(reconHtml).toContain('PENDING SCAN');
     expect(reconHtml).toContain('MICROWAVE BACKSCATTER (ACTIVE SAR');
     expect(reconHtml).toContain('Radar result');
+    expect(reconHtml).not.toContain(' (% sure, simulated)');
+    expect(reconHtml).not.toContain('dark specular flood sheet');
+    expect(reconHtml).not.toContain('95% CONVECTIVE STORM');
+
+    // After scanning Sector B with RADAR, the unlocked SAR backscatter finding & simulated confidence appear
+    engine.scanSector('B', 'RADAR');
+    manager.updateHud();
+    reconHtml = (manager as any).reconEl?.innerHTML || '';
+    expect(reconHtml).toContain('CONFIRMED');
     expect(reconHtml).toContain('dark specular flood sheet');
-    // No fixed figures that every operation used to show
     expect(reconHtml).not.toContain('95% CONVECTIVE STORM');
 
     manager.dispose();

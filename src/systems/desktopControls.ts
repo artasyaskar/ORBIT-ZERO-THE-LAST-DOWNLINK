@@ -1198,8 +1198,8 @@ export class DesktopControlsManager {
   public restartMission(): void {
     this.host.restartMission();
     this.tutorialStep = 'INTRO';
-    this.briefingModalOpen = true;
-    this.notifyAction('Mission Pass Restarted');
+    this.briefingModalOpen = false;
+    this.notifyAction('Pass restarted — ready to scan.');
     this.updateHud();
   }
 
@@ -2255,16 +2255,35 @@ export class DesktopControlsManager {
     this.reconEl.style.maxHeight = 'calc(100vh - 180px)';
     this.reconEl.style.overflowY = 'auto';
 
-    // Optical atmospheric profile
-    // Every number and sentence here comes from this operation's sector data (no fixed flood physics).
+    // Optical & SAR physics forecast + measured outcome ONLY after scanning that sector (no answer spoiler).
+    // Every number and sentence here comes from this operation's active scenario and live packets.
+    const activeScenario = this.host.engine.getActiveScenario();
+    const opticalPacket = state.packets.find((p) => p.sectorId === sector.id && p.sensorMode === 'OPTICAL');
+    const radarPacket = state.packets.find((p) => p.sectorId === sector.id && p.sensorMode === 'RADAR');
     const opticalOutcome = sector.outcomes.OPTICAL;
     const radarOutcome = sector.outcomes.RADAR;
     const opticalAlbedo = isStorm ? describeWeather(sector.cloudCover) : 'Clear atmosphere';
-    const opticalTau = ` (% sure, simulated)`;
-    const opticalTrans = opticalOutcome.finding;
+    const opticalStatusText = opticalPacket
+      ? `${opticalPacket.confidence} (${opticalOutcome.observationConfidencePct ?? 0}% sure, simulated)`
+      : `PENDING SCAN (${getScanCost(activeScenario.budget, 'OPTICAL').powerCost} Wh)`;
+    const opticalStatusColor = opticalPacket
+      ? (opticalPacket.confidence === 'CONFIRMED' ? '#10b981' : opticalPacket.confidence === 'PROBABLE' ? '#f59e0b' : '#ef4444')
+      : '#94a3b8';
+    const opticalDetailText = opticalPacket
+      ? opticalOutcome.finding
+      : (isStorm
+        ? 'Optical wavelengths scatter through cloud, smoke, or storm plumes.'
+        : 'Clear atmospheric path — Optical captures daylight features cleanly.');
 
-    // Active microwave SAR profile
-    const radarPhenomenology = radarOutcome.finding;
+    const radarStatusText = radarPacket
+      ? `${radarPacket.confidence} (${radarOutcome.observationConfidencePct ?? 0}% sure, simulated)`
+      : `PENDING SCAN (${getScanCost(activeScenario.budget, 'RADAR').powerCost} Wh)`;
+    const radarStatusColor = radarPacket
+      ? (radarPacket.confidence === 'CONFIRMED' ? '#10b981' : radarPacket.confidence === 'PROBABLE' ? '#f59e0b' : '#ef4444')
+      : '#94a3b8';
+    const radarDetailText = radarPacket
+      ? radarOutcome.finding
+      : 'Active C-band SAR (5.4 GHz) penetrates weather/smoke; higher battery draw.';
 
     this.reconEl.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(56, 189, 248, 0.25); padding-bottom: 4px; margin-bottom: 6px;">
@@ -2294,10 +2313,10 @@ export class DesktopControlsManager {
         </div>
         <div style="display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 2px;">
           <span style="color: #94a3b8;">Optical result:</span>
-          <b style="color: ${opticalOutcome.confidence === 'CONFIRMED' ? '#10b981' : opticalOutcome.confidence === 'PROBABLE' ? '#f59e0b' : '#ef4444'};">${opticalTau}</b>
+          <b style="color: ${opticalStatusColor};">${opticalStatusText}</b>
         </div>
-        <div style="font-size: 10px; color: ${isStorm ? '#ef4444' : '#cbd5e1'}; font-style: italic;">
-          ${opticalTrans}
+        <div style="font-size: 10px; color: ${opticalPacket && isStorm ? '#ef4444' : '#cbd5e1'}; font-style: italic;">
+          ${opticalDetailText}
         </div>
       </div>
 
@@ -2308,10 +2327,10 @@ export class DesktopControlsManager {
         </div>
         <div style="display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 2px;">
           <span style="color: #94a3b8;">Radar result:</span>
-          <b style="color: ${radarOutcome.confidence === 'CONFIRMED' ? '#10b981' : radarOutcome.confidence === 'PROBABLE' ? '#f59e0b' : '#ef4444'};">${radarOutcome.confidence} (${radarOutcome.observationConfidencePct ?? 0}% sure, simulated)</b>
+          <b style="color: ${radarStatusColor};">${radarStatusText}</b>
         </div>
         <div style="font-size: 10px; color: #cbd5e1; margin-top: 2px;">
-          <span style="color: #94a3b8;">Surface Response:</span> ${radarPhenomenology}
+          <span style="color: #94a3b8;">${radarPacket ? 'Surface Response:' : 'Sensor Physics:'}</span> ${radarDetailText}
         </div>
       </div>
 

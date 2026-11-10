@@ -265,8 +265,15 @@ export class XrEntryOverlay {
     return this.phase;
   }
 
-  showLoading(): void {
-    this.render('loading', { status: XR_ENTRY_TEXT.loading, button: XR_ENTRY_TEXT.loadingButton, enabled: false, progress: true });
+  showLoading(status: string = XR_ENTRY_TEXT.loading): void {
+    this.render('loading', { status, button: XR_ENTRY_TEXT.loadingButton, enabled: false, progress: true });
+  }
+
+  /** Updates the loading progress message without resetting other button/overlay visibility. */
+  setLoadingStage(status: string): void {
+    if (this.phase !== 'loading') return;
+    this.statusEl.textContent = status;
+    this.statusEl.hidden = !status;
   }
 
   showReady(status: string = XR_ENTRY_TEXT.ready): void {
@@ -301,6 +308,9 @@ export class XrEntryOverlay {
     if (options !== undefined) this.launchOptions = options;
     const world = this.world;
     if (!world) return;
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('orbit:audio-unlock'));
+    }
     this.render('starting', { status: XR_ENTRY_TEXT.starting, button: XR_ENTRY_TEXT.startingButton, enabled: false, progress: true });
     this.slowTimer = window.setTimeout(() => {
       if (this.phase === 'starting') this.statusEl.textContent = XR_ENTRY_TEXT.slow;
