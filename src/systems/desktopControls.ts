@@ -1796,6 +1796,15 @@ export class DesktopControlsManager {
         break;
       case 'campaign': this.toggleCampaignModal(); return;
       case 'close-campaign': this.campaignModalOpen = false; break;
+      case 'enter-vr':
+        this.host.handleControlAction?.('ENTER_XR');
+        return;
+      case 'landing-menu': {
+        const nextUrl = new URL(window.location.href);
+        nextUrl.search = '?landing';
+        window.location.href = nextUrl.toString();
+        return;
+      }
       case 'launch':
         this.campaignModalOpen = false;
         this.briefingModalOpen = true;

@@ -5,7 +5,8 @@
   "description": "ORBIT ZERO: THE LAST DOWNLINK — Seated hands-first WebXR spatial strategy & emergency-intelligence triage puzzle game built with Meta Immersive Web SDK (IWSDK 1.0.1)",
   "type": "module",
   "scripts": {
-    "dev": "iwsdk dev restart --open --foreground",
+    "dev": "node scripts/dev-server.mjs",
+    "dev:iwsdk": "iwsdk dev restart --timeout 180000 --open --foreground",
     "dev:runtime": "vite",
     "dev:down": "iwsdk dev down",
     "dev:status": "iwsdk dev status",

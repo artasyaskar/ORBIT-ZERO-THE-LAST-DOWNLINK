@@ -52,7 +52,20 @@ export async function initOrbitZeroGame(
   // Ensure container is clean and visible
   container.style.display = 'block';
 
-  const world = await World.create(container, projectOptions);
+  // When ENTER VR is clicked on the Landing Page, show the XR loading overlay immediately
+  // while World.create() downloads and builds the 3D cockpit and UIKitML panels.
+  const overlay = config.launchXR ? getXrEntryOverlay() : null;
+  if (overlay) {
+    overlay.showLoading();
+  }
+
+  let world: World;
+  try {
+    world = await World.create(container, projectOptions);
+  } catch (err) {
+    if (overlay) overlay.showLoadFailed(err);
+    throw err;
+  }
 
   // Ensure hands-first pinch grabbing signal is enabled on IWSDK GrabSystem
   const grabSystem = world.getSystem(GrabSystem);
@@ -65,11 +78,10 @@ export async function initOrbitZeroGame(
   // `?perf=1` adds the readout and the 60 s summary.
   world.registerSystem(PerfMonitorSystem);
 
-  if (config.launchXR) {
+  if (overlay) {
     // requestSession() needs a live user gesture. World.create() above loads every critical asset first,
     // which can outlast Chromium's ~5 s activation window on a cold Quest cache. Ask only while the gesture
     // is live; otherwise (or if the request fails) the overlay offers a fresh tap with a plain message.
-    const overlay = getXrEntryOverlay();
     overlay.attach(world, { promptOnReturn: true });
     const activation = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation;
     const gestureLive = activation ? activation.isActive : true;
@@ -147,7 +159,13 @@ function bootstrap(): void {
   }
 
   // Headset browsers (or ?headset) skip the cinematic landing; ?landing shows it anyway.
-  const headsetVisit = !forceLanding && Boolean(urlParams?.has('headset') || isStandaloneHeadsetBrowser(navigator.userAgent));
+  // Note: @iwsdk/vite-plugin-dev injects window.IWER_DEVICE in local dev, which spoofs navigator.userAgent
+  // to OculusBrowser/Quest 3 on a desktop PC. Do not treat desktop IWER dev injection as a physical headset
+  // unless ?headset is explicitly requested, so the Landing Page (Hero -> VR or Desktop selector) opens first.
+  const isDevInjectedIwer = typeof window !== 'undefined' && Boolean((window as any).IWER_DEVICE);
+  const headsetVisit =
+    !forceLanding &&
+    Boolean(urlParams?.has('headset') || (!isDevInjectedIwer && isStandaloneHeadsetBrowser(navigator.userAgent)));
   if (headsetVisit) {
     startHeadsetLobby(urlScenario, urlTutorial);
     return;

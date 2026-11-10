@@ -92,7 +92,10 @@ export function missionCardHtml(state: MissionState, custom?: MissionScenarioCon
   return `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
       <span style="font-size:11px;color:#38bdf8;font-weight:800;letter-spacing:1px;">${escapeHtml(scenario.operationCode ?? 'OPERATION')} // MISSION CARD [SIMULATED]</span>
-      <button data-action="campaign" style="background:none;border:none;color:#94a3b8;font-size:11px;cursor:pointer;text-decoration:underline;pointer-events:auto;">Change operation [C]</button>
+      <div style="display:flex;gap:12px;align-items:center;">
+        <button data-action="landing-menu" style="background:none;border:none;color:#94a3b8;font-size:11px;cursor:pointer;text-decoration:underline;pointer-events:auto;">← Landing page</button>
+        <button data-action="campaign" style="background:none;border:none;color:#94a3b8;font-size:11px;cursor:pointer;text-decoration:underline;pointer-events:auto;">Change operation [C]</button>
+      </div>
     </div>
     <div style="font-size:21px;font-weight:800;color:#f8fafc;margin-bottom:4px;">${escapeHtml(scenario.name)}</div>
     <div style="font-size:13px;color:#cbd5e1;line-height:1.5;margin-bottom:10px;">${escapeHtml(scenario.storyLine ?? scenario.briefing)}</div>
@@ -107,6 +110,7 @@ export function missionCardHtml(state: MissionState, custom?: MissionScenarioCon
     <div style="font-size:12px;color:#fde68a;margin-top:8px;font-weight:700;">${escapeHtml(rulesText(state, custom))}</div>
     ${best}
     <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px;">
+      ${btn('enter-vr', 'ENTER VR', '#38bdf8', { id: 'btn-mission-enter-vr' })}
       ${btn('academy', 'TRAINING FIRST (90s)', '#a78bfa')}
       ${btn('start-pass', 'START PASS [Enter]', '#34d399', { active: true, id: 'btn-commence-pass' })}
     </div>`;

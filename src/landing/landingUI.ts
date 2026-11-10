@@ -155,13 +155,18 @@ export class LandingUI {
     this.container = container;
     this.events = events;
 
-    this.checkWebXRSupport();
     this.buildDOM();
     this.refreshCardsFromConfig();
     this.attachListeners();
+    void this.checkWebXRSupport();
   }
 
   private async checkWebXRSupport(): Promise<void> {
+    if (typeof window !== 'undefined' && ((window as any).IWER_DEVICE || (window as any).__ORBIT_IWER__)) {
+      this.isWebXRSupported = true;
+      this.updateVRCardState();
+      return;
+    }
     if (typeof navigator !== 'undefined' && 'xr' in navigator && (navigator as any).xr?.isSessionSupported) {
       try {
         this.isWebXRSupported = await (navigator as any).xr.isSessionSupported('immersive-vr');
@@ -351,6 +356,9 @@ export class LandingUI {
                 <button id="btn-advisory-play-desktop" class="oz-btn-primary oz-btn-small">
                   PLAY ON DESKTOP INSTEAD
                 </button>
+                <button id="btn-advisory-try-vr" class="oz-btn-ghost oz-btn-small">
+                  OPEN VR LOBBY ANYWAY
+                </button>
                 <button id="btn-advisory-close" class="oz-btn-ghost oz-btn-small">
                   CLOSE
                 </button>
@@ -397,6 +405,7 @@ export class LandingUI {
   }
 
   private updateVRCardState(): void {
+    if (!this.rootEl) return;
     const vrBadge = this.rootEl.querySelector('#vr-status-badge');
     if (!vrBadge) return;
 
@@ -530,6 +539,10 @@ export class LandingUI {
     this.rootEl.querySelector('#btn-advisory-play-desktop')?.addEventListener('click', () => {
       this.hideVRAdvisory();
       this.events.onPlayDesktop(this.getSelectedLaunch(false));
+    });
+    this.rootEl.querySelector('#btn-advisory-try-vr')?.addEventListener('click', () => {
+      this.hideVRAdvisory();
+      this.events.onEnterVR(this.getSelectedLaunch(true));
     });
     this.rootEl.querySelector('#btn-advisory-close')?.addEventListener('click', () => {
       this.hideVRAdvisory();
