@@ -101,3 +101,55 @@ export function requestStatusChip(status: 'VERIFIED' | 'PARTIAL' | 'UNVERIFIED')
   if (status === 'PARTIAL') return { label: 'PARTIAL', color: '#f59e0b' };
   return { label: 'MISSED', color: '#ef4444' };
 }
+
+/** Deterministic compact code generated strictly from real end-of-pass telemetry (zero server dependency). */
+export function formatRunCode(
+  state: {
+    scenarioId: string;
+    debrief: {
+      totalScore: number;
+      efficiencyGrade: string;
+    } | null;
+  },
+  custom?: { operationCode?: string } | null,
+  dailyDate?: string | null,
+): string {
+  const d = state.debrief;
+  const tag = dailyDate
+    ? `DAILY-${dailyDate.replace(/-/g, '')}`
+    : (custom?.operationCode ?? state.scenarioId)
+        .replace(/[^A-Za-z0-9]+/g, '')
+        .slice(0, 8)
+        .toUpperCase();
+  const scorePart = d ? `${d.totalScore}${d.efficiencyGrade}` : 'PASS';
+  return `OZ-${tag}-${scorePart}`;
+}
+
+/** Shareable monospace/plain-text run card reflecting only verified DebriefReport metrics. */
+export function formatShareCard(
+  state: {
+    scenarioId: string;
+    debrief: {
+      totalScore: number;
+      achievableScore: number;
+      efficiencyGrade: string;
+      transmittedPacketIds: string[];
+      droppedPacketIds: string[];
+      downlinkUsedSec: number;
+      downlinkWindowSec: number;
+      powerRemaining: number;
+      evaluations: ReadonlyArray<{ status: 'VERIFIED' | 'PARTIAL' | 'UNVERIFIED' }>;
+    } | null;
+  },
+  dailyStreak: number,
+  custom?: { operationCode?: string; name?: string } | null,
+  dailyDate?: string | null,
+): string {
+  const d = state.debrief;
+  if (!d) return 'ORBIT ZERO — Pass in progress';
+  const code = formatRunCode(state, custom, dailyDate);
+  const marks = d.evaluations.map((e) => (e.status === 'VERIFIED' ? '[OK]' : e.status === 'PARTIAL' ? '[~]' : '[X]')).join(' ');
+  const label = dailyDate ? `DAILY ${dailyDate}` : (custom?.name ?? state.scenarioId);
+  const streakPart = dailyDate || dailyStreak > 0 ? ` | Streak ${dailyStreak}d` : '';
+  return `ORBIT ZERO | ${label} | ${d.totalScore}/${d.achievableScore} (Grade ${d.efficiencyGrade}) | ${marks} | ${d.downlinkUsedSec.toFixed(1)}/${d.downlinkWindowSec.toFixed(1)}s | ${d.powerRemaining} Wh left${streakPart} | ${code}`;
+}

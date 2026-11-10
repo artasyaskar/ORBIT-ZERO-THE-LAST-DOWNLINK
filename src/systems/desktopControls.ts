@@ -12,7 +12,7 @@
  * 6. Zero XR Conflict: Automatically hides when presenting in an immersive WebXR headset session.
  */
 
-import { bottleneckCauseTag, OUTCOME_LABELS, retryGuidanceFor, escapeHtml, clipText, requestStatusChip, type DebriefOutcome } from '../ui/debriefText';
+import { bottleneckCauseTag, formatRunCode, formatShareCard, OUTCOME_LABELS, retryGuidanceFor, escapeHtml, clipText, requestStatusChip, type DebriefOutcome } from '../ui/debriefText';
 import {
   Camera,
   Object3D,
@@ -1811,6 +1811,14 @@ export class DesktopControlsManager {
         this.host.launchScenario?.(arg);
         this.host.playCue?.('CRISIS_ALERT');
         break;
+      case 'daily-pass':
+        this.campaignModalOpen = false;
+        this.briefingModalOpen = true;
+        this.host.handleControlAction?.('DAILY_PASS');
+        break;
+      case 'skin':
+        (window as any).__ORBIT_ZERO__?.setCockpitSkin?.(arg);
+        break;
       case 'sensor':
         this.host.setSensor?.(arg as SensorMode);
         this.notifyAction(`${SENSOR_PLAIN_GUIDE[arg as SensorMode].label}: ${SENSOR_PLAIN_GUIDE[arg as SensorMode].sees}. ${SENSOR_PLAIN_GUIDE[arg as SensorMode].blind}.`, true);
@@ -2028,7 +2036,7 @@ export class DesktopControlsManager {
     }
     this.campaignModalEl.style.display = 'block';
     const profile = (window as any).__ORBIT_ZERO__?.getProfile?.();
-    this.campaignModalEl.innerHTML = campaignHtml(state, profile?.mastery ?? {});
+    this.campaignModalEl.innerHTML = campaignHtml(state, profile?.mastery ?? {}, profile);
   }
 
   private renderBriefingModal(state: MissionState): void {
@@ -2105,9 +2113,22 @@ export class DesktopControlsManager {
         <div id="debrief-failure-diagnostic" style="text-align: left; background: rgba(15, 23, 42, 0.7); border-left: 3px solid ${outcomeColor}; border-radius: 0 6px 6px 0; padding: 7px 10px; margin: 6px 0 4px; font-size: 12px; color: #e2e8f0;">
           <span style="color: #94a3b8; font-weight: 800;">${debrief.outcome === 'SUCCESS' ? 'NEXT STEP' : 'TRY THIS'}</span> ${tip}
         </div>
-        <div style="display: flex; justify-content: center; gap: 10px; margin-top: 8px;">
+        ${(() => {
+          const orbitApi = (window as any).__ORBIT_ZERO__;
+          const dailyDate = orbitApi?.getDailyDate?.() ?? null;
+          const profile = orbitApi?.getProfile?.();
+          const runCode = formatRunCode(state, custom, dailyDate);
+          const shareCard = formatShareCard(state, profile?.daily?.streak ?? 0, custom, dailyDate);
+          (this as any)._lastShareCard = shareCard;
+          return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin:6px 0 2px;font-size:11px;color:#94a3b8;">
+            <span>RUN CODE: <code id="debrief-run-code" style="color:#38bdf8;font-weight:800;">${escapeHtml(runCode)}</code>${profile?.daily?.streak ? ` · DAILY STREAK <b style="color:#fbbf24;">${profile.daily.streak}d</b>` : ''}</span>
+            <button id="btn-aar-copy" style="${this.btnStyle('#94a3b8')};padding:4px 10px;font-size:11px;">COPY RESULT</button>
+          </div>`;
+        })()}
+        <div style="display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin-top: 8px;">
           <button id="btn-aar-restart" style="${this.btnStyle('#38bdf8')}">${isAcademyPass ? 'REPLAY TRAINING [R]' : 'RETRY PASS [R]'}</button>
           <button id="btn-aar-next" style="${this.btnStyle('#34d399', true)}">${isAcademyPass ? 'START OP 01 [N]' : 'NEXT OPERATION [N]'}</button>
+          <button id="btn-aar-daily" style="${this.btnStyle('#fbbf24')}">DAILY PASS</button>
           <button id="btn-aar-campaign" style="${this.btnStyle('#a855f7')}">CAMPAIGN [C]</button>
         </div>
       `;
@@ -2116,6 +2137,18 @@ export class DesktopControlsManager {
         this.host.nextMission();
         this.briefingModalOpen = true;
         this.updateHud();
+      });
+      this.bannerEl.querySelector('#btn-aar-daily')?.addEventListener('click', () => {
+        this.briefingModalOpen = true;
+        this.host.handleControlAction?.('DAILY_PASS');
+        this.updateHud();
+      });
+      this.bannerEl.querySelector('#btn-aar-copy')?.addEventListener('click', (e) => {
+        const text = (this as any)._lastShareCard as string;
+        try { void navigator.clipboard?.writeText?.(text); } catch {}
+        const targetBtn = e.currentTarget as HTMLButtonElement | null;
+        if (targetBtn) targetBtn.textContent = 'COPIED!';
+        this.notifyAction(`Copied result card (${text.split(' | ').pop() ?? ''})`, true);
       });
       this.bannerEl.querySelector('#btn-aar-campaign')?.addEventListener('click', () => {
         this.campaignModalOpen = true;

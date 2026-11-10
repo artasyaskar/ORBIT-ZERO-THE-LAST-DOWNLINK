@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { generateProceduralCrisis, hashSeed } from '../src/mission/proceduralCrisis';
+import { MissionEngine } from '../src/mission/missionEngine';
+import { buildDailyPassCrisis, deriveSeasonalEarthContext, generateProceduralCrisis, hashSeed } from '../src/mission/proceduralCrisis';
 
 describe('Procedural Crisis & Replay Engine', () => {
   it('produces identical crisis scenarios for the same seed (determinism)', () => {
@@ -37,6 +38,21 @@ describe('Procedural Crisis & Replay Engine', () => {
     const h3 = hashSeed('QUEST_3_HORIZON');
     expect(h1).toBe(h2);
     expect(h1).not.toBe(h3);
+  });
+
+  it('builds deterministic daily challenges with seasonal Earth context and mathematically solvable S-Rank paths', () => {
+    const a = buildDailyPassCrisis('2026-11-11');
+    const b = buildDailyPassCrisis('2026-11-11');
+    expect(a.seed).toBe(b.seed);
+    expect(a.config.operationCode).toBe('DAILY // 2026-11-11');
+    expect(a.config.subtitle).toContain('Late Autumn Inversion (Nov)');
+    expect(deriveSeasonalEarthContext('2026-07-15', 'CYCLONIC_SUPERCELL').seasonLabel).toBe('Peak Monsoon Surge (Jul)');
+
+    const engine = new MissionEngine();
+    engine.startProceduralCrisis('DAILY-2026-11-11');
+    const active = engine.getActiveScenario();
+    expect(active.budget.initialPower).toBeGreaterThanOrEqual(a.optimalPowerCost);
+    expect(active.budget.downlinkDurationSec).toBeGreaterThanOrEqual(a.optimalDownlinkSec);
   });
 });
 

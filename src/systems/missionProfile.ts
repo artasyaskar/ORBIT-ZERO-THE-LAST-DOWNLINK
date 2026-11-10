@@ -1,6 +1,70 @@
+import { CAMPAIGN_OPERATIONS, getScenarioThresholds } from '../mission/missionConfig';
 import type { DebriefReport, EfficiencyGrade, MissionScenarioId } from '../mission/types';
 
 export type GuidanceMode = 'GUIDED' | 'STANDARD' | 'EXPERT';
+export type CockpitSkinId = 'ORBITAL_CYAN' | 'SOLAR_AMBER' | 'EMERALD_RECON' | 'INFRARED_CRIMSON';
+
+export interface CockpitSkinSpec {
+  id: CockpitSkinId;
+  label: string;
+  shortLabel: string;
+  primaryHex: number;
+  secondaryHex: number;
+  unlockStars: number;
+  unlockStreak: number;
+  unlockHint: string;
+}
+
+export const COCKPIT_SKIN_ORDER: ReadonlyArray<CockpitSkinId> = [
+  'ORBITAL_CYAN',
+  'SOLAR_AMBER',
+  'EMERALD_RECON',
+  'INFRARED_CRIMSON',
+];
+
+export const COCKPIT_SKINS: Readonly<Record<CockpitSkinId, CockpitSkinSpec>> = {
+  ORBITAL_CYAN: {
+    id: 'ORBITAL_CYAN',
+    label: 'Orbital Cyan (Default)',
+    shortLabel: 'CYAN',
+    primaryHex: 0x38bdf8,
+    secondaryHex: 0xf59e0b,
+    unlockStars: 0,
+    unlockStreak: 0,
+    unlockHint: 'Starter telemetry trim',
+  },
+  SOLAR_AMBER: {
+    id: 'SOLAR_AMBER',
+    label: 'Solar Amber',
+    shortLabel: 'AMBER',
+    primaryHex: 0xf59e0b,
+    secondaryHex: 0xfde68a,
+    unlockStars: 1,
+    unlockStreak: 1,
+    unlockHint: 'Earn 1 star or 1 Daily pass',
+  },
+  EMERALD_RECON: {
+    id: 'EMERALD_RECON',
+    label: 'Emerald Recon',
+    shortLabel: 'EMERALD',
+    primaryHex: 0x10b981,
+    secondaryHex: 0x6ee7b7,
+    unlockStars: 3,
+    unlockStreak: 2,
+    unlockHint: 'Earn 3 stars or 2-day Daily streak',
+  },
+  INFRARED_CRIMSON: {
+    id: 'INFRARED_CRIMSON',
+    label: 'Infrared Crimson',
+    shortLabel: 'CRIMSON',
+    primaryHex: 0xef4444,
+    secondaryHex: 0xfb923c,
+    unlockStars: 6,
+    unlockStreak: 3,
+    unlockHint: 'Earn 6 stars or 3-day Daily streak',
+  },
+};
+
 export interface MissionPreferences {
   guidance: GuidanceMode;
   dominantHand: 'LEFT' | 'RIGHT';
@@ -15,6 +79,7 @@ export interface MissionPreferences {
   relaxedClock: boolean;
   audioLevel: number;
   seatOffset: [number, number, number];
+  cockpitSkin: CockpitSkinId;
 }
 export interface MissionMastery {
   attempts: number;
@@ -30,6 +95,7 @@ export interface MissionProfile {
   mastery: Partial<Record<MissionScenarioId, MissionMastery>>;
   tutorialComplete: boolean;
   daily: { lastCompletedDate: string | null; streak: number; bestScore: number };
+  bestStreak: number;
 }
 
 const PROFILE_KEY = 'orbit-zero-profile-v1';
@@ -41,9 +107,11 @@ export function createMissionProfile(): MissionProfile {
       gazeAssist: false, tabletopMode: false,
       largeText: false, highContrast: false, reducedMotion: false, captions: true, relaxedClock: false, audioLevel: 0.65,
       seatOffset: [0, 0, 0],
+      cockpitSkin: 'ORBITAL_CYAN',
     },
     mastery: {}, tutorialComplete: false,
     daily: { lastCompletedDate: null, streak: 0, bestScore: 0 },
+    bestStreak: 0,
   };
 }
 
@@ -68,6 +136,7 @@ export function loadMissionProfile(): MissionProfile {
         Math.max(-0.8, Math.min(0.8, input.seatOffset[2])),
       ];
     }
+    if (COCKPIT_SKIN_ORDER.includes(input.cockpitSkin)) profile.preferences.cockpitSkin = input.cockpitSkin;
     for (const id of [
       'ORBITAL_ACADEMY',
       'STANDARD_INDUS_PASS',
@@ -89,6 +158,14 @@ export function loadMissionProfile(): MissionProfile {
     if (value.daily && Number.isFinite(value.daily.streak) && Number.isFinite(value.daily.bestScore) &&
       (value.daily.lastCompletedDate === null || /^\d{4}-\d{2}-\d{2}$/.test(value.daily.lastCompletedDate))) {
       profile.daily = { ...value.daily };
+    }
+    if (typeof value.bestStreak === 'number' && Number.isFinite(value.bestStreak)) {
+      profile.bestStreak = Math.max(value.bestStreak, profile.daily.streak);
+    } else {
+      profile.bestStreak = profile.daily.streak;
+    }
+    if (!isCockpitSkinUnlocked(profile, profile.preferences.cockpitSkin)) {
+      profile.preferences.cockpitSkin = 'ORBITAL_CYAN';
     }
   } catch { /* Storage can be disabled in private or embedded browsers. */ }
   return profile;
@@ -160,9 +237,46 @@ export function getDailyPass(date: string): MissionScenarioId {
 export function recordDailyPass(profile: MissionProfile, date: string, score: number): void {
   if (profile.daily.lastCompletedDate === date) {
     profile.daily.bestScore = Math.max(profile.daily.bestScore, score);
+    profile.bestStreak = Math.max(profile.bestStreak ?? 0, profile.daily.streak);
     return;
   }
   const elapsedDays = profile.daily.lastCompletedDate
     ? (Date.parse(date) - Date.parse(profile.daily.lastCompletedDate)) / 86400000 : 0;
-  profile.daily = { lastCompletedDate: date, streak: elapsedDays === 1 ? profile.daily.streak + 1 : 1, bestScore: score };
+  const nextStreak = elapsedDays === 1 ? profile.daily.streak + 1 : 1;
+  profile.daily = { lastCompletedDate: date, streak: nextStreak, bestScore: score };
+  profile.bestStreak = Math.max(profile.bestStreak ?? 0, nextStreak);
+}
+
+/** Total stars earned across campaign operations + challenge scenarios. */
+export function totalStarsEarned(profile: MissionProfile): number {
+  const ops: MissionScenarioId[] = [
+    ...CAMPAIGN_OPERATIONS,
+    'MONSOON_SUPERCELL_PASS',
+    'SOLAR_BROWNOUT_PASS',
+  ];
+  let sum = 0;
+  for (const id of ops) {
+    sum += starsFor(profile.mastery[id], getScenarioThresholds(id).successScore);
+  }
+  return sum;
+}
+
+export function isCockpitSkinUnlocked(profile: MissionProfile, skinId: CockpitSkinId): boolean {
+  const spec = COCKPIT_SKINS[skinId];
+  if (!spec) return false;
+  if (spec.unlockStars === 0 && spec.unlockStreak === 0) return true;
+  const bestStreak = Math.max(profile.bestStreak ?? 0, profile.daily.streak);
+  return totalStarsEarned(profile) >= spec.unlockStars || bestStreak >= spec.unlockStreak;
+}
+
+export function unlockedCockpitSkins(profile: MissionProfile): CockpitSkinId[] {
+  return COCKPIT_SKIN_ORDER.filter((id) => isCockpitSkinUnlocked(profile, id));
+}
+
+export function cycleUnlockedCockpitSkin(profile: MissionProfile): CockpitSkinId {
+  const unlocked = unlockedCockpitSkins(profile);
+  const idx = unlocked.indexOf(profile.preferences.cockpitSkin);
+  const next = unlocked[(idx + 1) % unlocked.length] ?? 'ORBITAL_CYAN';
+  profile.preferences.cockpitSkin = next;
+  return next;
 }

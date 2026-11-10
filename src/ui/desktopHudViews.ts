@@ -22,7 +22,18 @@ import {
 import { coveredRequestIds, formatClock, isPassStalled, type NextStep } from '../mission/guidance';
 import type { MissionScenarioConfig, MissionScenarioId, MissionState, SensorMode } from '../mission/types';
 import { escapeHtml } from './debriefText';
-import { starsFor, starString, type MissionMastery } from '../systems/missionProfile';
+import {
+  COCKPIT_SKINS,
+  COCKPIT_SKIN_ORDER,
+  isCockpitSkinUnlocked,
+  starsFor,
+  starString,
+  totalStarsEarned,
+  type CockpitSkinId,
+  type MissionMastery,
+  type MissionProfile,
+} from '../systems/missionProfile';
+import { buildDailyPassCrisis } from '../mission/proceduralCrisis';
 
 const SENSOR_COLOR: Record<SensorMode, string> = { OPTICAL: '#38bdf8', THERMAL: '#fb923c', RADAR: '#facc15' };
 const TONE_COLOR: Record<NextStep['tone'], string> = { info: '#38bdf8', warn: '#f59e0b', critical: '#f87171', success: '#34d399' };
@@ -217,7 +228,11 @@ export function actionBarHtml(state: MissionState, custom?: MissionScenarioConfi
     </div>`;
 }
 
-export function campaignHtml(state: MissionState, mastery: Partial<Record<MissionScenarioId, MasteryView>>): string {
+export function campaignHtml(
+  state: MissionState,
+  mastery: Partial<Record<MissionScenarioId, MasteryView>>,
+  profile?: MissionProfile | null,
+): string {
   const card = (id: MissionScenarioId, accent: string) => {
     const s = MISSION_SCENARIOS[id];
     const m = mastery[id];
@@ -237,14 +252,43 @@ export function campaignHtml(state: MissionState, mastery: Partial<Record<Missio
     </div>`;
   };
   const accents = ['#f59e0b', '#38bdf8', '#34d399'];
+  const todayUtc = new Date().toISOString().slice(0, 10);
+  const dailyCrisis = buildDailyPassCrisis(todayUtc);
+  const streak = profile?.daily?.streak ?? 0;
+  const bestStreak = Math.max(profile?.bestStreak ?? 0, streak);
+  const starsTotal = profile ? totalStarsEarned(profile) : 0;
+  const activeSkin: CockpitSkinId = profile?.preferences?.cockpitSkin ?? 'ORBITAL_CYAN';
+  const skinButtons = COCKPIT_SKIN_ORDER.map((skinId) => {
+    const spec = COCKPIT_SKINS[skinId];
+    const unlocked = !profile || isCockpitSkinUnlocked(profile, skinId);
+    const hexCss = `#${spec.primaryHex.toString(16).padStart(6, '0')}`;
+    const isActive = activeSkin === skinId;
+    return `<button data-action="skin:${skinId}" ${unlocked ? '' : 'disabled'} title="${escapeHtml(spec.unlockHint)}" style="
+      font:800 11px/1.2 Inter,system-ui,sans-serif; padding:5px 10px; border-radius:6px; pointer-events:auto;
+      cursor:${unlocked ? 'pointer' : 'not-allowed'}; opacity:${unlocked ? 1 : 0.45};
+      color:${isActive ? '#0b1220' : '#e2e8f0'}; background:${isActive ? hexCss : 'rgba(15,23,42,.85)'};
+      border:1.5px solid ${hexCss};">${escapeHtml(spec.shortLabel)}${unlocked ? '' : ` (LOCK: ${spec.unlockHint})`}</button>`;
+  }).join(' ');
   return `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-      <div style="font-size:11px;color:#00f0ff;font-weight:800;letter-spacing:2px;">CAMPAIGN [SIMULATED SCENARIOS]</div>
+      <div style="font-size:11px;color:#00f0ff;font-weight:800;letter-spacing:2px;">CAMPAIGN [SIMULATED SCENARIOS] · ${starsTotal}★</div>
       <button data-action="close-campaign" id="btn-close-campaign" style="background:none;border:none;color:#94a3b8;font-size:16px;cursor:pointer;pointer-events:auto;">✕</button>
     </div>
-    <div style="font-size:13px;color:#cbd5e1;margin-bottom:14px;">Each operation teaches one new idea. Beat your best score to earn Grade S.</div>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px;">
+    <div style="font-size:13px;color:#cbd5e1;margin-bottom:12px;">Each operation teaches one new idea. Beat your best score to earn Grade S and unlock console skins.</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px;">
       ${CAMPAIGN_OPERATIONS.map((id, i) => card(id, accents[i % accents.length])).join('')}
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;background:rgba(15,23,42,.9);border:1.5px solid #f59e0b;border-radius:10px;padding:10px 14px;margin-bottom:10px;">
+      <div>
+        <div style="font-size:10px;color:#fbbf24;font-weight:800;letter-spacing:1px;">DAILY SEEDED CHALLENGE · ${todayUtc} · STREAK ${streak}d (BEST ${bestStreak}d)</div>
+        <div style="font-size:13px;font-weight:800;color:#f8fafc;">${escapeHtml(dailyCrisis.config.name)} — ${escapeHtml(dailyCrisis.config.subtitle)}</div>
+        <div style="font-size:11px;color:#94a3b8;">${escapeHtml(dailyCrisis.config.storyLine ?? dailyCrisis.config.briefing)}</div>
+      </div>
+      ${btn('daily-pass', 'LAUNCH DAILY PASS', '#fbbf24', { active: true, id: 'btn-launch-daily' })}
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;background:rgba(15,23,42,.65);border:1px solid rgba(148,163,184,.22);border-radius:8px;padding:8px 12px;margin-bottom:12px;">
+      <span style="font-size:11px;font-weight:800;color:#94a3b8;letter-spacing:.6px;">COCKPIT SKIN</span>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">${skinButtons}</div>
     </div>
     <div style="display:flex;justify-content:space-between;gap:10px;">
       ${btn('academy', 'OP 00: ORBITAL ACADEMY (TRAINING, NO CLOCK)', '#a78bfa', { id: 'camp-card-academy' })}

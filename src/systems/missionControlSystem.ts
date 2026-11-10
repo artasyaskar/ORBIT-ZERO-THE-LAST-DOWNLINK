@@ -77,6 +77,8 @@ import { GLOBE_CARD_SCALE, IMMERSIVE_PANEL_POSES, MISSION_HUD_POSES, SEATED_EYE,
 import { SectorWeatherLayer } from './sectorWeatherFx';
 import { paintSensorView } from '../ui/sensorViewPainter';
 import { missionCardModel, resultModel, trackerText } from '../ui/hudText';
+import { formatRunCode } from '../ui/debriefText';
+import { buildDailyPassCrisis } from '../mission/proceduralCrisis';
 import { getXrEntryOverlay, isXrEntryOverlayShowing } from '../ui/xrEntryOverlay';
 import { SCORING } from '../mission/missionConfig';
 import { fmtRate, rateOf, rawStorageUnits } from '../mission/budgetText';
@@ -95,8 +97,9 @@ import { OrbitalAudioController, type OrbitalSoundCue } from './orbitalAudio';
 import { VoiceCommander, type VoiceDialogueId } from './voiceCommander';
 import { AgenticCoPilot, type AgenticIntervention } from './agenticCoPilot';
 import {
-  getDailyPass, loadMissionProfile, recordDailyPass, recordMissionMastery, saveMissionProfile, starsFor, starString,
-  type MissionPreferences,
+  COCKPIT_SKINS, cycleUnlockedCockpitSkin, isCockpitSkinUnlocked, loadMissionProfile,
+  recordDailyPass, recordMissionMastery, saveMissionProfile, starsFor, starString,
+  type CockpitSkinId, type MissionPreferences,
 } from './missionProfile';
 import type { ActionResult, MissionAction, MissionSolution } from '../mission/types';
 
@@ -903,6 +906,15 @@ export class MissionControlSystem extends createSystem({
         getMissionBenchmark: () => getMissionBenchmark(this.engine.getState().scenarioId, this.engine.getActiveCustomScenario()),
         getReachablePlan: () => this.getSolution(this.engine.getState()),
         getProfile: () => structuredClone(this.profile),
+        getDailyDate: () => this.dailyDate,
+        setCockpitSkin: (skinId: CockpitSkinId) => {
+          if (isCockpitSkinUnlocked(this.profile, skinId)) {
+            this.profile.preferences.cockpitSkin = skinId;
+            saveMissionProfile(this.profile);
+            this.applyAccessibility();
+            this.syncAll();
+          }
+        },
         togglePreference: (key: keyof MissionPreferences) => this.cyclePreference(key),
         getGazeState: () => ({ sectorId: this.gazeSectorId, dwellProgress: Math.min(1, this.gazeDwellSec / 1.35), gazeAssist: this.profile.preferences.gazeAssist }),
         setCameraPreset: (preset: 'HERO' | 'GLOBE' | 'CUBES' | 'CRADLE' | 'DOWNLINK' | 'DEBRIEF') => this.setCameraPreset(preset),
@@ -3806,7 +3818,7 @@ export class MissionControlSystem extends createSystem({
       this.settingsOpen = !this.settingsOpen;
       this.telemetryPanel?.getElementById('AccessibilitySettings')?.setProperties({ display: this.settingsOpen ? 'flex' : 'none' });
     });
-    const preferenceIds = { guidance: 'Guidance', dominantHand: 'DominantHand', oneHanded: 'OneHanded', gazeAssist: 'GazeAssist', largeText: 'LargeText', highContrast: 'HighContrast', reducedMotion: 'ReducedMotion', captions: 'Captions', audioLevel: 'AudioLevel', relaxedClock: 'RelaxedClock' } as const;
+    const preferenceIds = { guidance: 'Guidance', dominantHand: 'DominantHand', oneHanded: 'OneHanded', gazeAssist: 'GazeAssist', largeText: 'LargeText', highContrast: 'HighContrast', reducedMotion: 'ReducedMotion', captions: 'Captions', audioLevel: 'AudioLevel', relaxedClock: 'RelaxedClock', cockpitSkin: 'CockpitSkin' } as const;
     for (const key of Object.keys(preferenceIds) as (keyof typeof preferenceIds)[]) {
       bindClick(this.telemetryPanel, `Btn_${preferenceIds[key]}`, () => this.cyclePreference(key));
     }
@@ -3956,6 +3968,7 @@ export class MissionControlSystem extends createSystem({
       const result = resultModel(state, custom);
       if (!result) return;
       const color = result.tone === 'success' ? '#34d399' : result.tone === 'warn' ? '#f59e0b' : '#f87171';
+      this.setText(hud, 'ResultKicker', `AFTER-ACTION REVIEW [SIMULATED] | ${formatRunCode(state, custom, this.dailyDate)}`);
       this.setText(hud, 'ResultTitle', result.title);
       this.setTextColor(hud, 'ResultTitle', color);
       this.setText(hud, 'ResultScore', result.score);
@@ -4790,6 +4803,8 @@ export class MissionControlSystem extends createSystem({
       preferences.guidance = modes[(modes.indexOf(preferences.guidance) + 1) % modes.length];
     } else if (key === 'dominantHand') {
       preferences.dominantHand = preferences.dominantHand === 'LEFT' ? 'RIGHT' : 'LEFT';
+    } else if (key === 'cockpitSkin') {
+      cycleUnlockedCockpitSkin(this.profile);
     } else if (key === 'audioLevel') preferences.audioLevel = preferences.audioLevel > 0.7 ? 0 : preferences.audioLevel === 0 ? 0.4 : preferences.audioLevel < 0.5 ? 0.65 : 1;
     else if (key !== 'seatOffset') preferences[key] = !preferences[key];
     this.audio.setVolume(preferences.audioLevel);
@@ -4797,6 +4812,22 @@ export class MissionControlSystem extends createSystem({
     saveMissionProfile(this.profile);
     this.applyAccessibility();
     this.syncAll();
+  }
+
+  private applyCockpitSkin(skinId: CockpitSkinId): void {
+    const spec = COCKPIT_SKINS[skinId] ?? COCKPIT_SKINS.ORBITAL_CYAN;
+    const consoleObj = this.sceneObject('orbital-console');
+    if (!consoleObj) return;
+    const primaryParts = ['HoloRingOuterCyan', 'HoloRingInnerCyan', 'GimbalAzimuthRing', 'LeftTrayLedStrip', 'TacticalRadarSweepBlade'];
+    const secondaryParts = ['HoloRingMidAmber', 'LeftWingWarmAccentBar', 'RightWingWarmAccentBar'];
+    for (const name of primaryParts) {
+      const mesh = this.childByName(consoleObj, name);
+      if (mesh) this.setObjectTint(mesh, spec.primaryHex, 1.1);
+    }
+    for (const name of secondaryParts) {
+      const mesh = this.childByName(consoleObj, name);
+      if (mesh) this.setObjectTint(mesh, spec.secondaryHex, 0.95);
+    }
   }
 
   private applyAccessibility(): void {
@@ -4815,6 +4846,7 @@ export class MissionControlSystem extends createSystem({
         }
       });
     }
+    this.applyCockpitSkin(preferences.cockpitSkin);
     const scanner = this.sceneObject('scanner-tool');
     // The console has one scanner holster, on the left. x = +0.44 is the discard chute: a scanner parked
     // there turned every scanner pinch into DISCARD of the selected cube.
@@ -4925,10 +4957,14 @@ export class MissionControlSystem extends createSystem({
 
   private startDailyPass(): void {
     if (this.engine.getState().phase === 'DOWNLINK') return;
+    if (this.tutorial.isActive()) this.tutorial.skip();
     this.forceReleaseAllGrabs();
     this.dailyDate = new Date().toISOString().slice(0, 10);
-    this.engine.setScenario(getDailyPass(this.dailyDate));
+    const daily = buildDailyPassCrisis(this.dailyDate);
+    this.engine.startProceduralCrisis(`DAILY-${this.dailyDate}`);
+    this.xrCardOpen = true;
     this.handleRestartMission();
+    void daily;
   }
 
   private cycleReplay(): void {
@@ -4968,6 +5004,7 @@ export class MissionControlSystem extends createSystem({
       Lbl_RelaxedClock: `PASS CLOCK: ${p.relaxedClock ? 'OFF (RELAXED)' : 'ON'}`,
       Lbl_AudioLevel: `AUDIO: ${Math.round(p.audioLevel * 100)}%`,
       Lbl_GazeAssist: `HEAD POINT ASSIST: ${p.gazeAssist ? 'ON' : 'OFF'}`,
+      Lbl_CockpitSkin: `TRIM SKIN: ${(COCKPIT_SKINS[p.cockpitSkin] ?? COCKPIT_SKINS.ORBITAL_CYAN).shortLabel}`,
     };
     for (const [id, text] of Object.entries(labels)) this.setText(this.telemetryPanel, id, text);
     this.setText(this.telemetryPanel, 'AudioCaption', p.captions ? clipText(this.caption || 'GROUND CONTROL: one pass, three requests, one final downlink.', 96) : '');

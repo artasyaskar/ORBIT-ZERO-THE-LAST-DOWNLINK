@@ -35,6 +35,51 @@ export type CrisisThreatCategory =
   | 'GEOMAGNETIC_BROWNOUT'
   | 'RAPID_INUNDATION_SURGE';
 
+export interface SeasonalEarthContext {
+  seasonLabel: string;
+  regionLabel: string;
+  atmosphericNote: string;
+}
+
+const MONTHLY_EARTH_CONTEXT: ReadonlyArray<Readonly<{ seasonLabel: string; atmosphericNote: string }>> = [
+  { seasonLabel: 'Winter Orographic (Jan)', atmosphericNote: 'Clear northern valleys with patchy high-altitude cloud streaks.' },
+  { seasonLabel: 'Late Winter Shear (Feb)', atmosphericNote: 'Fast upper-level winds shifting mid-basin fog and ridge cloud.' },
+  { seasonLabel: 'Pre-Monsoon Dry (Mar)', atmosphericNote: 'Dust haze along low corridors; thermal contrast elevated.' },
+  { seasonLabel: 'Spring Melt Surge (Apr)', atmosphericNote: 'Snowmelt runoff peaks; thick valley haze over bridge crossings.' },
+  { seasonLabel: 'Heat Dome Transition (May)', atmosphericNote: 'Thermal shimmer and early convective towers over foothills.' },
+  { seasonLabel: 'Monsoon Onset (Jun)', atmosphericNote: 'Warm moist inflow builds thick convective anvil clouds over lowlands.' },
+  { seasonLabel: 'Peak Monsoon Surge (Jul)', atmosphericNote: 'Sustained cloud decks obscure passive optics across river bends.' },
+  { seasonLabel: 'Heavy Monsoon Flood (Aug)', atmosphericNote: 'Multi-layer storm cells; SAR penetration required on wet corridors.' },
+  { seasonLabel: 'Post-Monsoon Trough (Sep)', atmosphericNote: 'Mixed sunny breaks between residual floodwall cloud bands.' },
+  { seasonLabel: 'Retreating Monsoon (Oct)', atmosphericNote: 'Sharp contrast between sunlit ridges and lingering basin mist.' },
+  { seasonLabel: 'Late Autumn Inversion (Nov)', atmosphericNote: 'Cool valley fog traps smoke plumes near infrastructure spurs.' },
+  { seasonLabel: 'Early Winter Front (Dec)', atmosphericNote: 'Crisp orbital visibility with isolated western ridge overcast.' },
+];
+
+/** Deterministic bundled offline seasonal Earth observation framing (no network or live API required). */
+export function deriveSeasonalEarthContext(dateStr: string, category: CrisisThreatCategory): SeasonalEarthContext {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr.trim());
+  const monthIdx = match ? Math.max(0, Math.min(11, Number(match[2]) - 1)) : 10;
+  const entry = MONTHLY_EARTH_CONTEXT[monthIdx];
+  const regionLabel =
+    category === 'CYCLONIC_SUPERCELL'
+      ? 'Delta Coast & Spur'
+      : category === 'GEOMAGNETIC_BROWNOUT'
+        ? 'High-Latitude Relay Corridor'
+        : category === 'RAPID_INUNDATION_SURGE'
+          ? 'Piedmont Levee Basin'
+          : 'Upper Indus Floodplain';
+  return {
+    seasonLabel: entry.seasonLabel,
+    regionLabel,
+    atmosphericNote: entry.atmosphericNote,
+  };
+}
+
+export function dailyPassSeed(date: string): string {
+  return `DAILY-${date}`;
+}
+
 export interface ThreatVector {
   category: CrisisThreatCategory;
   name: string;
@@ -259,27 +304,41 @@ export function generateProceduralCrisis(seedInput: string | number = Date.now()
     F: { cloudCover: 'CLEAR' },
   };
 
+  // Guarantee exact S-rank solvability: optimal scan cost + 2 compressions (12 Wh) fits within 58 Wh cap
+  const minOptimalPower =
+    12 +
+    (bCloud === 'DENSE_STORM' ? 14 : 8) +
+    (cCloud === 'DENSE_STORM' ? 14 : 8) +
+    (eCloud === 'DENSE_STORM' ? 14 : 8);
+  const safePower = Math.max(pwrBudget, minOptimalPower);
+  const optimalPowerCost = minOptimalPower;
+  const optimalDownlinkSec = 7.6;
+
+  const isDaily = typeof seedInput === 'string' && seedInput.startsWith('DAILY-');
+  const dateTag = isDaily ? seedInput.slice('DAILY-'.length) : '';
+  const seasonal = isDaily ? deriveSeasonalEarthContext(dateTag, preset.category) : null;
+
   const budget: ResourceBudgetConfig = {
     ...MISSION_BUDGET,
-    initialPower: pwrBudget,
+    initialPower: safePower,
     downlinkDurationSec: timeLimit,
   };
 
   const scenarioConfig: MissionScenarioConfig = {
     id: 'STANDARD_INDUS_PASS',
-    name: threat.name,
-    subtitle: `${threat.codeName} | Level ${severity} Emergency`,
-    briefing: `${threat.description} Telemetry budget: ${pwrBudget} Wh Power, 9 MB abstract storage budget, ${timeLimit.toFixed(1)}s Horizon Contact. Triage and downlink verified flood evidence.`,
+    operationCode: isDaily ? `DAILY // ${dateTag}` : `GEN // ${seedNum.toString(16).toUpperCase().slice(0, 6)}`,
+    name: isDaily ? `Daily Pass: ${preset.name}` : threat.name,
+    subtitle: seasonal ? `${seasonal.seasonLabel} · ${seasonal.regionLabel}` : `${threat.codeName} | Level ${severity} Emergency`,
+    storyLine: seasonal
+      ? `${seasonal.atmosphericNote} Clear cloud-covered sectors with Radar; finish within ${timeLimit.toFixed(1)}s link window.`
+      : `${threat.description} Match sensors to sector weather and compress large cubes before link cutoff.`,
+    briefing: seasonal
+      ? `[OFFLINE DAILY SEED ${dateTag}] ${seasonal.seasonLabel} over ${seasonal.regionLabel}. ${seasonal.atmosphericNote} Budget: ${safePower} Wh, 9 blocks, ${timeLimit.toFixed(1)}s link.`
+      : `${threat.description} Telemetry budget: ${safePower} Wh Power, 9 MB abstract storage budget, ${timeLimit.toFixed(1)}s Horizon Contact. Triage and downlink verified flood evidence.`,
+    passDurationSec: 150,
     budget,
     sectorOverrides,
   };
-
-  // Theoretical optimal: Scan 3 sectors (B, C, E), compress 2, queue 3
-  // B: 14 PWR, C: 8 or 14 PWR, E: 14 PWR -> 36-42 PWR.
-  // Process 2: 12 PWR -> total 48-54 PWR <= pwrBudget!
-  // Tx: 1.8 + 4.0 + 1.8 = 7.6s <= timeLimit!
-  const optimalPowerCost = 48;
-  const optimalDownlinkSec = 7.6;
 
   return {
     seed: seedNum,
@@ -289,5 +348,10 @@ export function generateProceduralCrisis(seedInput: string | number = Date.now()
     optimalPowerCost,
     optimalDownlinkSec,
   };
+}
+
+/** Deterministic offline daily crisis generated from a YYYY-MM-DD UTC date string. */
+export function buildDailyPassCrisis(dateStr: string): ProceduralCrisisPass {
+  return generateProceduralCrisis(dailyPassSeed(dateStr));
 }
 

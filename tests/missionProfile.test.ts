@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createMissionProfile,
+  cycleUnlockedCockpitSkin,
   getDailyPass,
+  isCockpitSkinUnlocked,
   loadMissionProfile,
   recordDailyPass,
   recordMissionMastery,
   saveMissionProfile,
+  totalStarsEarned,
 } from '../src/systems/missionProfile';
+import { formatRunCode, formatShareCard } from '../src/ui/debriefText';
 import { MissionEngine } from '../src/mission/missionEngine';
 import { getMissionBenchmark } from '../src/mission/missionPlanner';
 import type { MissionScenarioId } from '../src/mission/types';
@@ -135,5 +139,35 @@ describe('Local mastery, preferences and daily passes', () => {
     const honestMedals = recordMissionMastery(profile, 'STANDARD_INDUS_PASS', report, { actualHandsUsed: 1, hintsRequestedCount: 0 });
     expect(honestMedals).toContain('ONE-HAND MODE');
     expect(honestMedals).toContain('NO-HINT SPECIALIST');
+  });
+
+  it('tracks bestStreak, unlocks cockpit trim skins with stars/streak, and builds deterministic share codes from debriefs', () => {
+    const profile = createMissionProfile();
+    expect(isCockpitSkinUnlocked(profile, 'ORBITAL_CYAN')).toBe(true);
+    expect(isCockpitSkinUnlocked(profile, 'SOLAR_AMBER')).toBe(false);
+    expect(isCockpitSkinUnlocked(profile, 'EMERALD_RECON')).toBe(false);
+    expect(isCockpitSkinUnlocked(profile, 'INFRARED_CRIMSON')).toBe(false);
+
+    recordDailyPass(profile, '2026-11-10', 85);
+    recordDailyPass(profile, '2026-11-11', 92);
+    expect(profile.bestStreak).toBe(2);
+    expect(isCockpitSkinUnlocked(profile, 'SOLAR_AMBER')).toBe(true);
+    expect(isCockpitSkinUnlocked(profile, 'EMERALD_RECON')).toBe(true);
+
+    const cycled = cycleUnlockedCockpitSkin(profile);
+    expect(cycled).toBe('SOLAR_AMBER');
+
+    const report = completedPass('STANDARD_INDUS_PASS');
+    recordMissionMastery(profile, 'STANDARD_INDUS_PASS', report);
+    expect(totalStarsEarned(profile)).toBe(3);
+
+    const engine = new MissionEngine('STANDARD_INDUS_PASS');
+    const code = formatRunCode({ scenarioId: 'STANDARD_INDUS_PASS', debrief: report }, null, '2026-11-11');
+    expect(code).toBe(`OZ-DAILY-20261111-${report.totalScore}${report.efficiencyGrade}`);
+    const share = formatShareCard({ scenarioId: 'STANDARD_INDUS_PASS', debrief: report }, profile.daily.streak, null, '2026-11-11');
+    expect(share).toContain(`DAILY 2026-11-11`);
+    expect(share).toContain(`Streak 2d`);
+    expect(share).toContain(code);
+    void engine;
   });
 });
