@@ -33,7 +33,8 @@ export type OrbitalSoundCue =
   | 'FSK_BURST'
   | 'SOLENOID_LATCH'
   | 'HANDSHAKE_CONFIRM'
-  | 'HOVER_TICK';
+  | 'HOVER_TICK'
+  | 'COMBO_STREAK';
 
 export class OrbitalAudioController {
   private ctx: AudioContext | null = null;
@@ -224,7 +225,38 @@ export class OrbitalAudioController {
       case 'HANDSHAKE_CONFIRM':
         this.playHandshakeConfirm();
         break;
+      case 'COMBO_STREAK':
+        this.playComboStinger(2);
+        break;
     }
+  }
+
+  /**
+   * High-energy ascending synth stinger for consecutive sensor matches, clutch compressions, and hot-docks.
+   * Pitch rises with streak count (1..4) for immediate arcade-tactile feedback.
+   */
+  public playComboStinger(streak = 1): void {
+    if (this.volume <= 0) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    try {
+      const clamped = Math.max(1, Math.min(4, streak));
+      const semitoneBoost = Math.pow(2, ((clamped - 1) * 2) / 12);
+      const baseNotes = [587.33, 739.99, 880.0, 1174.66]; // D5 - F#5 - A5 - D6
+      const count = Math.min(baseNotes.length, clamped + 1);
+      const now = ctx.currentTime;
+      for (let i = 0; i < count; i++) {
+        this.tone(
+          ctx,
+          baseNotes[i] * semitoneBoost,
+          baseNotes[i] * semitoneBoost * 1.02,
+          0.09,
+          i === count - 1 ? 'triangle' : 'sine',
+          0.085 * this.volume,
+          now + i * 0.045,
+        );
+      }
+    } catch {}
   }
 
   /**

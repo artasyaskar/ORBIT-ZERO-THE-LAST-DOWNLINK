@@ -317,6 +317,42 @@ export class MissionControlSystem extends createSystem({
   private static readonly RIGHT_AXIS = new Vector3(1, 0, 0);
   /** Panels farther than this from a hand cannot have a button within its 14 cm touch reach. */
   private static readonly PANEL_TOUCH_SCAN_RADIUS_M = 0.9;
+  private static readonly PANEL_TOUCH_BUTTONS: ReadonlyArray<{ panelId: string; buttonId: string }> = [
+    { panelId: 'briefing-panel', buttonId: 'Btn_StartTutorial' },
+    { panelId: 'briefing-panel', buttonId: 'Btn_SelectCampaign' },
+    { panelId: 'briefing-panel', buttonId: 'Btn_CycleSector' },
+    { panelId: 'briefing-panel', buttonId: 'Btn_ToggleSensor' },
+    { panelId: 'briefing-panel', buttonId: 'Btn_ScanSector' },
+    { panelId: 'briefing-panel', buttonId: 'Btn_CalibrateSeat' },
+    { panelId: 'briefing-panel', buttonId: 'exit-button' },
+    { panelId: 'briefing-panel', buttonId: 'xr-button' },
+    { panelId: 'telemetry-hud', buttonId: 'Btn_Pause' },
+    { panelId: 'telemetry-hud', buttonId: 'Btn_ProcessCube' },
+    { panelId: 'telemetry-hud', buttonId: 'Btn_QueueCube' },
+    { panelId: 'telemetry-hud', buttonId: 'Btn_DiscardCube' },
+    { panelId: 'telemetry-hud', buttonId: 'Btn_CycleCube' },
+    { panelId: 'telemetry-hud', buttonId: 'Btn_Settings' },
+    { panelId: 'telemetry-hud', buttonId: 'Btn_DominantHand' },
+    { panelId: 'debrief-panel', buttonId: 'Btn_CommitDownlink' },
+    { panelId: 'debrief-panel', buttonId: 'Btn_RestartMission' },
+    { panelId: 'debrief-panel', buttonId: 'Btn_NextMission' },
+    { panelId: 'debrief-panel', buttonId: 'Btn_ReorderQueue' },
+    { panelId: 'debrief-panel', buttonId: 'Btn_DailyPass' },
+    { panelId: 'debrief-panel', buttonId: 'Btn_ReplayDecision' },
+    { panelId: 'mission-hud', buttonId: 'Btn_StartPass' },
+    { panelId: 'mission-hud', buttonId: 'Btn_StartTraining' },
+    { panelId: 'mission-hud', buttonId: 'Btn_HudHint' },
+    { panelId: 'mission-hud', buttonId: 'Btn_HudTransmit' },
+    { panelId: 'mission-hud', buttonId: 'Btn_HudRetry' },
+    { panelId: 'mission-hud', buttonId: 'Btn_HudNext' },
+    { panelId: 'telemetry-hud', buttonId: 'Btn_RelaxedClock' },
+  ];
+  private readonly panelInReachScratch = new Map<string, boolean>();
+  private bothPinchHeldSec = 0;
+  private bothPinchTriggered = false;
+  private comboStreak = 0;
+  private comboCalloutText = '';
+  private comboCalloutUntilMs = 0;
   private readonly tempVecB = new Vector3();
   private readonly tempVecC = new Vector3();
   private readonly tempQuatA = new Quaternion();
@@ -1008,6 +1044,8 @@ export class MissionControlSystem extends createSystem({
           const names: string[] = [];
           this.scene.traverse((obj) => {
             if ((obj as any).isMesh || (obj as any).isLine || (obj as any).isPoints) {
+              const mat = (obj as any).material;
+              if (mat && !Array.isArray(mat) && mat.visible === false) return;
               if (obj.visible) {
                 let cur: Object3D | null = obj.parent;
                 let allVisible = true;
@@ -1072,6 +1110,7 @@ export class MissionControlSystem extends createSystem({
           const texs = new Set<any>();
           let transparentMeshes = 0;
           const isVisible = (o: any): boolean => {
+            if (o.material && !Array.isArray(o.material) && o.material.visible === false) return false;
             for (let p = o; p; p = p.parent) if (p.visible === false) return false;
             return true;
           };
@@ -1140,6 +1179,7 @@ export class MissionControlSystem extends createSystem({
         getTopContributors: (limit = 15) => {
           const groups = new Map<string, { calls: number; tris: number }>();
           const isVisible = (o: any): boolean => {
+            if (o.material && !Array.isArray(o.material) && o.material.visible === false) return false;
             for (let p = o; p; p = p.parent) if (p.visible === false) return false;
             return true;
           };
@@ -1330,6 +1370,11 @@ export class MissionControlSystem extends createSystem({
   }
 
   update(delta: number): void {
+    if (this.comboCalloutUntilMs > 0 && performance.now() > this.comboCalloutUntilMs) {
+      this.comboCalloutUntilMs = 0;
+      this.comboCalloutText = '';
+      this.syncMissionHud();
+    }
     if (this.hintArmedUntilMs > 0 && performance.now() > this.hintArmedUntilMs) {
       this.hintArmedUntilMs = 0; // armed hint expired unspent: restore the HUD label
       this.syncMissionHud();
@@ -1344,6 +1389,7 @@ export class MissionControlSystem extends createSystem({
     if (presenting !== this.deskPadsPresenting) {
       this.deskPadsPresenting = presenting;
       this.syncDeskPadsForXR(presenting);
+      this.applyXRPerformanceProfile(presenting);
       this.syncAll(); // headset and flat page show different panels and panel content
     }
     this.updateXRHandInteractions(delta);
@@ -2135,11 +2181,12 @@ export class MissionControlSystem extends createSystem({
               const obj = activeCubeEntity.object3D;
               const basePos = activePkt.queueIndex !== null ? this.cubeStationPosition('QUEUE', activePkt.queueIndex) : null;
               if (basePos) {
-                setWorldPosition(obj, basePos.add(new Vector3(0, reducedMotion ? 0 : 0.018, 0)));
+                basePos.y += reducedMotion ? 0 : 0.018;
+                setWorldPosition(obj, basePos);
                 obj.rotation.y += reducedMotion ? 0 : delta * 3.5;
                 const particles = this.childByName(obj, 'CubeAssemblyParticles');
                 if (particles instanceof Points && particles.material instanceof PointsMaterial) {
-                  particles.visible = !reducedMotion;
+                  particles.visible = !reducedMotion && !presenting;
                   particles.rotation.y += delta * 4.0;
                   particles.material.color.setHex(0xf59e0b);
                   particles.material.opacity = 0.5 + 0.4 * Math.sin(this.elapsedTime * 12);
@@ -2176,7 +2223,7 @@ export class MissionControlSystem extends createSystem({
               }
 
               // ADCS Attitude Slew: Point CubeSat optical downlink aperture toward Karachi Ground Station
-              const karachiWorld = karachiTerminal.getWorldPosition(new Vector3());
+              const karachiWorld = karachiTerminal.getWorldPosition(this.tempVecC);
               cubesat.lookAt(karachiWorld);
 
               // Pulsing Karachi demodulation footprint shockwave
@@ -2887,14 +2934,14 @@ export class MissionControlSystem extends createSystem({
       const slotIndex = cubeEntity.getValue(EvidenceCubeNode, 'slotIndex') ?? 0;
       if (!this.engine.getState().packets[slotIndex]) continue;
       obj.updateWorldMatrix(true, false);
-      const cubePos = obj.getWorldPosition(new Vector3());
+      const cubePos = obj.getWorldPosition(this.tempVec);
       const dist = sample.graspPoint.distanceTo(cubePos);
       if (dist <= cubeThreshold) {
         candidates.push({
           targetType: 'DATA_CUBE',
           targetId: `evidence-cube-${slotIndex + 1}`,
           distance: dist,
-          worldPosition: cubePos,
+          worldPosition: cubePos.clone(),
           cubeEntity,
           slotIndex,
         });
@@ -2910,7 +2957,7 @@ export class MissionControlSystem extends createSystem({
       if (!sObj || !isVisible(sObj)) continue;
       const sectorId = (sectorEntity.getValue(OrbitSectorNode, 'sectorId') ||
         'B') as SectorId;
-      const sPos = sObj.getWorldPosition(new Vector3());
+      const sPos = sObj.getWorldPosition(this.tempVec);
       const directDist = Math.min(
         sample.indexTip.distanceTo(sPos),
         sample.graspPoint.distanceTo(sPos),
@@ -2920,7 +2967,7 @@ export class MissionControlSystem extends createSystem({
           targetType: 'SECTOR',
           targetId: `sector-${sectorId.toLowerCase()}`,
           distance: directDist,
-          worldPosition: sPos,
+          worldPosition: sPos.clone(),
           sectorId,
         });
       }
@@ -2931,7 +2978,7 @@ export class MissionControlSystem extends createSystem({
       const obj = this.sceneObject(pad.id);
       if (!obj || !isVisible(obj)) continue;
       obj.updateWorldMatrix(true, false);
-      const pPos = obj.getWorldPosition(new Vector3());
+      const pPos = obj.getWorldPosition(this.tempVec);
       const effectiveDist = Math.min(
         sample.indexTip.distanceTo(pPos),
         sample.graspPoint.distanceTo(pPos),
@@ -2941,48 +2988,20 @@ export class MissionControlSystem extends createSystem({
           targetType: 'CONTROL_PAD',
           targetId: pad.id,
           distance: effectiveDist,
-          worldPosition: pPos,
+          worldPosition: pPos.clone(),
           controlAction: pad.action,
         });
       }
     }
 
     // 4. Check 3D Spatial UIKitML Panel Buttons (fingertip or pinch point within 14 cm)
-    const panelButtons: Array<{ panelId: string; buttonId: string }> = [
-      { panelId: 'briefing-panel', buttonId: 'Btn_StartTutorial' },
-      { panelId: 'briefing-panel', buttonId: 'Btn_SelectCampaign' },
-      { panelId: 'briefing-panel', buttonId: 'Btn_CycleSector' },
-      { panelId: 'briefing-panel', buttonId: 'Btn_ToggleSensor' },
-      { panelId: 'briefing-panel', buttonId: 'Btn_ScanSector' },
-      { panelId: 'briefing-panel', buttonId: 'Btn_CalibrateSeat' },
-      { panelId: 'briefing-panel', buttonId: 'exit-button' },
-      { panelId: 'briefing-panel', buttonId: 'xr-button' },
-      { panelId: 'telemetry-hud', buttonId: 'Btn_Pause' },
-      { panelId: 'telemetry-hud', buttonId: 'Btn_ProcessCube' },
-      { panelId: 'telemetry-hud', buttonId: 'Btn_QueueCube' },
-      { panelId: 'telemetry-hud', buttonId: 'Btn_DiscardCube' },
-      { panelId: 'telemetry-hud', buttonId: 'Btn_CycleCube' },
-      { panelId: 'telemetry-hud', buttonId: 'Btn_Settings' },
-      { panelId: 'debrief-panel', buttonId: 'Btn_CommitDownlink' },
-      { panelId: 'debrief-panel', buttonId: 'Btn_RestartMission' },
-      { panelId: 'debrief-panel', buttonId: 'Btn_NextMission' },
-      { panelId: 'debrief-panel', buttonId: 'Btn_ReorderQueue' },
-      { panelId: 'debrief-panel', buttonId: 'Btn_DailyPass' },
-      { panelId: 'debrief-panel', buttonId: 'Btn_ReplayDecision' },
-      { panelId: 'mission-hud', buttonId: 'Btn_StartPass' },
-      { panelId: 'mission-hud', buttonId: 'Btn_StartTraining' },
-      { panelId: 'mission-hud', buttonId: 'Btn_HudHint' },
-      { panelId: 'mission-hud', buttonId: 'Btn_HudTransmit' },
-      { panelId: 'mission-hud', buttonId: 'Btn_HudRetry' },
-      { panelId: 'mission-hud', buttonId: 'Btn_HudNext' },
-      { panelId: 'telemetry-hud', buttonId: 'Btn_RelaxedClock' },
-    ];
     // Every button lookup forces a matrix update of its whole UIKit panel. This runs for both hands every
     // frame, and a seated player's hands are about a metre from the panels, so a panel is skipped unless the
     // hand is within PANEL_TOUCH_SCAN_RADIUS_M of its centre (larger than any panel's half-diagonal + 14 cm).
-    const panelInReach = new Map<string, boolean>();
+    const panelInReach = this.panelInReachScratch;
+    panelInReach.clear();
     const reachRadius = MissionControlSystem.PANEL_TOUCH_SCAN_RADIUS_M;
-    for (const pb of panelButtons) {
+    for (const pb of MissionControlSystem.PANEL_TOUCH_BUTTONS) {
       let inReach = panelInReach.get(pb.panelId);
       if (inReach === undefined) {
         const panel = this.sceneObject(pb.panelId);
@@ -3314,7 +3333,10 @@ export class MissionControlSystem extends createSystem({
 
     this.bindXRSessionHandEvents();
 
-    for (const side of ['left', 'right'] as const) {
+    const handOrder = this.profile.preferences.dominantHand === 'LEFT'
+      ? (['left', 'right'] as const)
+      : (['right', 'left'] as const);
+    for (const side of handOrder) {
       const sample = this.sampleLiveXRHandState(side);
       if (!sample) {
         this.handleXRHandTrackingLost(side);
@@ -3478,6 +3500,22 @@ export class MissionControlSystem extends createSystem({
         this.lastHandPressed[side] = false;
         this.handleXRHandPressEnd(sample, 'pinch_release');
       }
+    }
+
+    // 6. Two-hand pinch hold (1.2s with empty hands) toggles the Perf HUD in VR without a URL parameter
+    if (this.lastHandPressed.left && this.lastHandPressed.right && !this.isAnyObjectGrabbed()) {
+      this.bothPinchHeldSec += Math.min(Math.max(0, _delta), 0.1);
+      if (this.bothPinchHeldSec >= 1.2 && !this.bothPinchTriggered) {
+        this.bothPinchTriggered = true;
+        const perf = (window as unknown as { __ORBIT_PERF__?: { toggle?: () => boolean } }).__ORBIT_PERF__;
+        const active = perf?.toggle?.() ?? false;
+        this.playCue('SELECT_SECTOR');
+        this.caption = `PERF HUD ${active ? 'ENABLED' : 'HIDDEN'} (two-hand pinch hold).`;
+        this.syncAll();
+      }
+    } else {
+      this.bothPinchHeldSec = 0;
+      this.bothPinchTriggered = false;
     }
   }
 
@@ -3678,8 +3716,7 @@ export class MissionControlSystem extends createSystem({
     for (const key of Object.keys(preferenceIds) as (keyof typeof preferenceIds)[]) {
       bindClick(this.telemetryPanel, `Btn_${preferenceIds[key]}`, () => this.cyclePreference(key));
     }
-    // The scanner always rests in the left holster now, so the scanner-hand toggle no longer does anything.
-    this.telemetryPanel?.getElementById('Btn_DominantHand')?.setProperties({ display: 'none' });
+    this.telemetryPanel?.getElementById('Btn_DominantHand')?.setProperties({ display: 'flex' });
     this.applyAccessibility();
 
     // Debrief Panel controls
@@ -3835,7 +3872,16 @@ export class MissionControlSystem extends createSystem({
       this.setText(hud, 'StepBody', clipText(tutStep.vrInstruction, 170));
       this.setText(hud, 'StepHands', '');
     } else {
-      this.setText(hud, 'StepKicker', state.lastActionOk ? 'NEXT STEP' : 'ACTION REJECTED');
+      const comboActive = this.comboCalloutUntilMs > performance.now() && this.comboCalloutText.length > 0;
+      this.setText(
+        hud,
+        'StepKicker',
+        !state.lastActionOk
+          ? 'ACTION REJECTED'
+          : comboActive
+            ? `${this.comboCalloutText}  |  NEXT STEP`
+            : 'NEXT STEP',
+      );
       this.setText(hud, 'StepTitle', step.title);
       this.setText(hud, 'StepBody', clipText(state.lastActionOk ? step.body : state.lastStatusMessage, 170));
       this.setText(hud, 'StepHands', hint && state.hintsUsed > 0 ? hint : `HANDS: ${step.hands}`);
@@ -4164,6 +4210,14 @@ export class MissionControlSystem extends createSystem({
     this.voiceCommander?.speakDirect(spoken, `[ARIA-7] ${spoken}`, 'MEDIUM');
   }
 
+  private triggerComboCallout(badge: string, detail: string): void {
+    this.comboStreak = Math.min(8, this.comboStreak + 1);
+    this.comboCalloutText = badge;
+    this.comboCalloutUntilMs = performance.now() + 2600;
+    this.audio.playComboStinger(this.comboStreak);
+    this.desktopControls?.triggerAchievement(badge, detail, '*');
+  }
+
   private handleScan(): void {
     const mode = this.engine.getState().activeSensorMode;
     const state = this.engine.getState();
@@ -4178,14 +4232,17 @@ export class MissionControlSystem extends createSystem({
       if (mode === 'THERMAL') this.caption = 'THERMAL SCAN: heat image acquired; thermal infrared sees through smoke, not thick cloud.';
       this.audio.playSubBassPulse();
 
-      // Achievement: the chosen sensor saw through this sector's weather well enough for its request.
+      // Achievement & Streak Callout: the chosen sensor saw through this sector's weather well enough for its request.
       const scanned = this.engine.getState().packets.find((p) => p.id === res.packet?.id);
       const scannedReq = scanned?.satisfiesRequestId
         ? getScenarioRequests(state.scenarioId, this.engine.getActiveCustomScenario())[scanned.satisfiesRequestId]
         : undefined;
       if (scanned && scannedReq && (scannedReq.minimumConfidence === 'PROBABLE' || scanned.confidence === 'CONFIRMED') && scanned.confidence !== 'UNVERIFIED') {
         const weather = describeWeather(getScenarioSector(state.scenarioId, scanned.sectorId, this.engine.getActiveCustomScenario()).cloudCover);
-        this.desktopControls?.triggerAchievement('SENSOR MATCH', `${SENSOR_PLAIN_GUIDE[mode].label} read Sector ${scanned.sectorId} through: ${weather.toLowerCase()}`, '*');
+        const badge = this.comboStreak >= 1 ? `STREAK x${this.comboStreak + 1}: SENSOR LOCK` : 'FIRST-TRY LOCK';
+        this.triggerComboCallout(badge, `${SENSOR_PLAIN_GUIDE[mode].label} read Sector ${scanned.sectorId} through: ${weather.toLowerCase()}`);
+      } else if (scanned?.confidence === 'UNVERIFIED') {
+        this.comboStreak = 0;
       }
 
       this.voiceCommander?.trigger('SCAN_ACQUIRED');
@@ -4214,12 +4271,14 @@ export class MissionControlSystem extends createSystem({
       this.playCue('PROCESS_SUCCESS');
       this.audio.playCompressionChirp();
 
-      // Check if all packets fit now (Knapsack Optimizer achievement)
+      // Check if all packets fit now (Knapsack Optimizer / Clutch Compress callout)
       const nextState = this.engine.getState();
       const queuedPackets = nextState.packets.filter((p) => nextState.queuePacketIds.includes(p.id));
       const totalTx = queuedPackets.reduce((acc, p) => acc + p.transmitSec, 0);
       if (totalTx <= nextState.downlinkWindowSec && queuedPackets.length === 3) {
-        this.desktopControls?.triggerAchievement('FITS THE WINDOW', `${queuedPackets.reduce((acc, p) => acc + p.rawTransmitSec, 0).toFixed(1)}s raw -> ${totalTx.toFixed(1)}s after compression`, '+');
+        this.triggerComboCallout('FITS THE WINDOW', `${queuedPackets.reduce((acc, p) => acc + p.rawTransmitSec, 0).toFixed(1)}s raw -> ${totalTx.toFixed(1)}s after compression`);
+      } else if (res.packet && res.packet.rawTransmitSec - res.packet.transmitSec >= 1.4) {
+        this.triggerComboCallout('CLUTCH COMPRESS', `Saved ${(res.packet.rawTransmitSec - res.packet.transmitSec).toFixed(1)}s on the downlink clock`);
       }
 
       this.voiceCommander?.trigger('PROCESS_SUCCESS');
@@ -4248,6 +4307,8 @@ export class MissionControlSystem extends createSystem({
       const nextState = this.engine.getState();
       if (nextState.downlinkCommittedSec > nextState.downlinkWindowSec + 0.01) {
         this.voiceCommander?.trigger('QUEUE_OVERFLOW');
+      } else if (res.ok && coveredRequestIds(nextState).size >= 3) {
+        this.triggerComboCallout('CLEAN SWEEP (3/3)', 'All 3 ground requests locked in the bay — pull TRANSMIT!');
       }
     }
     this.syncAll();
@@ -4395,6 +4456,65 @@ export class MissionControlSystem extends createSystem({
     // 2.88 m x 1.35 m double-sided tint at 2.4% opacity: two full-view blended layers per eye for no visible gain.
     const canopyGlass = consoleObj?.getObjectByName('CanopyGlassGlare');
     if (canopyGlass) canopyGlass.visible = !immersive;
+    // Console micro-details replaced by XR pads or imperceptible at headset resolution: keep Object3D.visible true
+    // for tests and raycasting while setting material.visible = !immersive to cut draw calls per eye.
+    for (const name of [
+      'CradleClampLeft',
+      'CradleClampRight',
+      'SensorToggleStem',
+      'BakedStatic_LeverArmAssembly_0',
+      'TacticalRadarSweepBlade',
+      'DownlinkSlotWaveguide_1',
+      'DownlinkSlotWaveguide_2',
+      'DownlinkSlotWaveguide_3',
+      'DownlinkSlotProgress_1',
+      'DownlinkSlotProgress_2',
+      'DownlinkSlotProgress_3',
+      'DownlinkPulseRing_1',
+      'DownlinkPulseRing_2',
+      'DownlinkPulseRing_3',
+      'DiscardChuteGlowRing',
+    ]) {
+      const node = consoleObj?.getObjectByName(name);
+      if (node instanceof Mesh && !Array.isArray(node.material)) node.material.visible = !immersive;
+    }
+    const globeObj = this.sceneObject('earth-globe');
+    for (const name of [
+      'KarachiGroundStationDish',
+      'SubSatelliteNadirPip',
+      'MergedStormFloodLightning',
+      'GlobeAtmosphereRim',
+      'OuterAzimuthRing',
+      'DownlinkLaserSheath',
+      'KarachiDishShockwave',
+    ]) {
+      const node = globeObj?.getObjectByName(name);
+      if (node && ((node as any).isMesh || (node as any).isLine) && !Array.isArray((node as any).material)) {
+        (node as any).material.visible = !immersive;
+      }
+    }
+    const gaugesObj = this.sceneObject('desk-gauges');
+    for (const name of ['PadIlluminatedCap', 'MasterIgnitionCap']) {
+      const node = gaugesObj?.getObjectByName(name);
+      if (node instanceof Mesh && !Array.isArray(node.material)) node.material.visible = !immersive;
+    }
+    const swathPadObj = this.sceneObject('pad-fire-swath');
+    const plungerGuard = swathPadObj?.getObjectByName('PlungerGuardRing');
+    if (plungerGuard instanceof Mesh && !Array.isArray(plungerGuard.material)) plungerGuard.material.visible = !immersive;
+    for (const stationPadId of ['pad-process-cradle', 'pad-queue-downlink', 'pad-commit-downlink', 'pad-discard-chute']) {
+      const padObj = this.sceneObject(stationPadId);
+      padObj?.traverse((child) => {
+        if (child instanceof Mesh && !Array.isArray(child.material)) child.material.visible = !immersive;
+      });
+    }
+    const ariaObj = this.sceneObject('avatar-aria');
+    const ariaBars = ariaObj?.getObjectByName('AriaWaveformInstancedBars');
+    if (ariaBars && (ariaBars as any).isMesh && !Array.isArray((ariaBars as any).material)) {
+      (ariaBars as any).material.visible = !immersive;
+    }
+    // Sync evidence cube internal micro-meshes for the new presentation mode
+    const state = this.engine.getState();
+    this.syncCubeTransforms(state.packets, state);
   }
 
   /** Single entry point for loading an operation from any menu (desktop campaign, landing, panels). */
@@ -4434,6 +4554,9 @@ export class MissionControlSystem extends createSystem({
   private handleRestartMission(): void {
     this.forceReleaseAllGrabs();
     this.xrCardOpen = this.engine.getState().scenarioId !== 'ORBITAL_ACADEMY';
+    this.comboStreak = 0;
+    this.comboCalloutText = '';
+    this.comboCalloutUntilMs = 0;
     this.lastTransmittedCount = 0;
     this.lastDownlinkTickSecond = -1;
     this.downlinkUiSyncAccumulator = 0;
@@ -4714,7 +4837,7 @@ export class MissionControlSystem extends createSystem({
     const labels: Record<string, string> = {
       Lbl_Pause: this.engine.getState().paused ? 'RESUME PASS' : 'PAUSE PASS',
       Lbl_Guidance: `GUIDANCE: ${p.guidance}`,
-      Lbl_DominantHand: `SCANNER HAND: ${p.dominantHand}`,
+      Lbl_DominantHand: `DOMINANT HAND: ${p.dominantHand}`,
       Lbl_OneHanded: `ONE-HAND ASSIST: ${p.oneHanded ? 'ON' : 'OFF'}`,
       Lbl_LargeText: `LARGE TEXT: ${p.largeText ? 'ON' : 'OFF'}`,
       Lbl_HighContrast: `HIGH CONTRAST: ${p.highContrast ? 'ON' : 'OFF'}`,
@@ -5039,7 +5162,10 @@ export class MissionControlSystem extends createSystem({
         this.applyAction({ type: 'SELECT_PACKET', packetId: livePkt.id });
         const res = this.applyAction({ type: 'QUEUE', packetId: livePkt.id });
         this.playCue(res.ok ? 'QUEUE_SLOT' : 'ERROR_REJECT');
-        if (res.ok) this.audio.playMagneticSnap();
+        if (res.ok) {
+          this.audio.playMagneticSnap();
+          this.triggerComboCallout('HOT DOCK!', 'Cube docked live into the open downlink window');
+        }
       } else if (liveTarget?.kind === 'RAW_TRAY' && livePkt.queued) {
         const res = this.applyAction({ type: 'UNQUEUE', packetId: livePkt.id });
         this.playCue(res.ok ? 'QUEUE_SLOT' : 'ERROR_REJECT');
@@ -5506,12 +5632,23 @@ export class MissionControlSystem extends createSystem({
 
   private syncCubeTransforms(packets: DataPacket[], snapshot?: MissionState): void {
     const state = snapshot ?? this.engine.getState();
+    const xrPresenting = Boolean(this.world.renderer?.xr?.isPresenting);
 
     for (const cubeEntity of this.queries.cubes.entities) {
       const slotIndex = cubeEntity.getValue(EvidenceCubeNode, 'slotIndex') ?? 0;
       const pkt = packets[slotIndex];
       const obj = cubeEntity.object3D;
       if (!obj) continue;
+
+      // In XR, the 4.4 cm cube's outer titanium frame and glowing 512x512 front telemetry display carry the
+      // visual read; hiding material.visible on the internal micro-meshes saves 9-15 draw calls per eye while
+      // keeping Object3D.visible intact for unit tests and pointer raycasting on CubeAcrylicShell.
+      for (const internalName of ['CubeAcrylicShell', 'CubeConfidenceCore', 'CubeBridgeSpan', 'CubeCloudObscurationCap', 'CubeRadarSpikes', 'CubeHighwayVector', 'CubeTopDisplay']) {
+        const part = obj.getObjectByName(internalName);
+        if (part instanceof Mesh && !Array.isArray(part.material)) {
+          part.material.visible = !xrPresenting;
+        }
+      }
 
       const isCurrentlyGrabbed = this.cubeInteractions.isHeld(obj);
 
