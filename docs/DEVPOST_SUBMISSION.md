@@ -12,7 +12,7 @@ The puzzle comes from real Earth-observation trade-offs, simplified and clearly 
 
 The campaign has three operations. In Fireline, a wildfire races through a canyon and smoke hides the evacuation road. In Monsoon Shield, a levee breach floods a basin under storm cloud. In Aftershock, an earthquake meets a crippled battery and you cannot answer everyone, so you choose who gets help. A nine-step training pass teaches every move without a clock. Every result shows what reached the ground, what did not, and one concrete way to do better.
 
-The game runs in Meta Quest Browser from a link, with nothing to install. It is built with Meta's Immersive Web SDK, Three.js and spatial UIKit panels, with procedural models and synthesized audio. The scene is tuned for Quest 3: under 100 draw calls and 100k triangles per eye in play, with automatic quality fallback if the frame rate drops. Options include captions, large text, high contrast, reduced motion, one-handed play and a relaxed clock.
+The game runs in Meta Quest Browser from a link, with nothing to install. It is built with Meta's Immersive Web SDK, Three.js and spatial UIKit panels, with procedural models and synthesized audio. The scene is tuned for Quest 3: 41–49 draw calls and 29k–34k triangles per eye in play (strictly within a 50-draw / 35k-triangle budget), zero per-frame heap allocations in the hand-tracking hot path, and automatic quality fallback if the frame rate drops. Options include captions, large text, high contrast, reduced motion, dominant-hand selection (right/left), one-handed play and a relaxed clock.
 
 All scenarios are fictional simulations grounded in remote-sensing physics. The game does not control real satellites, use live imagery or predict real rescues.
 

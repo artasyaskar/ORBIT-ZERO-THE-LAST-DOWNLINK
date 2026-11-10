@@ -69,11 +69,12 @@ pads do the same jobs (`tests/e2e-controllers.mjs` plays a whole pass that way i
 - [ ] Quest menu -> Exit mid-pass, then re-enter: the pass is paused with its clock, resume works.
 
 ## 4. Frame rate and render budget (45-60 min)
-Read the `?perf=1` panel (lower left of the view). Hold each view about 60 s for the summary line.
+Read the `?perf=1` panel (lower left of the view, or hold a two-hand pinch with empty hands for 1.2 s to toggle it in VR). Hold each view about 60 s for the summary line.
 - [ ] Mission Card, live play with three cubes, and the open downlink window: FPS avg >= 70 and 1% low >= 60
       at 72 Hz (if the headset runs 90 Hz: avg >= 85).
 - [ ] Panel says "multiview". If it says "no multiview", record it: the GPU then draws twice the numbers below.
-- [ ] Draws per eye close to the emulator numbers: card ~85, live ~97, downlink ~104.
+- [ ] Draws and triangles per eye match the verified emulator budget (`<= 50` draws/eye, `<= 35,000` tris/eye):
+      card `41-42` draws (`29.5k-32.0k` tris), live `46-49` draws (`31.8k-34.3k` tris), downlink `44-47` draws (`30.7k-33.3k` tris).
 - [ ] No visible judder when turning the head quickly over the globe.
 - [ ] If FPS stays low at 90/120 Hz, a `[perf] ... asking for 72 Hz` log line appears (USB inspect) and the
       rate drops once. After exiting a slow session, the next ENTER VR logs the 0.8 resolution step.
@@ -93,7 +94,7 @@ Read the `?perf=1` panel (lower left of the view). Hold each view about 60 s for
 
 ## 7. Comfort and legibility (82-90 min)
 - [ ] Every control is reachable seated without leaning (35-60 cm).
-- [ ] HUD text readable without squinting; LARGE TEXT and HIGH CONTRAST work.
+- [ ] HUD text readable without squinting; LARGE TEXT, HIGH CONTRAST, and DOMINANT HAND (RIGHT / LEFT) on the right panel work.
 - [ ] RECENTER on the desk re-seats the view after leaning or standing.
 - [ ] Captions show ARIA's lines; REDUCED MOTION stops the sweep, swirl and cube spin.
 
