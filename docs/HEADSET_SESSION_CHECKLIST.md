@@ -74,7 +74,7 @@ Read the `?perf=1` panel (lower left of the view, or hold a two-hand pinch with 
       at 72 Hz (if the headset runs 90 Hz: avg >= 85).
 - [ ] Panel says "multiview". If it says "no multiview", record it: the GPU then draws twice the numbers below.
 - [ ] Draws and triangles per eye match the verified emulator budget (`<= 50` draws/eye, `<= 35,000` tris/eye):
-      card `41-42` draws (`29.5k-32.0k` tris), live `46-49` draws (`31.8k-34.3k` tris), downlink `44-47` draws (`30.7k-33.3k` tris).
+      card `41-43` draws (`29.7k-32.2k` tris), live `46-50` draws (`32.0k-34.6k` tris), downlink `44-48` draws (`30.9k-33.5k` tris).
 - [ ] No visible judder when turning the head quickly over the globe.
 - [ ] If FPS stays low at 90/120 Hz, a `[perf] ... asking for 72 Hz` log line appears (USB inspect) and the
       rate drops once. After exiting a slow session, the next ENTER VR logs the 0.8 resolution step.

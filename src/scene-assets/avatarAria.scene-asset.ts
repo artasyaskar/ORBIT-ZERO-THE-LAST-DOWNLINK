@@ -12,6 +12,7 @@
 
 import {
   AdditiveBlending,
+  BoxGeometry,
   CanvasTexture,
   CylinderGeometry,
   DoubleSide,
@@ -259,7 +260,7 @@ export function createAvatarAriaAsset(): Object3D {
   barMat.name = 'AriaWaveformBarMat';
 
   // 1 InstancedMesh for all 20 bars (normalized unit height 1.0)
-  const baseBarGeo = bevelBox(0.0055, 1.0, 0.004, 0.0008, 0.0012, 1);
+  const baseBarGeo = new BoxGeometry(0.0055, 1.0, 0.004);
   const instancedBars = new InstancedMesh(baseBarGeo, barMat, nBars);
   instancedBars.name = 'AriaWaveformInstancedBars';
   instancedBars.instanceMatrix.setUsage(DynamicDrawUsage);

@@ -139,7 +139,7 @@ try {
   const missionText = await page.locator('.oz-hero-welcome').innerText();
   assert.ok(missionText.includes('Every scan costs capacitor energy'), 'Mission text must state the energy cost of scanning');
   assert.ok(missionText.includes('competes for the last downlink'), 'Mission text must state the downlink competition premise');
-  assert.ok(missionText.includes('Karachi Ground Station before Loss of Signal'), 'Mission text must state the transmission objective');
+  assert.ok(missionText.includes('reaches the ground before the window closes'), 'Mission text must state the transmission objective');
 
   // Verify Audio Mute Button
   const muteBtn = page.locator('#btn-landing-mute');

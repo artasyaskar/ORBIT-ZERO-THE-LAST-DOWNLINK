@@ -57,7 +57,7 @@ export function buildTutorialSteps(
     index: 1,
     id: 'STEP_1_ENVIRONMENT',
     title: 'STEP 1/9: GET COMFORTABLE',
-    vrInstruction: 'Sit back: everything is 35-60 cm in front of you. Touch the globe with a fingertip. If your hand is lost, a cube you held will automatically snap back to its tray.',
+    vrInstruction: 'Sit back: everything is 35-60 cm in front of you. Touch the globe with a fingertip or point your laser at any sector and pinch. Dropped cubes snap back.',
     desktopInstruction: 'Drag the 3D Earth Globe or click any Sector Beacon to orient the orbital console (dropped cubes auto-return to their slot).',
     scientificNote: `ORBIT ZERO flies a sun-synchronous low-Earth orbit. Every pass over Karachi Ground Station has a finite S-Band horizon window (${rate}).`,
     ghostHandTarget: 'GLOBE_GIMBAL',

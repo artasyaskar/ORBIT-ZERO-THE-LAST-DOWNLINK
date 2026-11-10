@@ -159,10 +159,11 @@ function bootstrap(): void {
   }
 
   // Headset browsers (or ?headset) skip the cinematic landing; ?landing shows it anyway.
-  // Note: @iwsdk/vite-plugin-dev injects window.IWER_DEVICE in local dev, which spoofs navigator.userAgent
-  // to OculusBrowser/Quest 3 on a desktop PC. Do not treat desktop IWER dev injection as a physical headset
-  // unless ?headset is explicitly requested, so the Landing Page (Hero -> VR or Desktop selector) opens first.
-  const isDevInjectedIwer = typeof window !== 'undefined' && Boolean((window as any).IWER_DEVICE);
+  // Note: @iwsdk/vite-plugin-dev injects window.IWER_DEVICE in `vite dev`, which spoofs navigator.userAgent
+  // to OculusBrowser/Quest 3 on a desktop PC. Scope that check to dev (`import.meta.env.DEV`) so the Landing Page
+  // opens first during local desktop dev, while production Quest/emulator builds still open the headset lobby.
+  const isDevInjectedIwer = Boolean((import.meta as { env?: { DEV?: boolean } }).env?.DEV)
+    && typeof window !== 'undefined' && Boolean((window as any).IWER_DEVICE);
   const headsetVisit =
     !forceLanding &&
     Boolean(urlParams?.has('headset') || (!isDevInjectedIwer && isStandaloneHeadsetBrowser(navigator.userAgent)));

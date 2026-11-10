@@ -222,9 +222,11 @@ const DISCARD_CONFIRM_WINDOW_MS = 3000;
 /** Debrief panel elements that only matter before downlink; hidden once results are shown. */
 const DEBRIEF_PANEL_OPERATIONS_ONLY = ['Slot1Card', 'Slot2Card', 'Slot3Card', 'Btn_ReorderQueue', 'Btn_CommitDownlink'] as const;
 
-const GLOBE_CENTER_WORLD = new Vector3(0, 0.98, -0.48);
-/** Seated-XR spot for the ARIA hologram: left of the globe, below the forward HUD strip. */
-const ARIA_XR_POSITION = new Vector3(-0.38, 1.06, -0.7);
+const GLOBE_CENTER_WORLD = new Vector3(0, 1.07, -0.48);
+/** Seated-XR spot for the ARIA hologram: upper-left cockpit window, clear of both the globe and forward HUD. */
+const ARIA_XR_POSITION = new Vector3(-0.62, 1.34, -0.76);
+const ARIA_XR_SCALE = 0.68;
+const ARIA_XR_YAW_RAD = (22 * Math.PI) / 180;
 const DOWNLINK_BAY_CENTER_WORLD = new Vector3(0.32, 0.79, -0.43);
 
 // The head position the cockpit is laid out for (see SEATED_EYE in ui/spatialLayout.ts).
@@ -657,7 +659,7 @@ export class MissionControlSystem extends createSystem({
     // each is hit-tested through one representative mesh instead: ARIA's portrait plate (what the laser
     // aims at) and the cube's acrylic shell (the box around its core). Events still bubble to the entity.
     this.limitPointerHitTest(this.sceneObject('avatar-aria'), 'AriaPortraitPlate');
-    for (const cubeEntity of this.queries.cubes.entities) this.limitPointerHitTest(cubeEntity.object3D, 'CubeAcrylicShell');
+    for (const cubeEntity of this.queries.cubes.entities) this.limitPointerHitTest(cubeEntity.object3D, 'CubeOuterFrame', 'CubeAcrylicShell');
 
     // 3. Subscribe to 3D Evidence Cube activations (poke/click selects cube)
     this.queries.cubeActivated.subscribe('qualify', (entity) => {
@@ -668,7 +670,12 @@ export class MissionControlSystem extends createSystem({
       if (pkt) {
         const src = this.world.renderer.xr.isPresenting ? 'xr-hand' : 'desktop';
         this.withInputSource(src, () => {
+          const tutStep = this.tutorial.getState().currentStepId;
           this.tutorial.notifyCubeGrabOrSelect(pkt.confidence !== 'UNVERIFIED', src);
+          // Controller rays cannot physically lift a cube; clicking the selected cube on STEP 5 completes inspection.
+          if (src === 'xr-hand' && tutStep === 'STEP_5_INSPECT' && state.selectedPacketId === pkt.id) {
+            this.tutorial.notifyCubeInspected(src);
+          }
           this.applyAction({ type: 'SELECT_PACKET', packetId: pkt.id });
           this.playCue('SELECT_SECTOR');
           this.syncAll();
@@ -686,6 +693,12 @@ export class MissionControlSystem extends createSystem({
       }
       const src = this.world.renderer.xr.isPresenting ? 'xr-hand' : 'desktop';
       this.withInputSource(src, () => {
+        if (src === 'xr-hand') {
+          if (action === 'SCAN') this.tutorial.notifyPinchScan('xr-hand');
+          if (action === 'PROCESS') this.tutorial.notifyCradleRelease('xr-hand');
+          if (action === 'QUEUE') this.tutorial.notifyDownlinkBayRelease('xr-hand');
+          if (action === 'COMMIT_DOWNLINK') this.tutorial.notifyTransmitActivated('xr-hand');
+        }
         this.handleControlAction(action);
       });
     });
@@ -3418,6 +3431,7 @@ export class MissionControlSystem extends createSystem({
           const prevTouch = this.lastHandGlobeTouchPos.get(side);
           if (!prevTouch) {
             this.lastHandGlobeTouchPos.set(side, sample.indexTip.clone());
+            const prevTutStep = this.tutorial.getState().currentStepId;
             this.withInputSource('xr-hand', () => {
               this.tutorial.notifyGlobeInteraction('xr-hand');
               if (this.tutorial.isActive()) {
@@ -3428,6 +3442,10 @@ export class MissionControlSystem extends createSystem({
                 );
               }
             });
+            if (this.tutorial.getState().currentStepId !== prevTutStep) {
+              this.playCue('SELECT_SECTOR');
+              this.syncAll();
+            }
             this.recordXRHandEvent({
               eventType: 'globe_touch',
               inputSource: 'hand',
@@ -3610,15 +3628,16 @@ export class MissionControlSystem extends createSystem({
       if (!el) return;
       el.name = id;
       const onClick = (event?: any) => {
+        const run = () => this.withInputSource(this.world.renderer?.xr?.isPresenting ? 'xr-hand' : 'desktop', handler);
         if (event && typeof event.pointerId === 'number') {
           // One pinch, one click: the custom hand path already fired this element for this pinch.
           if (this.customUiClick?.id === id && performance.now() <= this.customUiClick.until) {
             this.customUiClick = null;
             return;
           }
-          setTimeout(() => handler(), 0);
+          setTimeout(run, 0);
         } else {
-          handler();
+          run();
         }
       };
       el.addEventListener('click', onClick);
@@ -3697,16 +3716,29 @@ export class MissionControlSystem extends createSystem({
     }
 
     // Telemetry HUD controls
-    bindClick(this.telemetryPanel, 'Btn_ProcessCube', () =>
-      this.handleProcessSelected(),
-    );
-    bindClick(this.telemetryPanel, 'Btn_QueueCube', () =>
-      this.handleQueueSelected(),
-    );
+    bindClick(this.telemetryPanel, 'Btn_ProcessCube', () => {
+      if (this.world.renderer?.xr?.isPresenting) this.tutorial.notifyCradleRelease('xr-hand');
+      this.handleProcessSelected();
+    });
+    bindClick(this.telemetryPanel, 'Btn_QueueCube', () => {
+      if (this.world.renderer?.xr?.isPresenting) this.tutorial.notifyDownlinkBayRelease('xr-hand');
+      this.handleQueueSelected();
+    });
     bindClick(this.telemetryPanel, 'Btn_DiscardCube', () =>
       this.handleDiscardSelected(),
     );
-    bindClick(this.telemetryPanel, 'Btn_CycleCube', () => this.cycleEvidence());
+    bindClick(this.telemetryPanel, 'Btn_CycleCube', () => {
+      if (this.world.renderer?.xr?.isPresenting && !this.isLiveXRHandActive()) {
+        const tutStep = this.tutorial.getState().currentStepId;
+        const st = this.engine.getState();
+        const pkt = st.packets.find((p) => p.id === st.selectedPacketId) ?? st.packets[0];
+        if (pkt) {
+          this.tutorial.notifyCubeGrabOrSelect(pkt.confidence !== 'UNVERIFIED', 'xr-hand');
+          if (tutStep === 'STEP_5_INSPECT') this.tutorial.notifyCubeInspected('xr-hand');
+        }
+      }
+      this.cycleEvidence();
+    });
     bindClick(this.telemetryPanel, 'Btn_Pause', () => this.togglePause());
     bindClick(this.telemetryPanel, 'Btn_Settings', () => {
       this.settingsOpen = !this.settingsOpen;
@@ -3742,7 +3774,14 @@ export class MissionControlSystem extends createSystem({
       this.xrCardOpen = false;
       this.launchScenario('ORBITAL_ACADEMY');
     });
-    bindClick(this.missionHud, 'Btn_HudHint', () => this.handleAriaDelegate());
+    bindClick(this.missionHud, 'Btn_HudHint', () => {
+      if (this.tutorial.isActive()) {
+        this.playCue('SCENARIO_CYCLE');
+        this.launchScenario('FIRELINE_PASS');
+        return;
+      }
+      this.handleAriaDelegate();
+    });
     bindClick(this.missionHud, 'Btn_HudTransmit', () => this.handleCommitDownlinkButton());
     bindClick(this.missionHud, 'Btn_HudRetry', () => this.handleRestartMission());
     bindClick(this.missionHud, 'Btn_HudNext', () => this.nextMission());
@@ -3794,11 +3833,14 @@ export class MissionControlSystem extends createSystem({
     (panel as Object3D & { intersectChildren?: boolean }).intersectChildren = shown ? undefined : false;
   }
 
-  /** Pointer hit-tests of `root` visit only the named mesh (see the note where it is called). */
-  private limitPointerHitTest(root: Object3D | null | undefined, meshName: string): void {
-    const target = root?.getObjectByName(meshName);
-    if (!root || !(target instanceof Mesh)) return;
-    (root as Object3D & { interactableDescendants?: Object3D[] }).interactableDescendants = [target];
+  /** Pointer hit-tests of `root` visit only the named meshes (see the note where it is called). */
+  private limitPointerHitTest(root: Object3D | null | undefined, ...meshNames: string[]): void {
+    if (!root) return;
+    const targets = meshNames
+      .map((name) => root.getObjectByName(name))
+      .filter((node): node is Mesh => node instanceof Mesh);
+    if (targets.length === 0) return;
+    (root as Object3D & { interactableDescendants?: Object3D[] }).interactableDescendants = targets;
   }
 
   /** Which mode the forward headset HUD is in for the current state. */
@@ -3909,7 +3951,15 @@ export class MissionControlSystem extends createSystem({
     this.setText(hud, 'TrackerLine', trackerText(state, custom));
     const stalled = isPassStalled(state, custom);
     this.setText(hud, 'Lbl_HudTransmit', state.paused ? 'RESUME PASS' : state.phase === 'DOWNLINK' ? 'CLOSE LINK' : stalled ? 'ABORT PASS' : `TRANSMIT (${state.queuePacketIds.length}/${this.engine.getActiveScenario().budget.maxQueueSlots} LOADED)`);
-    this.setText(hud, 'Lbl_HudHint', this.isHintArmed() ? `PINCH AGAIN: -${SCORING.hintPenalty} pts` : `ASK ARIA (-${SCORING.hintPenalty} pts)`);
+    this.setText(
+      hud,
+      'Lbl_HudHint',
+      this.tutorial.isActive()
+        ? 'SKIP TO OP 01: FIRELINE'
+        : this.isHintArmed()
+          ? `PINCH AGAIN: -${SCORING.hintPenalty} pts`
+          : `ASK ARIA (-${SCORING.hintPenalty} pts)`,
+    );
   }
 
   /** Moves the forward HUD between the eye-level card pose and the strip above the globe, and
@@ -3924,15 +3974,19 @@ export class MissionControlSystem extends createSystem({
       hud.visible = immersive;
       if (immersive) this.syncMissionHud();
     }
-    // The ARIA hologram floats above the globe on desktop; in the headset it moves beside the globe
-    // so it never covers the forward Mission HUD.
+    // The ARIA hologram floats above the globe on desktop; in the headset it sits in the upper-left
+    // cockpit window clear of both the globe and the forward Mission HUD.
     const avatar = this.sceneObject('avatar-aria');
     if (avatar) {
       avatar.userData.desktopPos ??= avatar.position.clone();
       const want = immersive ? ARIA_XR_POSITION : (avatar.userData.desktopPos as Vector3);
-      if (!avatar.position.equals(want)) {
+      if (!avatar.position.equals(want) || avatar.userData.xrPoseImmersive !== immersive) {
+        const scale = immersive ? ARIA_XR_SCALE : 1;
+        avatar.userData.xrPoseImmersive = immersive;
+        avatar.userData.laserBaseScale = scale;
         avatar.position.copy(want);
-        avatar.scale.setScalar(immersive ? 0.7 : 1);
+        avatar.scale.setScalar(scale);
+        avatar.rotation.set(0, immersive ? ARIA_XR_YAW_RAD : 0, 0);
       }
     }
     if (hud && immersive) {
@@ -4506,11 +4560,6 @@ export class MissionControlSystem extends createSystem({
       padObj?.traverse((child) => {
         if (child instanceof Mesh && !Array.isArray(child.material)) child.material.visible = !immersive;
       });
-    }
-    const ariaObj = this.sceneObject('avatar-aria');
-    const ariaBars = ariaObj?.getObjectByName('AriaWaveformInstancedBars');
-    if (ariaBars && (ariaBars as any).isMesh && !Array.isArray((ariaBars as any).material)) {
-      (ariaBars as any).material.visible = !immersive;
     }
     // Sync evidence cube internal micro-meshes for the new presentation mode
     const state = this.engine.getState();
@@ -5639,6 +5688,8 @@ export class MissionControlSystem extends createSystem({
       const pkt = packets[slotIndex];
       const obj = cubeEntity.object3D;
       if (!obj) continue;
+      // Empty standby slots have no packet to select and must not steal XR laser hits from neighbouring cubes.
+      (obj as Object3D & { intersectChildren?: boolean }).intersectChildren = pkt ? undefined : false;
 
       // In XR, the 4.4 cm cube's outer titanium frame and glowing 512x512 front telemetry display carry the
       // visual read; hiding material.visible on the internal micro-meshes saves 9-15 draw calls per eye while

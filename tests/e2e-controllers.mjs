@@ -97,6 +97,99 @@ try {
   s = await state();
   check(s.phase === 'DOWNLINK', 'TRANSMIT (Mission HUD) opens the live downlink window', s.phase);
 
+  // 8. ARIA-7 hologram + 3D audio bars sit clear of the globe in the upper-left cockpit window
+  const ariaCheck = await page.evaluate(() => {
+    const aria = window.__ORBIT_ZERO__.getSceneObject('avatar-aria');
+    const bars = aria?.getObjectByName('AriaWaveformInstancedBars');
+    return {
+      pos: aria ? [aria.position.x, aria.position.y, aria.position.z] : null,
+      scale: aria?.scale.x ?? null,
+      barsVisible: Boolean(bars?.visible && bars?.material?.visible !== false),
+    };
+  });
+  check(
+    Boolean(ariaCheck.pos && ariaCheck.pos[0] <= -0.55 && ariaCheck.pos[1] >= 1.25 && Math.abs((ariaCheck.scale ?? 1) - 0.68) < 0.05 && ariaCheck.barsVisible),
+    'ARIA-7 hologram & 3D waveform bars sit clear of the Earth globe in VR',
+    JSON.stringify(ariaCheck),
+  );
+
+  // 9. Landing -> ENTER MISSION CONTROL -> ENTER VR opens OP 01: FIRELINE (not OP 00) without selecting a card
+  await page.goto(`${url}?landing`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#btn-enter-experience', { state: 'visible', timeout: 15000 });
+  await page.click('#btn-enter-experience');
+  await page.waitForSelector('#btn-enter-vr', { state: 'visible', timeout: 10000 });
+  await page.click('#btn-enter-vr');
+  await page.waitForFunction(() => Boolean(window.__ORBIT_ZERO__), null, { timeout: 90000 });
+  const landingVrState = await page.evaluate(() => ({
+    scenarioId: window.__ORBIT_ZERO__.getState().scenarioId,
+    tutorialActive: window.__ORBIT_ZERO__.getTutorialState().active,
+  }));
+  check(
+    landingVrState.scenarioId === 'FIRELINE_PASS' && !landingVrState.tutorialActive,
+    'Landing -> ENTER MISSION CONTROL -> ENTER VR launches OP 01: FIRELINE by default',
+    JSON.stringify(landingVrState),
+  );
+
+  // 10. Controller mode: OP 00 Academy SKIP TO OP 01, Card -> TRAINING FIRST, and full STEPS 1..8 -> DOWNLINK
+  await page.goto(`${url}?scenario=ORBITAL_ACADEMY&tutorial=1`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => document.querySelector('#oz-xr-entry')?.dataset.phase === 'ready', null, { timeout: 180000 });
+  await page.click('#oz-xr-enter');
+  await page.waitForFunction(() => window.__ORBIT_ZERO__.getRuntimeStatus().immersive, null, { timeout: 30000 });
+  await page.waitForFunction(() => window.__ORBIT_ZERO__.getSeatFit().count > 0, null, { timeout: 15000 });
+  await page.evaluate(async () => {
+    const remote = window.__ORBIT_IWER__.remote;
+    await remote.dispatch('set_input_mode', { mode: 'controller' });
+    for (const d of ['controller-left', 'controller-right']) await remote.dispatch('set_connected', { device: d, connected: true });
+  });
+  await page.waitForTimeout(500);
+  const skipLabel = await page.evaluate(() => window.__ORBIT_ZERO__.getPanelText('mission-hud', 'Lbl_HudHint'));
+  check(skipLabel === 'SKIP TO OP 01: FIRELINE', 'VR Training HUD shows SKIP TO OP 01: FIRELINE button', `label="${skipLabel}"`);
+
+  // Skip training via SKIP TO OP 01: FIRELINE, then re-enter training from OP 01 Card's TRAINING FIRST button
+  await press('controller-right', 'mission-hud:Btn_HudHint');
+  await page.waitForTimeout(300);
+  const afterSkip = await page.evaluate(() => ({
+    scenarioId: window.__ORBIT_ZERO__.getState().scenarioId,
+    tutorialActive: window.__ORBIT_ZERO__.getTutorialState().active,
+  }));
+  check(
+    afterSkip.scenarioId === 'FIRELINE_PASS' && !afterSkip.tutorialActive,
+    'Pinching/clicking SKIP TO OP 01: FIRELINE exits training directly into OP 01',
+    JSON.stringify(afterSkip),
+  );
+  await press('controller-right', 'mission-hud:Btn_StartTraining');
+  await page.waitForTimeout(400);
+
+  // Step 1 & 2: trigger on Sector B
+  await press('controller-right', 'sector-b');
+  let tut = await page.evaluate(() => window.__ORBIT_ZERO__.getTutorialState());
+  check(tut.currentStepId === 'STEP_3_PINCH', 'Controller trigger on Sector B advances OP 00 to STEP 3', tut.currentStepId);
+
+  // Step 3: Thermal + Fire Swath
+  for (let i = 0; i < 3 && (await state()).activeSensorMode !== 'THERMAL'; i++) await press('controller-right', 'pad-toggle-sensor');
+  await press('controller-right', 'pad-fire-swath');
+  await page.waitForTimeout(950);
+  tut = await page.evaluate(() => window.__ORBIT_ZERO__.getTutorialState());
+  check(tut.currentStepId === 'STEP_4_GRAB', 'Controller Fire Swath advances OP 00 to STEP 4', tut.currentStepId);
+
+  // Step 4 & 5: Trigger on cube 1 twice (select, then inspect)
+  const c1 = await press('controller-right', 'evidence-cube-1');
+  const c2 = await press('controller-right', 'evidence-cube-1');
+  tut = await page.evaluate(() => window.__ORBIT_ZERO__.getTutorialState());
+  check(tut.currentStepId === 'STEP_6_PROCESS', 'Controller cube selection & inspect advances OP 00 to STEP 6', `${tut.currentStepId} | c1=${JSON.stringify(c1)} c2=${JSON.stringify(c2)}`);
+
+  // Step 6 & 7: Compress & Load via telemetry-hud buttons
+  const pBtn = await press('controller-right', 'telemetry-hud:Btn_ProcessCube');
+  const qBtn = await press('controller-right', 'telemetry-hud:Btn_QueueCube');
+  tut = await page.evaluate(() => window.__ORBIT_ZERO__.getTutorialState());
+  check(tut.currentStepId === 'STEP_8_TRANSMIT', 'Controller Compress + Queue advances OP 00 to STEP 8', `${tut.currentStepId} | p=${JSON.stringify(pBtn)} q=${JSON.stringify(qBtn)} | s=${JSON.stringify((await state()).packets.map(p => [p.id, p.processed, p.queued]))}`);
+
+  // Step 8 -> DOWNLINK -> STEP 9
+  await press('controller-right', 'mission-hud:Btn_HudTransmit');
+  await page.waitForTimeout(400);
+  tut = await page.evaluate(() => window.__ORBIT_ZERO__.getTutorialState());
+  check(tut.currentStepId === 'STEP_9_DEBRIEF', 'Controller TRANSMIT opens downlink and advances OP 00 to STEP 9', tut.currentStepId);
+
   check(failures.length === 0, 'no page errors', failures.slice(0, 3).join(' | '));
 } finally {
   await app.close();

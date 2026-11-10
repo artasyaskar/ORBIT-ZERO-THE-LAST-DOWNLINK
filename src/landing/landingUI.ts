@@ -149,7 +149,7 @@ export class LandingUI {
   private vrAdvisoryEl!: HTMLDivElement;
 
   private isWebXRSupported = false;
-  private selectedCard: CampaignCardSpec = defaultCampaignCard();
+  private selectedCard: CampaignCardSpec = CAMPAIGN_MENU_CARDS[1];
 
   constructor(container: HTMLElement, events: LandingUIEvents) {
     this.container = container;
@@ -466,6 +466,9 @@ export class LandingUI {
   private attachListeners(): void {
     // "ENTER MISSION CONTROL" primary CTA
     this.rootEl.querySelector('#btn-enter-experience')?.addEventListener('click', () => {
+      if (this.selectedCard.id === 'ORBITAL_ACADEMY') {
+        this.selectCampaignCard('FIRELINE_PASS');
+      }
       this.events.onEnterExperience();
       this.transitionToSelection();
     });

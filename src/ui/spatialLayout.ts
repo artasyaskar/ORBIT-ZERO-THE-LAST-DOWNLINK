@@ -54,7 +54,7 @@ export const IMMERSIVE_PANEL_POSES = {
  */
 export const MISSION_HUD_POSES = {
   card: { position: [0, 1.3, -0.72], pitchDeg: 0, scale: 0.085 },
-  strip: { position: [0, 1.56, -0.9], pitchDeg: 14, scale: 0.115 },
+  strip: { position: [0, 1.61, -0.95], pitchDeg: 16, scale: 0.108 },
 } as const;
 export const GLOBE_CARD_SCALE = 0.45;
 
