@@ -13,6 +13,7 @@
 import {
   AdditiveBlending,
   BackSide,
+  BoxGeometry,
   BufferGeometry,
   Color,
   CylinderGeometry,
@@ -1006,50 +1007,64 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
   const busH = 0.068;
   const busL = 0.204; // 3U length (3 x 6.8cm)
 
+  // Illuminated anodized titanium frame so 3U rails read cleanly against deep space
   const blackAnodizedMat = new MeshStandardMaterial({
-    color: 0x141923,
-    roughness: 0.34,
-    metalness: 0.84,
+    color: 0x475569,
+    emissive: 0x1e293b,
+    emissiveIntensity: 0.34,
+    roughness: 0.28,
+    metalness: 0.86,
   });
   const darkCoreMat = new MeshStandardMaterial({
-    color: 0x0b0f17,
-    roughness: 0.52,
-    metalness: 0.65,
-  });
-  // Front side only: every foil patch faces out of the bus (their backs face the closed chassis), so the
-  // patches join the CubeSat's one baked static draw instead of drawing on their own.
-  const kaptonGoldMat = new MeshStandardMaterial({
-    color: 0xf5b82e,
-    emissive: 0x6b3e06,
+    color: 0x1e293b,
+    emissive: 0x0f172a,
     emissiveIntensity: 0.24,
+    roughness: 0.44,
+    metalness: 0.72,
+  });
+  // Rich NASA Kapton gold foil with subtle warm orbital rim bounce
+  const kaptonGoldMat = new MeshStandardMaterial({
+    color: 0xfbbf24,
+    emissive: 0xb45309,
+    emissiveIntensity: 0.44,
+    roughness: 0.20,
+    metalness: 0.90,
+  });
+  const kaptonSolidGoldMat = new MeshStandardMaterial({
+    color: 0xfbbf24,
+    emissive: 0xd97706,
+    emissiveIntensity: 0.48,
+    roughness: 0.22,
+    metalness: 0.88,
+  });
+  // Luminous electric-cobalt solar PV arrays so both wings stand out in space
+  const solarCellBlueMat = new MeshStandardMaterial({
+    color: 0x2563eb,
+    emissive: 0x1d4ed8,
+    emissiveIntensity: 0.72,
+    roughness: 0.16,
+    metalness: 0.78,
+  });
+  const silverBusbarMat = new MeshStandardMaterial({
+    color: 0xf1f5f9,
+    emissive: 0x64748b,
+    emissiveIntensity: 0.32,
     roughness: 0.22,
     metalness: 0.92,
   });
-  const kaptonSolidGoldMat = new MeshStandardMaterial({
-    color: 0xf5b82e,
-    emissive: 0x78350f,
-    emissiveIntensity: 0.28,
-    roughness: 0.24,
-    metalness: 0.86,
-  });
-  const solarCellBlueMat = new MeshStandardMaterial({
-    color: 0x173873,
-    emissive: 0x0c244f,
-    emissiveIntensity: 0.28,
-    roughness: 0.2,
-    metalness: 0.72,
-  });
-  const silverBusbarMat = new MeshStandardMaterial({
-    color: 0xdbe4f0,
-    roughness: 0.24,
-    metalness: 0.9,
-  });
   const opticalLensGlassMat = new MeshStandardMaterial({
-    color: 0x2563eb,
-    emissive: 0x0284c7,
-    emissiveIntensity: 0.65,
-    roughness: 0.06,
-    metalness: 0.35,
+    color: 0x38bdf8,
+    emissive: 0x0ea5e9,
+    emissiveIntensity: 1.5,
+    roughness: 0.08,
+    metalness: 0.45,
+  });
+  const ionPlasmaMat = new MeshStandardMaterial({
+    color: 0xbae6fd,
+    emissive: 0x38bdf8,
+    emissiveIntensity: 2.8,
+    roughness: 0.1,
+    metalness: 0.2,
   });
 
   // 1. Inner 3U Structural Core Box
@@ -1060,10 +1075,10 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
   coreBox.name = 'CubeSatCoreChassis';
   root.add(coreBox);
 
-  // 2. Four Longitudinal 3U Anodized Corner Rails + Protruding Deployment Standoffs
-  const railSize = 0.0068;
+  // 2. Four Longitudinal 3U Anodized Corner Rails
+  const railSize = 0.0072;
   const railOffset = busW * 0.5 - railSize * 0.5;
-  const railGeo = bevelBox(railSize, railSize, busL + 0.008, 0.0008, 0.0012, 1);
+  const railGeo = new BoxGeometry(railSize, railSize, busL + 0.008);
 
   const cornerSigns: Array<[number, number]> = [
     [-1, -1],
@@ -1077,28 +1092,13 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
     rail.name = `CubeSatCornerRail_${idx}`;
     rail.position.set(sx * railOffset, sy * railOffset, 0);
     root.add(rail);
-
-    for (const sz of [-1, 1]) {
-      const bolt = new Mesh(
-        new CylinderGeometry(0.0014, 0.0014, 0.002, 8),
-        silverBusbarMat,
-      );
-      bolt.name = `RailFastener_${idx}_${sz > 0 ? 'F' : 'R'}`;
-      bolt.rotation.set(Math.PI / 2, 0, 0);
-      bolt.position.set(
-        sx * railOffset,
-        sy * railOffset,
-        sz * (busL * 0.5 + 0.0045),
-      );
-      root.add(bolt);
-    }
   }
 
   // 3. Four Transverse 1U Structural Bulkhead Rings (Z = -1.5U, -0.5U, +0.5U, +1.5U)
   const uStep = busL / 3;
   const zStations = [-1.5 * uStep, -0.5 * uStep, 0.5 * uStep, 1.5 * uStep];
-  const hBarGeo = bevelBox(busW - railSize * 1.4, 0.0048, 0.0052, 0.0006, 0.001, 1);
-  const vBarGeo = bevelBox(0.0048, busH - railSize * 1.4, 0.0052, 0.0006, 0.001, 1);
+  const hBarGeo = new BoxGeometry(busW - railSize * 1.3, 0.005, 0.0054);
+  const vBarGeo = new BoxGeometry(0.005, busH - railSize * 1.3, 0.0054);
 
   for (const [sIdx, zPos] of zStations.entries()) {
     for (const sy of [-1, 1]) {
@@ -1120,8 +1120,8 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
     'FrontPayloadKaptonMLI',
     busW - 0.011,
     busH - 0.011,
-    6,
-    6,
+    5,
+    5,
     0.0024,
     kaptonGoldMat,
   );
@@ -1132,8 +1132,8 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
     'TopAftKaptonMLI',
     busW - 0.012,
     uStep * 1.35,
+    4,
     5,
-    6,
     0.002,
     kaptonGoldMat,
   );
@@ -1144,147 +1144,190 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
   for (const sx of [-1, 1]) {
     const sideGold = buildCrinkledKaptonPatch(
       `SideAvionicsKapton_${sx > 0 ? 'R' : 'L'}`,
-      uStep * 0.42,
+      uStep * 0.45,
       busH - 0.016,
+      3,
       4,
-      5,
-      0.0016,
+      0.0018,
       kaptonGoldMat,
     );
     sideGold.rotation.set(0, (sx * Math.PI) / 2, 0);
-    sideGold.position.set(sx * (busW * 0.5 - 0.0022), 0, -uStep * 0.22);
+    sideGold.position.set(sx * (busW * 0.5 - 0.002), 0, -uStep * 0.22);
     root.add(sideGold);
   }
 
-  // 5. Nadir Optical Camera Assembly on Front (+Z) Face
+  // 5. Nadir Multi-Spectral Optical Camera Assembly on Front (+Z) Face
   const camHousing = new Mesh(
-    bevelBox(0.034, 0.034, 0.014, 0.0018, 0.003, 1),
+    bevelBox(0.038, 0.038, 0.016, 0.0018, 0.003, 1),
     blackAnodizedMat,
   );
   camHousing.name = 'OpticalCameraHousing';
-  camHousing.position.set(0, -0.001, busL * 0.5 + 0.005);
+  camHousing.position.set(0, -0.001, busL * 0.5 + 0.006);
   root.add(camHousing);
 
-  for (const [bx, by] of cornerSigns) {
-    const cBolt = new Mesh(
-      new CylinderGeometry(0.0013, 0.0013, 0.002, 6),
-      silverBusbarMat,
-    );
-    cBolt.name = `CameraBezelBolt_${bx}_${by}`;
-    cBolt.rotation.set(Math.PI / 2, 0, 0);
-    cBolt.position.set(bx * 0.0125, -0.001 + by * 0.0125, busL * 0.5 + 0.0122);
-    root.add(cBolt);
-  }
-
   const outerBaffle = new Mesh(
-    new TorusGeometry(0.0115, 0.0022, 6, 12),
-    blackAnodizedMat,
-  );
-  outerBaffle.name = 'CameraOuterBaffle';
-  outerBaffle.position.set(0, -0.001, busL * 0.5 + 0.0125);
-  root.add(outerBaffle);
-
-  const innerApertureRing = new Mesh(
-    new TorusGeometry(0.0088, 0.0012, 6, 12),
+    new TorusGeometry(0.0135, 0.0025, 6, 12),
     silverBusbarMat,
   );
-  innerApertureRing.name = 'CameraApertureRing';
-  innerApertureRing.position.set(0, -0.001, busL * 0.5 + 0.0128);
-  root.add(innerApertureRing);
+  outerBaffle.name = 'CameraOuterBaffle';
+  outerBaffle.position.set(0, -0.001, busL * 0.5 + 0.014);
+  root.add(outerBaffle);
 
   const lensDome = new Mesh(
-    new SphereGeometry(0.0086, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.42),
+    new SphereGeometry(0.0102, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.45),
     opticalLensGlassMat,
   );
   lensDome.name = 'CameraObjectiveLens';
   lensDome.rotation.set(Math.PI / 2, 0, 0);
-  lensDome.position.set(0, -0.001, busL * 0.5 + 0.0085);
+  lensDome.position.set(0, -0.001, busL * 0.5 + 0.010);
   root.add(lensDome);
 
   const calBracket = new Mesh(
-    bevelBox(0.011, 0.008, 0.007, 0.0008, 0.0015, 1),
+    new BoxGeometry(0.012, 0.009, 0.008),
     silverBusbarMat,
   );
   calBracket.name = 'StarTrackerCalBracket';
-  calBracket.position.set(0.019, -0.023, busL * 0.5 + 0.003);
+  calBracket.position.set(0.020, -0.024, busL * 0.5 + 0.003);
   calBracket.rotation.set(0.2, -0.25, -0.35);
   root.add(calBracket);
 
-  // 6. Body-Mounted Photovoltaic Cell Panels (Left -X, Right +X, and Forward Top +Y)
+  // 5b. Dorsal High-Gain X-Band Parabolic Telemetry Dish + Feed Spire (Hero Spacecraft Silhouette)
+  const dishPedestal = new Mesh(
+    new CylinderGeometry(0.0045, 0.0065, 0.020, 8),
+    blackAnodizedMat,
+  );
+  dishPedestal.name = 'HighGainDishPedestal';
+  dishPedestal.position.set(0, busH * 0.5 + 0.010, -uStep * 0.72);
+  root.add(dishPedestal);
+
+  const dishBowl = new Mesh(
+    new CylinderGeometry(0.032, 0.007, 0.012, 14, 1, false),
+    silverBusbarMat,
+  );
+  dishBowl.name = 'HighGainParabolicDish';
+  dishBowl.position.set(0, busH * 0.5 + 0.026, -uStep * 0.72);
+  dishBowl.rotation.set(-0.26, 0, 0);
+  root.add(dishBowl);
+
+  const dishRim = new Mesh(
+    new TorusGeometry(0.032, 0.0018, 5, 16),
+    kaptonSolidGoldMat,
+  );
+  dishRim.name = 'HighGainDishRim';
+  dishRim.position.set(0, busH * 0.5 + 0.031, -uStep * 0.72 - 0.0015);
+  dishRim.rotation.set(Math.PI / 2 - 0.26, 0, 0);
+  root.add(dishRim);
+
+  const dishFeedStalk = new Mesh(
+    new CylinderGeometry(0.0014, 0.0020, 0.022, 6),
+    blackAnodizedMat,
+  );
+  dishFeedStalk.name = 'HighGainDishFeedStalk';
+  dishFeedStalk.position.set(0, busH * 0.5 + 0.039, -uStep * 0.72 - 0.004);
+  dishFeedStalk.rotation.set(-0.26, 0, 0);
+  root.add(dishFeedStalk);
+
+  const dishBeacon = new Mesh(
+    new SphereGeometry(0.0042, 6, 4),
+    ionPlasmaMat,
+  );
+  dishBeacon.name = 'HighGainDishBeacon';
+  dishBeacon.position.set(0, busH * 0.5 + 0.050, -uStep * 0.72 - 0.007);
+  root.add(dishBeacon);
+
+  // 5c. Aft Electric Xenon Hall-Effect Thruster Nozzle & Glowing Ion Plasma Plume Core (-Z)
+  const thrusterBell = new Mesh(
+    new CylinderGeometry(0.014, 0.021, 0.020, 12),
+    blackAnodizedMat,
+  );
+  thrusterBell.name = 'HallThrusterBell';
+  thrusterBell.rotation.set(-Math.PI / 2, 0, 0);
+  thrusterBell.position.set(0, 0, -busL * 0.5 - 0.011);
+  root.add(thrusterBell);
+
+  const thrusterRing = new Mesh(
+    new TorusGeometry(0.0185, 0.0018, 5, 14),
+    kaptonSolidGoldMat,
+  );
+  thrusterRing.name = 'HallThrusterCollar';
+  thrusterRing.position.set(0, 0, -busL * 0.5 - 0.021);
+  root.add(thrusterRing);
+
+  const ionCore = new Mesh(
+    new CylinderGeometry(0.013, 0.002, 0.044, 10),
+    ionPlasmaMat,
+  );
+  ionCore.name = 'HallThrusterIonPlume';
+  ionCore.rotation.set(-Math.PI / 2, 0, 0);
+  ionCore.position.set(0, 0, -busL * 0.5 - 0.042);
+  root.add(ionCore);
+
+  // 6. Body-Mounted Photovoltaic Cell Panels (Left -X, Right +X, Forward Top +Y)
+  const sideCellGeo = new BoxGeometry(0.0022, busH - 0.016, 0.024);
   for (const sx of [-1, 1]) {
-    const xPos = sx * (busW * 0.5 - 0.0008);
+    const xPos = sx * (busW * 0.5 - 0.0005);
     for (let strip = 0; strip < 3; strip++) {
-      const zCenter = uStep * 0.92 - strip * 0.026;
-      const cell = new Mesh(
-        bevelBox(0.0018, busH - 0.016, 0.023, 0.0003, 0.0006, 1),
-        solarCellBlueMat,
-      );
+      const cell = new Mesh(sideCellGeo, solarCellBlueMat);
       cell.name = `SideSolarFwd_${sx > 0 ? 'R' : 'L'}_${strip}`;
-      cell.position.set(xPos, 0, zCenter);
+      cell.position.set(xPos, 0, uStep * 0.92 - strip * 0.027);
       root.add(cell);
     }
     for (let strip = 0; strip < 2; strip++) {
-      const zCenter = -uStep * 0.78 - strip * 0.028;
-      const cell = new Mesh(
-        bevelBox(0.0018, busH - 0.016, 0.025, 0.0003, 0.0006, 1),
-        solarCellBlueMat,
-      );
+      const cell = new Mesh(sideCellGeo, solarCellBlueMat);
       cell.name = `SideSolarAft_${sx > 0 ? 'R' : 'L'}_${strip}`;
-      cell.position.set(xPos, 0, zCenter);
+      cell.position.set(xPos, 0, -uStep * 0.78 - strip * 0.028);
       root.add(cell);
     }
   }
 
+  const topCellGeo = new BoxGeometry(busW - 0.015, 0.0022, 0.028);
+  const topBusGeo = new BoxGeometry(busW - 0.014, 0.0026, 0.0018);
   for (let strip = 0; strip < 3; strip++) {
     const zCenter = uStep * 1.15 - strip * 0.032;
-    const topCell = new Mesh(
-      bevelBox(busW - 0.015, 0.0018, 0.028, 0.0003, 0.0006, 1),
-      solarCellBlueMat,
-    );
+    const topCell = new Mesh(topCellGeo, solarCellBlueMat);
     topCell.name = `TopBodySolar_${strip}`;
-    topCell.position.set(0, busH * 0.5 - 0.0006, zCenter);
+    topCell.position.set(0, busH * 0.5 - 0.0004, zCenter);
     root.add(topCell);
 
-    const busbar = new Mesh(
-      bevelBox(busW - 0.014, 0.002, 0.0014, 0.0002, 0.0003, 1),
-      silverBusbarMat,
-    );
+    const busbar = new Mesh(topBusGeo, silverBusbarMat);
     busbar.name = `TopBodyBusbar_${strip}`;
-    busbar.position.set(0, busH * 0.5 - 0.0004, zCenter + 0.015);
+    busbar.position.set(0, busH * 0.5 - 0.0002, zCenter + 0.015);
     root.add(busbar);
   }
 
-  // 7. Twin Horizontal Deployable Solar Array Wings (3 x 4 Photovoltaic Cell Grid per Wing)
-  const wingSpan = 0.172;
-  const wingChord = 0.118;
+  // 7. Twin Wide Deployable Photovoltaic Solar Array Wings (3 x 4 High-Contrast Cobalt Cells + Gold Kapton Frame)
+  const wingSpan = 0.210;
+  const wingChord = 0.132;
   const cols = 4;
   const rows = 3;
   const cellW = (wingSpan - 0.014) / cols;
   const cellD = (wingChord - 0.012) / rows;
-  const cellGeo = bevelBox(cellW - 0.0022, 0.0016, cellD - 0.0022, 0.0003, 0.0008, 1);
+  const cellGeo = new BoxGeometry(cellW - 0.003, 0.0022, cellD - 0.003);
 
   for (const sx of [-1, 1]) {
     const wingGroup = new Group();
     wingGroup.name = sx < 0 ? 'LeftSolarWing' : 'RightSolarWing';
     wingGroup.position.set(
-      sx * (busW * 0.5 + wingSpan * 0.5 + 0.003),
-      busH * 0.5 - 0.002,
+      sx * (busW * 0.5 + wingSpan * 0.5 + 0.012),
+      busH * 0.5 - 0.004,
       -0.008,
     );
-    wingGroup.rotation.set(0.06, 0, sx * -0.04);
+    wingGroup.rotation.set(0.10, 0, sx * -0.05);
 
     const substrate = new Mesh(
-      bevelBox(wingSpan, 0.0022, wingChord, 0.0005, 0.0015, 1),
+      new BoxGeometry(wingSpan, 0.0034, wingChord),
       kaptonSolidGoldMat,
     );
     substrate.name = `${wingGroup.name}_Substrate`;
+    substrate.position.y = -0.0003;
     wingGroup.add(substrate);
 
     const frameRim = new Mesh(
-      bevelBox(wingSpan - 0.003, 0.0026, wingChord - 0.003, 0.0004, 0.001, 1),
+      new BoxGeometry(wingSpan - 0.004, 0.0028, wingChord - 0.004),
       blackAnodizedMat,
     );
     frameRim.name = `${wingGroup.name}_Frame`;
+    frameRim.position.y = 0.0004;
     wingGroup.add(frameRim);
 
     for (let r = 0; r < rows; r++) {
@@ -1293,7 +1336,7 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
         const xOff = (c - (cols - 1) * 0.5) * cellW;
         const cell = new Mesh(cellGeo, solarCellBlueMat);
         cell.name = `${wingGroup.name}_Cell_${r}_${c}`;
-        cell.position.set(xOff, 0.0014, zOff);
+        cell.position.set(xOff, 0.0018, zOff);
         wingGroup.add(cell);
       }
     }
@@ -1301,42 +1344,33 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
     for (let c = 1; c < cols; c++) {
       const xOff = (c - cols * 0.5) * cellW;
       const vBus = new Mesh(
-        bevelBox(0.0016, 0.0028, wingChord - 0.008, 0.0002, 0.0003, 1),
+        new BoxGeometry(0.0020, 0.0034, wingChord - 0.008),
         silverBusbarMat,
       );
       vBus.name = `${wingGroup.name}_ColBus_${c}`;
-      vBus.position.set(xOff, 0.0015, 0);
+      vBus.position.set(xOff, 0.0018, 0);
       wingGroup.add(vBus);
-
-      for (const sz of [-1, 1]) {
-        const clip = new Mesh(
-          bevelBox(0.0045, 0.0036, 0.0032, 0.0004, 0.0005, 1),
-          silverBusbarMat,
-        );
-        clip.name = `${wingGroup.name}_EdgeClip_${c}_${sz > 0 ? 'F' : 'R'}`;
-        clip.position.set(xOff, 0.0015, sz * (wingChord * 0.5 + 0.0005));
-        wingGroup.add(clip);
-      }
     }
 
     for (let r = 1; r < rows; r++) {
       const zOff = (r - rows * 0.5) * cellD;
       const hBus = new Mesh(
-        bevelBox(wingSpan - 0.008, 0.0028, 0.0015, 0.0002, 0.0003, 1),
+        new BoxGeometry(wingSpan - 0.008, 0.0034, 0.0018),
         silverBusbarMat,
       );
       hBus.name = `${wingGroup.name}_RowBus_${r}`;
-      hBus.position.set(0, 0.0015, zOff);
+      hBus.position.set(0, 0.0018, zOff);
       wingGroup.add(hBus);
     }
 
-    for (const hz of [-0.034, 0.034]) {
+    // Structural Y-boom hinges anchoring wing cleanly to chassis
+    for (const hz of [-0.036, 0.036]) {
       const hinge = new Mesh(
-        bevelBox(0.009, 0.005, 0.007, 0.0008, 0.001, 1),
+        new BoxGeometry(0.018, 0.0055, 0.008),
         silverBusbarMat,
       );
       hinge.name = `${wingGroup.name}_Hinge_${hz > 0 ? 'F' : 'R'}`;
-      hinge.position.set(sx * (-wingSpan * 0.5 - 0.002), 0, hz);
+      hinge.position.set(sx * (-wingSpan * 0.5 - 0.007), 0, hz);
       wingGroup.add(hinge);
     }
 
@@ -1344,7 +1378,7 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
   }
 
   // 8. Six Precision Whip Antennas (4 Front Corner Dipoles + 2 Dorsal Monopoles)
-  const whipGeo = new CylinderGeometry(0.00055, 0.00085, 1, 8);
+  const whipGeo = new CylinderGeometry(0.0007, 0.0010, 1, 6);
   const antennaSpans: Array<{ name: string; start: Vector3; end: Vector3 }> = [
     {
       name: 'Antenna_FrontTopLeft',
@@ -1368,13 +1402,13 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
     },
     {
       name: 'Antenna_DorsalLeft',
-      start: new Vector3(-0.008, busH * 0.5, 0.004),
-      end: new Vector3(-0.036, busH * 0.5 + 0.078, 0.026),
+      start: new Vector3(-0.012, busH * 0.5, 0.018),
+      end: new Vector3(-0.038, busH * 0.5 + 0.078, 0.034),
     },
     {
       name: 'Antenna_DorsalRight',
-      start: new Vector3(0.012, busH * 0.5, -0.016),
-      end: new Vector3(0.034, busH * 0.5 + 0.084, -0.004),
+      start: new Vector3(0.014, busH * 0.5, 0.010),
+      end: new Vector3(0.036, busH * 0.5 + 0.082, 0.024),
     },
   ];
 
@@ -1389,60 +1423,60 @@ export function createOrbitZeroCubeSatAsset(): Object3D {
   // 9. Payload & Avionics Telemetry Indicators (baked into the single CubeSat static draw call)
   const opticalRingMat = new MeshStandardMaterial({
     color: 0x38bdf8,
-    emissive: 0x0284c7,
-    emissiveIntensity: 1.8,
-    roughness: 0.15,
+    emissive: 0x0ea5e9,
+    emissiveIntensity: 2.4,
+    roughness: 0.14,
     metalness: 0.4,
   });
   opticalRingMat.name = 'CubeSatOpticalRingMat';
   const opticalRing = new Mesh(
-    new TorusGeometry(0.0092, 0.0011, 6, 12),
+    new TorusGeometry(0.0110, 0.0014, 6, 12),
     opticalRingMat,
   );
   opticalRing.name = 'CubeSatOpticalApertureRingMesh';
-  opticalRing.position.set(0, -0.001, busL * 0.5 + 0.0135);
+  opticalRing.position.set(0, -0.001, busL * 0.5 + 0.0155);
   root.add(opticalRing);
 
   const sarFeedMat = new MeshStandardMaterial({
-    color: 0xf59e0b,
-    emissive: 0xb45309,
-    emissiveIntensity: 0.35,
-    roughness: 0.25,
-    metalness: 0.8,
+    color: 0xfbbf24,
+    emissive: 0xf59e0b,
+    emissiveIntensity: 1.4,
+    roughness: 0.22,
+    metalness: 0.78,
   });
   sarFeedMat.name = 'CubeSatSarFeedMat';
   const sarFeed = new Mesh(
-    bevelBox(0.038, 0.006, 0.003, 0.0004, 0.0006, 1),
+    new BoxGeometry(0.042, 0.007, 0.004),
     sarFeedMat,
   );
   sarFeed.name = 'CubeSatSarFeedStripMesh';
-  sarFeed.position.set(0, -busH * 0.5 + 0.004, busL * 0.5 + 0.002);
+  sarFeed.position.set(0, -busH * 0.5 + 0.004, busL * 0.5 + 0.003);
   root.add(sarFeed);
 
   const attitudeLockMat = new MeshStandardMaterial({
     color: 0x10b981,
-    emissive: 0x059669,
-    emissiveIntensity: 1.0,
+    emissive: 0x34d399,
+    emissiveIntensity: 2.0,
     roughness: 0.2,
     metalness: 0.5,
   });
   const epsTelemetryMat = new MeshStandardMaterial({
     color: 0x38bdf8,
-    emissive: 0x0284c7,
-    emissiveIntensity: 0.8,
+    emissive: 0x22d3ee,
+    emissiveIntensity: 1.8,
     roughness: 0.2,
     metalness: 0.5,
   });
-  const ledGeo = new SphereGeometry(0.0022, 6, 4);
+  const ledGeo = new SphereGeometry(0.0030, 6, 4);
   const attitudeLock = new Mesh(ledGeo, attitudeLockMat);
-  attitudeLock.position.set(0.024, 0.045, -0.06);
+  attitudeLock.position.set(0.025, 0.046, -0.06);
   root.add(attitudeLock);
   const epsHeartbeat = new Mesh(ledGeo, epsTelemetryMat);
-  epsHeartbeat.position.set(-0.024, 0.045, -0.06);
+  epsHeartbeat.position.set(-0.025, 0.046, -0.06);
   root.add(epsHeartbeat);
 
   mergeStaticMeshesByMaterial(root);
-  // Entire 3U CubeSat (rails, panels, chassis, lens, fasteners, indicators) becomes 1 draw call.
+  // Entire 3U CubeSat (rails, dish, ion thruster, solar wings, lens, indicators) becomes 1 draw call.
   mergeStaticMeshesIntoBakedMaterial(root);
 
   for (const markerName of [

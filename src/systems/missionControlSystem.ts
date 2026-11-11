@@ -74,7 +74,7 @@ import { clipText, plainScience, retryGuidanceFor } from '../ui/debriefText';
 import { gradeLabel, memoryBlocks, outcomeLabel as outcomeWords, resultHeadline, TRAINING_COMPLETE_LABEL } from '../mission/resultLabels';
 import { DELIBERATE_SCANNER_PRESS_RADIUS_M, SCANNER_TARGET_ID, isStrayScannerGrab, pressOwner } from './scannerArbitration';
 import { GLOBE_CARD_SCALE, IMMERSIVE_PANEL_POSES, MISSION_HUD_POSES, SEATED_EYE, seatFitOffset, type PanelPose } from '../ui/spatialLayout';
-import { SectorWeatherLayer } from './sectorWeatherFx';
+import { SectorWeatherLayer, type HazardVisualTheme } from './sectorWeatherFx';
 import { paintSensorView } from '../ui/sensorViewPainter';
 import { missionCardModel, resultModel, trackerText } from '../ui/hudText';
 import { formatRunCode } from '../ui/debriefText';
@@ -82,13 +82,18 @@ import { buildDailyPassCrisis } from '../mission/proceduralCrisis';
 import { getXrEntryOverlay, isXrEntryOverlayShowing } from '../ui/xrEntryOverlay';
 import { SCORING } from '../mission/missionConfig';
 import { fmtRate, rateOf, rawStorageUnits } from '../mission/budgetText';
-import type { DataPacket, MissionScenarioId, MissionState, SectorId, SensorMode } from '../mission/types';
+import type { DataPacket, MissionScenarioId, MissionState, SectorConfig, SectorId, SensorMode } from '../mission/types';
 import {
   GLOBE_RADIUS,
   SECTOR_GEO_DEFINITIONS,
   latLonToGlobePoint,
 } from '../scene-assets/earthGlobe.scene-asset';
-import { createEarthGlobeEnhancementsOptimized, updateEarthEnhancementsOptimized } from '../scene-assets/earthGlobeEnhancements.optimized';
+import {
+  configureEarthDisasterEnhancements,
+  createEarthGlobeEnhancementsOptimized,
+  updateEarthEnhancementsOptimized,
+  type EarthDisasterTheme,
+} from '../scene-assets/earthGlobeEnhancements.optimized';
 import { GAUGE_SEGMENT_RANGES, GAUGE_SEGMENTS_MESH_NAME } from '../scene-assets/deskGauges.scene-asset';
 import { alignSpan, isBakedStaticMaterial } from '../scene-assets/lib/hardsurface';
 import { SECTOR_OVERLAYS_MESH_NAME, setSectorOverlayGlow, setSectorOverlayLook } from '../scene-assets/lib/sectorOverlayMesh';
@@ -472,6 +477,11 @@ export class MissionControlSystem extends createSystem({
   private readonly pressResolvedTarget = new Map<'left' | 'right', string | null>();
   private earthGlobeEnhancements?: Object3D;
   private enhancementAnimationTime = 0;
+  private globeCoreMat?: MeshStandardMaterial;
+  private basePlanetMapCanvas?: HTMLCanvasElement;
+  private scenarioEmissiveCanvas?: HTMLCanvasElement;
+  private scenarioEmissiveTex?: CanvasTexture;
+  private lastHazardVisualKey = '';
   private objectCache = new Map<string, Object3D>();
   private tempDirection = new Vector3();
   private tempTarget = new Vector3();
@@ -644,11 +654,13 @@ export class MissionControlSystem extends createSystem({
     // 1. Bind NASA Blue Marble 4K textures onto the 3D Earth Globe & Cloud Layer
     this.bindEarthPlanetTextures();
 
-    // 1a. RC10: Mount Tactical Earth Enhancements (storm, lightning, flood over Indus Basin)
+    // 1a. Mount scenario-reactive Tactical Earth Enhancements (Wildfire / Flood / Earthquake)
     const globe = this.sceneObject('earth-globe');
     if (globe) {
       this.earthGlobeEnhancements = createEarthGlobeEnhancementsOptimized();
       globe.add(this.earthGlobeEnhancements);
+      this.lastHazardVisualKey = '';
+      this.syncScenarioHazardVisuals(this.engine.getState());
     }
 
     // Desk pads: headset-only ECS targets (desktop clicks the console's own buttons). See syncDeskPadsForXR.
@@ -1481,10 +1493,13 @@ export class MissionControlSystem extends createSystem({
     const reducedMotion = this.profile.preferences.reducedMotion;
     if (!reducedMotion && !this.reviewState) this.elapsedTime += delta;
 
-    // RC10: Update Earth Enhancements (storm rotation and lightning pulses)
+    // Update Earth surface & enhancement shaders (flames, flood ripples, lightning, fault waves)
     this.enhancementAnimationTime += delta;
     if (this.earthGlobeEnhancements) {
       updateEarthEnhancementsOptimized(this.earthGlobeEnhancements as Group, delta, this.enhancementAnimationTime);
+    }
+    if (this.globeCoreMat && this.scenarioEmissiveTex && !reducedMotion) {
+      this.globeCoreMat.emissiveIntensity = 0.94 + 0.14 * Math.sin(this.enhancementAnimationTime * 2.8);
     }
 
     this.animateCubeTransitions(delta);
@@ -2006,23 +2021,24 @@ export class MissionControlSystem extends createSystem({
         epsHeartbeat.material.emissiveIntensity = 0.5 + 0.3 * Math.sin(this.elapsedTime * 3.14);
       }
 
-      // Continuous inclined Low-Earth Orbit (LEO) circular path around the central Tactical Earth Globe:
-      // Orbits round-and-round outside the globe rings while clearing desk trays (y >= 0.94m) and eye/HUD (z <= -0.14m).
+      // Continuous inclined Low-Earth Orbit (LEO) elliptical path around the central Tactical Earth Globe:
+      // Larger hero silhouette (0.62 scale) clearing the globe rings, desk trays (y >= 0.93m), and user/HUD (z <= -0.18m).
       const orbitGlobe = this.sceneObject('earth-globe');
       const orbitCenter = orbitGlobe ? orbitGlobe.getWorldPosition(this.tempVec) : this.tempVec.set(0, 1.07, -0.48);
       const globeScaleRatio = orbitGlobe ? Math.max(0.42, orbitGlobe.scale.x / 1.32) : 1;
-      const orbitR = 0.355 * globeScaleRatio;
-      const tilt = 0.42; // 24 deg LEO orbital inclination around Earth globe
+      const orbitRx = 0.43 * globeScaleRatio;
+      const orbitRz = 0.30 * globeScaleRatio;
       const orbitAngle = this.elapsedTime * (reducedMotion ? 0.16 : 0.56);
-      const satX = orbitCenter.x + Math.cos(orbitAngle) * orbitR;
-      const satY = orbitCenter.y + Math.sin(orbitAngle) * orbitR * Math.sin(tilt) + 0.04 * globeScaleRatio;
-      const satZ = orbitCenter.z + Math.sin(orbitAngle) * orbitR * Math.cos(tilt);
+      const satX = orbitCenter.x + Math.cos(orbitAngle) * orbitRx;
+      const satY = orbitCenter.y + Math.sin(orbitAngle) * 0.14 * globeScaleRatio + 0.025 * globeScaleRatio;
+      const satZ = orbitCenter.z + Math.sin(orbitAngle) * orbitRz;
       cubesat.position.set(satX, satY, satZ);
-      cubesat.scale.setScalar(0.38 * globeScaleRatio);
+      cubesat.scale.setScalar(0.62 * globeScaleRatio);
 
-      // Nadir-tracking attitude: keeps optical bulkhead pointed toward Earth center during orbital sweep
+      // Nadir-tracking attitude with a gentle orbital bank so both gold/cobalt wings & dish read cleanly
       // (Downlink phase overrides attitude with exact ADCS lookAt(karachiWorld) right below).
       cubesat.lookAt(orbitCenter);
+      cubesat.rotateZ(0.28);
     }
 
     // Live Proximity Aiming Laser & Target Reticle Lock when scanner wand is held
@@ -2416,6 +2432,7 @@ export class MissionControlSystem extends createSystem({
     const coreSphere = globe.getObjectByName('GlobeCoreSphere');
     if (coreSphere instanceof Mesh && coreSphere.material instanceof MeshStandardMaterial) {
       const mat = coreSphere.material;
+      this.globeCoreMat = mat;
       if (enhancedMaps?.albedo) {
         mat.map = enhancedMaps.albedo;
       } else if (albedoTex) {
@@ -2443,9 +2460,10 @@ export class MissionControlSystem extends createSystem({
         cMat.alphaMap = finalCloudTex;
       }
       cMat.transparent = true;
-      cMat.opacity = 0.40;
+      cMat.opacity = 0.36;
       cMat.needsUpdate = true;
     }
+    this.syncScenarioHazardVisuals(this.engine.getState());
   }
 
   private bindCosmicEnvironmentAndTextures(): void {
@@ -2473,39 +2491,9 @@ export class MissionControlSystem extends createSystem({
   }
 
   private initSpacecraftTelemetryLEDs(cubesat: Object3D): void {
-    if (cubesat.getObjectByName('AdcsAttitudeLockLED')) return;
-
-    const attitudeLockMat = new MeshStandardMaterial({
-      color: 0x10b981,
-      emissive: 0x059669,
-      emissiveIntensity: 1.0,
-      roughness: 0.2,
-      metalness: 0.5,
-    });
-    attitudeLockMat.name = 'AdcsAttitudeLockLEDMat';
-
-    const epsTelemetryMat = new MeshStandardMaterial({
-      color: 0x38bdf8,
-      emissive: 0x0284c7,
-      emissiveIntensity: 0.8,
-      roughness: 0.2,
-      metalness: 0.5,
-    });
-    epsTelemetryMat.name = 'PowerTelemetryHeartbeatLEDMat';
-
-    const ledGeo = new SphereGeometry(0.0022, 8, 6);
-
-    const attitudeLock = new Mesh(ledGeo, attitudeLockMat);
-    attitudeLock.name = 'AdcsAttitudeLockLED';
-    attitudeLock.position.set(0.024, 0.045, -0.06);
-    cubesat.add(attitudeLock);
-
-    const epsHeartbeat = new Mesh(ledGeo, epsTelemetryMat);
-    epsHeartbeat.name = 'PowerTelemetryHeartbeatLED';
-    epsHeartbeat.position.set(-0.024, 0.045, -0.06);
-    cubesat.add(epsHeartbeat);
-
-    // Prevent the orbiting 3U CubeSat from intercepting desktop clicks aimed at Earth sectors behind it.
+    if (cubesat.userData.cubeSatInit) return;
+    cubesat.userData.cubeSatInit = true;
+    // Prevent the orbiting 3U CubeSat from intercepting desktop/XR pointer clicks aimed at Earth sectors behind it.
     cubesat.traverse((c) => {
       c.raycast = () => {};
     });
@@ -2692,6 +2680,7 @@ export class MissionControlSystem extends createSystem({
       aCtx.fill();
     }
 
+    this.basePlanetMapCanvas = albedoCanvas;
     const albedoOut = new CanvasTexture(albedoCanvas);
     albedoOut.colorSpace = SRGBColorSpace;
     albedoOut.needsUpdate = true;
@@ -5459,9 +5448,230 @@ export class MissionControlSystem extends createSystem({
     }
   }
 
-  /** Every sector's weather puffs, in one Points object parented to the globe (rotates and scales with it). */
+  /** Every sector's weather & disaster VFX, in one Points object parented to the globe (rotates and scales with it). */
   private weatherLayer: SectorWeatherLayer | null = null;
   private weatherSlots = new Map<SectorId, number>();
+
+  private resolveScenarioHazardTheme(state: MissionState): EarthDisasterTheme {
+    if (state.scenarioId === 'FIRELINE_PASS' || state.scenarioId === 'ORBITAL_ACADEMY') {
+      return 'WILDFIRE';
+    }
+    if (state.scenarioId === 'AFTERSHOCK_PASS' || state.scenarioId === 'DEFENSE_SHIELD_PASS') {
+      return 'EARTHQUAKE';
+    }
+    const custom = this.engine.getActiveCustomScenario();
+    const covers = SECTOR_ORDER.map((id) => getScenarioSector(state.scenarioId, id, custom).cloudCover);
+    if (covers.some((c) => c === 'DENSE_SMOKE' || c === 'MODERATE_SMOKE')) return 'WILDFIRE';
+    if (covers.some((c) => c === 'SEISMIC_DUST')) return 'EARTHQUAKE';
+    return 'FLOOD';
+  }
+
+  /**
+   * Paints scenario-specific emissive disaster features (blazing firelines, glowing flooded Indus plains,
+   * or seismic fault fissures) onto a reusable 1024x512 CanvasTexture mapped directly onto GlobeCoreSphere
+   * (0 additional draw calls in both VR Headset and Desktop).
+   */
+  private paintScenarioEmissiveTexture(
+    theme: EarthDisasterTheme,
+    sectorWeather: Partial<Record<SectorId, SectorConfig['cloudCover']>>,
+  ): void {
+    if (typeof document === 'undefined') return;
+    const w = 1024;
+    const h = 512;
+    if (!this.scenarioEmissiveCanvas) {
+      this.scenarioEmissiveCanvas = document.createElement('canvas');
+      this.scenarioEmissiveCanvas.width = w;
+      this.scenarioEmissiveCanvas.height = h;
+      this.scenarioEmissiveTex = new CanvasTexture(this.scenarioEmissiveCanvas);
+      this.scenarioEmissiveTex.colorSpace = SRGBColorSpace;
+      this.cleanupFuncs.push(() => {
+        this.scenarioEmissiveTex?.dispose();
+        this.scenarioEmissiveTex = undefined;
+        this.scenarioEmissiveCanvas = undefined;
+      });
+    }
+    const ctx = this.scenarioEmissiveCanvas.getContext('2d');
+    if (!ctx) return;
+
+    // 1. Preserve soft night-side planetary luminance (~0.045) matching baseline EarthSurfaceMaterial
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1.0;
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, w, h);
+    if (this.basePlanetMapCanvas) {
+      ctx.globalAlpha = 0.055;
+      ctx.drawImage(this.basePlanetMapCanvas, 0, 0, w, h);
+      ctx.globalAlpha = 1.0;
+    }
+
+    const toXY = (lat: number, lon: number): [number, number] => [
+      ((lon + 180) / 360) * w,
+      ((90 - lat) / 180) * h,
+    ];
+    const paintRadialGlow = (lat: number, lon: number, radiusPx: number, inner: string, mid: string) => {
+      const [cx, cy] = toXY(lat, lon);
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radiusPx);
+      grad.addColorStop(0, inner);
+      grad.addColorStop(0.5, mid);
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radiusPx, 0, Math.PI * 2);
+      ctx.fill();
+    };
+    const strokeJaggedLine = (coords: Array<[number, number]>, widthPx: number, color: string, blurPx: number) => {
+      ctx.save();
+      ctx.beginPath();
+      coords.forEach(([lat, lon], idx) => {
+        const [x, y] = toXY(lat, lon);
+        if (idx === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.strokeStyle = color;
+      ctx.lineWidth = widthPx;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.shadowColor = color;
+      ctx.shadowBlur = blurPx;
+      ctx.stroke();
+      ctx.restore();
+    };
+
+    const bCenter = SECTOR_GEO_DEFINITIONS.B.centerLatLon;
+    const dCenter = SECTOR_GEO_DEFINITIONS.D.centerLatLon;
+    const eCenter = SECTOR_GEO_DEFINITIONS.E.centerLatLon;
+    const cCenter = SECTOR_GEO_DEFINITIONS.C.centerLatLon;
+
+    if (theme === 'WILDFIRE') {
+      // Blazing canyon inferno in Sector B (Bolan Canyon) & spot fires in Sector E (Juniper Ridge)
+      paintRadialGlow(bCenter[0], bCenter[1], 32, 'rgba(255, 110, 20, 0.85)', 'rgba(180, 45, 10, 0.42)');
+      strokeJaggedLine(
+        [
+          [bCenter[0] - 5.2, bCenter[1] - 8.2],
+          [bCenter[0] - 1.6, bCenter[1] - 3.4],
+          [bCenter[0] + 1.4, bCenter[1] + 0.5],
+          [bCenter[0] + 3.8, bCenter[1] + 5.2],
+          [bCenter[0] + 5.6, bCenter[1] + 8.6],
+        ],
+        4.2,
+        'rgba(255, 165, 45, 0.98)',
+        10,
+      );
+      strokeJaggedLine(
+        [
+          [bCenter[0] - 3.0, bCenter[1] + 3.2],
+          [bCenter[0] + 0.4, bCenter[1] + 1.0],
+          [bCenter[0] + 4.1, bCenter[1] - 3.0],
+        ],
+        2.4,
+        'rgba(255, 232, 120, 0.95)',
+        6,
+      );
+
+      paintRadialGlow(eCenter[0], eCenter[1], 24, 'rgba(251, 146, 60, 0.80)', 'rgba(154, 52, 18, 0.35)');
+      strokeJaggedLine(
+        [
+          [eCenter[0] - 4.4, eCenter[1] - 5.6],
+          [eCenter[0] - 1.2, eCenter[1] - 1.5],
+          [eCenter[0] + 1.1, eCenter[1] + 2.6],
+          [eCenter[0] + 3.1, eCenter[1] + 6.4],
+        ],
+        3.2,
+        'rgba(255, 145, 35, 0.95)',
+        8,
+      );
+
+      // Sector D industrial kiln false-positive: tight small static amber pinpoint
+      paintRadialGlow(dCenter[0], dCenter[1], 8, 'rgba(245, 158, 11, 0.92)', 'rgba(217, 119, 6, 0.35)');
+    } else if (theme === 'EARTHQUAKE') {
+      // Fault rupture scars across Hanna Gorge (Sector B) & Chaman Fault Substation (Sector E)
+      paintRadialGlow(bCenter[0], bCenter[1], 24, 'rgba(214, 185, 140, 0.50)', 'rgba(146, 112, 74, 0.22)');
+      strokeJaggedLine(
+        [
+          [bCenter[0] - 6.0, bCenter[1] - 7.4],
+          [bCenter[0] - 2.0, bCenter[1] - 2.2],
+          [bCenter[0] + 1.0, bCenter[1] + 2.4],
+          [bCenter[0] + 5.2, bCenter[1] + 6.8],
+        ],
+        3.0,
+        'rgba(249, 115, 22, 0.92)',
+        8,
+      );
+
+      paintRadialGlow(eCenter[0], eCenter[1], 26, 'rgba(251, 146, 60, 0.72)', 'rgba(185, 28, 28, 0.32)');
+      strokeJaggedLine(
+        [
+          [eCenter[0] - 7.0, eCenter[1] - 8.2],
+          [eCenter[0] - 2.6, eCenter[1] - 2.2],
+          [eCenter[0] + 1.4, eCenter[1] + 2.8],
+          [eCenter[0] + 6.2, eCenter[1] + 7.6],
+        ],
+        3.8,
+        'rgba(255, 120, 35, 0.96)',
+        10,
+      );
+      paintRadialGlow(eCenter[0], eCenter[1], 10, 'rgba(253, 224, 71, 0.95)', 'rgba(249, 115, 22, 0.5)');
+    } else {
+      // FLOOD / MONSOON: Saturated turquoise-cyan Indus overflow plains & Sector B/E deluge basins
+      paintRadialGlow(28.5, 70.0, 26, 'rgba(14, 165, 233, 0.75)', 'rgba(2, 132, 199, 0.36)');
+      paintRadialGlow(bCenter[0], bCenter[1], 32, 'rgba(56, 189, 248, 0.82)', 'rgba(14, 165, 233, 0.38)');
+      paintRadialGlow(eCenter[0], eCenter[1], 26, 'rgba(34, 211, 238, 0.75)', 'rgba(2, 132, 199, 0.34)');
+      if (sectorWeather.C === 'DENSE_STORM') {
+        paintRadialGlow(cCenter[0], cCenter[1], 24, 'rgba(56, 189, 248, 0.68)', 'rgba(30, 64, 175, 0.30)');
+      }
+      strokeJaggedLine(
+        [
+          [35.4, 74.6],
+          [32.6, 71.4],
+          [30.2, 70.9],
+          [28.4, 69.7],
+          [26.2, 68.1],
+          [24.2, 67.6],
+        ],
+        4.5,
+        'rgba(56, 189, 248, 0.85)',
+        8,
+      );
+    }
+
+    if (this.scenarioEmissiveTex) this.scenarioEmissiveTex.needsUpdate = true;
+    const globe = this.sceneObject('earth-globe');
+    const coreSphere = globe?.getObjectByName('GlobeCoreSphere');
+    if (coreSphere instanceof Mesh && coreSphere.material instanceof MeshStandardMaterial) {
+      this.globeCoreMat = coreSphere.material;
+      coreSphere.material.emissiveMap = this.scenarioEmissiveTex ?? null;
+      coreSphere.material.emissive.setHex(0xffffff);
+      coreSphere.material.emissiveIntensity = 0.96;
+      coreSphere.material.needsUpdate = true;
+    }
+  }
+
+  private syncScenarioHazardVisuals(state: MissionState): void {
+    const custom = this.engine.getActiveCustomScenario();
+    const theme = this.resolveScenarioHazardTheme(state);
+    const sectorWeather: Partial<Record<SectorId, SectorConfig['cloudCover']>> = {};
+    for (const sectorId of SECTOR_ORDER) {
+      sectorWeather[sectorId] = getScenarioSector(state.scenarioId, sectorId, custom).cloudCover;
+    }
+    const key = `${state.scenarioId}:${theme}:${SECTOR_ORDER.map((id) => sectorWeather[id]).join(',')}`;
+    if (key === this.lastHazardVisualKey) return;
+    this.lastHazardVisualKey = key;
+
+    this.weatherLayer?.setHazardTheme(theme as HazardVisualTheme);
+    if (this.earthGlobeEnhancements) {
+      configureEarthDisasterEnhancements(this.earthGlobeEnhancements as Group, {
+        theme,
+        sectorWeather,
+      });
+    }
+    this.paintScenarioEmissiveTexture(theme, sectorWeather);
+
+    const cloudSphere = this.sceneObject('earth-globe')?.getObjectByName('GlobeCloudSphere');
+    if (cloudSphere instanceof Mesh && cloudSphere.material instanceof MeshStandardMaterial) {
+      cloudSphere.material.opacity = theme === 'FLOOD' ? 0.42 : 0.25;
+      cloudSphere.material.needsUpdate = true;
+    }
+  }
 
   private syncSectorWeather(): void {
     const globe = this.sceneObject('earth-globe');
@@ -5480,6 +5690,7 @@ export class MissionControlSystem extends createSystem({
       this.weatherLayer = layer;
       this.cleanupFuncs.push(() => { layer.dispose(); this.weatherLayer = null; this.weatherSlots.clear(); });
     }
+    this.syncScenarioHazardVisuals(state);
     for (const [sectorId, slot] of this.weatherSlots) {
       this.weatherLayer.setWeather(slot, getScenarioSector(state.scenarioId, sectorId, custom).cloudCover);
     }
@@ -5560,8 +5771,12 @@ export class MissionControlSystem extends createSystem({
         } else if (isScanned) {
           // Optical failed against cloud/smoke deck: high-albedo reflection glare
           setSectorOverlayLook(overlays, sectorId, 'cap', { visible: capVisible, opacity: 0.92, color: 0xe2e8f0, emissive: 0xef4444, emissiveIntensity: 0.45 });
+        } else if (sectorCfg.cloudCover === 'DENSE_SMOKE' || sectorCfg.cloudCover === 'MODERATE_SMOKE') {
+          setSectorOverlayLook(overlays, sectorId, 'cap', { visible: capVisible, opacity: isSelected ? 0.46 : 0.36, color: 0x3b1d0f, emissive: 0xea580c, emissiveIntensity: 0.45 });
+        } else if (sectorCfg.cloudCover === 'SEISMIC_DUST') {
+          setSectorOverlayLook(overlays, sectorId, 'cap', { visible: capVisible, opacity: isSelected ? 0.46 : 0.34, color: 0x92704a, emissive: 0xb45309, emissiveIntensity: 0.24 });
         } else {
-          setSectorOverlayLook(overlays, sectorId, 'cap', { visible: capVisible, opacity: isSelected ? 0.82 : 0.68, emissive: 0x000000, emissiveIntensity: 0 });
+          setSectorOverlayLook(overlays, sectorId, 'cap', { visible: capVisible, opacity: isSelected ? 0.56 : 0.44, color: 0x334155, emissive: 0x0284c7, emissiveIntensity: 0.22 });
         }
       }
     }
