@@ -45,7 +45,7 @@ function cleanStaleRuntimeState() {
   if (!existsSync(runtimeDir)) return;
   try {
     for (const entry of readdirSync(runtimeDir)) {
-      if (entry.endsWith('.lock') || entry.endsWith('.tmp')) {
+      if (entry.includes('.lock') || entry.endsWith('.tmp')) {
         rmSync(join(runtimeDir, entry), { recursive: true, force: true });
       }
     }
@@ -66,6 +66,33 @@ function cleanStaleRuntimeState() {
   }
 }
 
+/**
+ * IWSDK's runtime owner check synchronously runs powershell.exe with a 1500 ms timeout.
+ * Pre-warming PowerShell CLR assemblies in OS cache prevents cold-start timeouts on Windows.
+ */
+function warmWindowsPowerShell() {
+  if (process.platform !== 'win32') return Promise.resolve();
+  return new Promise((res) => {
+    const child = spawn(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', '(Get-Process -Id $PID).Id'],
+      { stdio: 'ignore', windowsHide: true },
+    );
+    const timer = setTimeout(() => {
+      try { child.kill(); } catch {}
+      res();
+    }, 6000);
+    child.once('exit', () => {
+      clearTimeout(timer);
+      res();
+    });
+    child.once('error', () => {
+      clearTimeout(timer);
+      res();
+    });
+  });
+}
+
 function openBrowserUrl(url) {
   try {
     if (process.platform === 'win32') {
@@ -83,17 +110,34 @@ function openBrowserUrl(url) {
   }
 }
 
+async function startWithOwnerRetry(maxAttempts = 3) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    cleanStaleRuntimeState();
+    await warmWindowsPowerShell();
+    let server;
+    try {
+      server = await createServer({
+        root,
+        configFile: resolve(root, 'vite.config.ts'),
+      });
+      await server.listen();
+      return server;
+    } catch (err) {
+      await server?.close().catch(() => {});
+      const retryable = err?.code === 'runtime_owner_identity_unavailable' && attempt < maxAttempts;
+      if (!retryable) throw err;
+      console.warn(`\n⚠️  [ORBIT ZERO] Windows PowerShell ownership check timed out (attempt ${attempt}/${maxAttempts}); retrying...`);
+      await new Promise((res) => setTimeout(res, 500));
+    }
+  }
+  throw new Error('Failed to start Vite dev server after retries.');
+}
+
 async function main() {
   const t0 = Date.now();
-  cleanStaleRuntimeState();
   console.log('\n🛰️  ORBIT ZERO: Starting HTTPS WebXR Dev Server (first cold start may take 15-30s)...');
 
-  const server = await createServer({
-    root,
-    configFile: resolve(root, 'vite.config.ts'),
-  });
-
-  await server.listen();
+  const server = await startWithOwnerRetry();
 
   const elapsedSec = ((Date.now() - t0) / 1000).toFixed(1);
   console.log(`\n✅ ORBIT ZERO Dev Server ready in ${elapsedSec}s:`);
@@ -111,6 +155,9 @@ async function main() {
 
 main().catch((err) => {
   console.error('\n❌ [ORBIT ZERO] Failed to start dev server:', err);
+  if (err?.code === 'runtime_owner_identity_unavailable') {
+    console.error('\n💡 Workaround if PowerShell is throttled on battery: run `npm run build` then `npx vite preview --port 8081 --host`.');
+  }
   process.exit(1);
 });
 
