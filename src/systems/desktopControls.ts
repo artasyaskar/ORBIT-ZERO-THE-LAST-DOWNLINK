@@ -1340,24 +1340,59 @@ export class DesktopControlsManager {
       z-index: 9999;
     `;
 
-    // Top Left Campaign Selector Button (Concepts 02 & 03)
+    const hudStyle = document.createElement('style');
+    hudStyle.id = 'orbit-zero-hud-css';
+    hudStyle.textContent = `
+      #orbit-zero-desktop-overlay button {
+        transition: transform 0.14s ease, box-shadow 0.16s ease, filter 0.16s ease, border-color 0.16s ease;
+      }
+      #orbit-zero-desktop-overlay button:not(:disabled):hover {
+        transform: translateY(-1px);
+        filter: brightness(1.12);
+        box-shadow: 0 4px 14px rgba(56, 189, 248, 0.24);
+      }
+      #orbit-zero-desktop-overlay button:focus-visible {
+        outline: 2px solid #38bdf8;
+        outline-offset: 2px;
+      }
+      #orbit-zero-campaign-btn:hover {
+        transform: translateY(-1px);
+        border-color: rgba(56, 189, 248, 0.85) !important;
+        box-shadow: 0 6px 22px rgba(0, 0, 0, 0.65), 0 0 18px rgba(0, 240, 255, 0.35) !important;
+      }
+      @keyframes ozPulseGlow {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.45; transform: scale(0.85); }
+      }
+      #orbit-zero-desktop-overlay .oz-live-dot {
+        animation: ozPulseGlow 2.1s ease-in-out infinite;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #orbit-zero-desktop-overlay button,
+        #orbit-zero-campaign-btn { transition: none !important; }
+        #orbit-zero-desktop-overlay .oz-live-dot { animation: none !important; }
+      }
+    `;
+    this.containerEl.appendChild(hudStyle);
+
+    // Top Left Campaign Selector Button
     const campaignBtnEl = document.createElement('div');
     campaignBtnEl.id = 'orbit-zero-campaign-btn';
     campaignBtnEl.style.cssText = `
       position: absolute;
-      top: 18px; left: 28px;
-      background: rgba(8, 14, 26, 0.85);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1px solid rgba(0, 240, 255, 0.45);
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), 0 0 14px rgba(0, 240, 255, 0.25);
-      border-radius: 6px;
-      padding: 7px 16px;
-      color: #00f0ff;
+      top: 16px; left: 24px;
+      background: linear-gradient(135deg, rgba(6, 13, 27, 0.92), rgba(14, 28, 52, 0.86));
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(0, 240, 255, 0.48);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 14px rgba(0, 240, 255, 0.22);
+      border-radius: 8px;
+      padding: 8px 16px;
+      color: #67e8f9;
       font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
-      font-size: 12px;
+      font-size: 11.5px;
       font-weight: 800;
-      letter-spacing: 1.5px;
+      letter-spacing: 1.4px;
       cursor: pointer;
       pointer-events: auto;
       z-index: 10000;
@@ -1370,52 +1405,60 @@ export class DesktopControlsManager {
     campaignBtnEl.addEventListener('click', () => this.toggleCampaignModal());
     this.containerEl.appendChild(campaignBtnEl);
 
-    // 0a. Top Right Digital Monospace Countdown Timer Pill (Concept Image 1 & 2)
+    // 0a. Top Right Telemetry Clock Card
     this.timerWidgetEl = document.createElement('div');
     this.timerWidgetEl.id = 'orbit-zero-hud-timer';
     this.timerWidgetEl.style.cssText = `
       position: absolute;
-      top: 18px; right: 28px;
-      background: rgba(8, 14, 26, 0.65);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1px solid rgba(56, 189, 248, 0.35);
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), 0 0 12px rgba(56, 189, 248, 0.15);
-      border-radius: 6px;
-      padding: 6px 14px;
+      top: 16px; right: 24px;
+      min-width: 196px;
+      background: linear-gradient(155deg, rgba(6, 13, 27, 0.92), rgba(12, 23, 44, 0.86));
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(56, 189, 248, 0.38);
+      border-left: 3px solid #fbbf24;
+      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+      border-radius: 8px;
+      padding: 7px 14px;
       color: #38bdf8;
       font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
-      font-size: 15px;
-      font-weight: 700;
-      letter-spacing: 1.5px;
+      font-size: 17px;
+      font-weight: 800;
+      letter-spacing: 1.2px;
       pointer-events: none;
       z-index: 10000;
     `;
     this.timerWidgetEl.innerText = '00:10.0';
     this.containerEl.appendChild(this.timerWidgetEl);
 
-    // 0b. Right Cockpit Window Frame Vertical Power Gauge (Concept Image 1 & 2)
+    // 0b. Top Right Bus Power & Storage Bar docked directly beneath Clock Card
     this.powerGaugeEl = document.createElement('div');
     this.powerGaugeEl.id = 'orbit-zero-hud-power';
     this.powerGaugeEl.style.cssText = `
       position: absolute;
-      top: 150px; right: 24px;
-      width: 48px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
+      top: 76px; right: 24px;
+      width: 196px;
+      background: linear-gradient(155deg, rgba(6, 13, 27, 0.9), rgba(12, 23, 44, 0.84));
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(56, 189, 248, 0.28);
+      border-left: 3px solid #38bdf8;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
+      border-radius: 8px;
+      padding: 7px 12px;
       pointer-events: none;
       z-index: 9999;
     `;
     this.containerEl.appendChild(this.powerGaugeEl);
 
-    // 0c. Left Cockpit Window Commander ARIA-7 Subtitle Box (Directly beneath 3D bust — Concept Images 1 & 2)
+    // 0c. Lower-Left Window Comms Card (ARIA-7 live guidance, docked cleanly above Recon badge)
     this.ariaHudEl = document.createElement('div');
     this.ariaHudEl.id = 'orbit-zero-aria-hud';
     this.ariaHudEl.style.cssText = `
       position: absolute;
-      bottom: 260px; left: 140px;
-      width: 340px;
+      bottom: 84px; left: 24px;
+      width: 320px;
+      max-width: 29vw;
       display: flex;
       flex-direction: column;
       pointer-events: none;
@@ -1423,23 +1466,22 @@ export class DesktopControlsManager {
     `;
     this.containerEl.appendChild(this.ariaHudEl);
 
-    // 0d. Earth Globe Center Brand Pill (3D modeled on sill, HTML duplicate hidden)
+    // 0d. Compact Top-Left Brand Tag paired neatly under Campaign button (leaves Downlink Bay unobstructed)
     this.brandBadgeEl = document.createElement('div');
     this.brandBadgeEl.id = 'orbit-zero-brand-badge';
     this.brandBadgeEl.style.cssText = `
       position: absolute;
-      bottom: 122px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(6, 12, 24, 0.78);
+      top: 56px;
+      left: 24px;
+      background: rgba(6, 12, 24, 0.72);
       backdrop-filter: blur(8px);
       -webkit-backdrop-filter: blur(8px);
-      border: 1px solid rgba(56, 189, 248, 0.28);
-      border-radius: 4px;
-      padding: 3px 12px;
-      font-size: 9px;
+      border: 1px solid rgba(56, 189, 248, 0.24);
+      border-radius: 5px;
+      padding: 3px 10px;
+      font-size: 9.5px;
       font-weight: 700;
-      letter-spacing: 1.5px;
+      letter-spacing: 1.4px;
       color: #94a3b8;
       z-index: 9999;
       pointer-events: none;
@@ -1532,22 +1574,23 @@ export class DesktopControlsManager {
     `;
     this.containerEl.appendChild(this.campaignModalEl);
 
-    // 1. Top Mission Status Banner (Only visible in Downlink / Debrief)
+    // 1. Top Mission Status Banner (Only visible in Downlink / Debrief / Operations Next Step)
     this.bannerEl = document.createElement('div');
     this.bannerEl.id = 'orbit-zero-hud-banner';
     this.bannerEl.style.cssText = `
       position: absolute;
       top: 14px; left: 50%;
       transform: translateX(-50%);
-      background: rgba(8, 14, 26, 0.82);
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
-      border: 1px solid rgba(56, 189, 248, 0.35);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65), 0 0 16px rgba(56, 189, 248, 0.15);
+      background: linear-gradient(160deg, rgba(6, 13, 27, 0.92), rgba(11, 22, 42, 0.88));
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(56, 189, 248, 0.38);
+      border-top: 2px solid rgba(56, 189, 248, 0.65);
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.72), 0 0 22px rgba(56, 189, 248, 0.14);
       border-radius: 12px;
-      padding: 10px 18px;
-      min-width: 440px;
-      max-width: 660px;
+      padding: 11px 18px;
+      min-width: 480px;
+      max-width: 680px;
       color: #f8fafc;
       pointer-events: auto;
       text-align: center;
@@ -1557,14 +1600,14 @@ export class DesktopControlsManager {
     `;
     this.containerEl.appendChild(this.bannerEl);
 
-    // 2. Action Toast Notification Pill (Positioned cleanly at top center — never blocks desk)
+    // 2. Action Toast Notification Pill (Positioned cleanly below top banner)
     this.toastEl = document.createElement('div');
     this.toastEl.id = 'orbit-zero-hud-action';
     this.toastEl.style.cssText = `
       position: absolute;
-      top: 168px; left: 50%;
+      top: 184px; left: 50%;
       transform: translate(-50%, -10px);
-      background: rgba(8, 14, 26, 0.88);
+      background: rgba(6, 13, 27, 0.92);
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
       border: 1px solid rgba(56, 189, 248, 0.45);
@@ -1574,7 +1617,7 @@ export class DesktopControlsManager {
       font-size: 11px;
       font-weight: 700;
       letter-spacing: 0.5px;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), 0 0 12px rgba(56, 189, 248, 0.2);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.65), 0 0 12px rgba(56, 189, 248, 0.2);
       opacity: 0;
       transition: opacity 0.25s ease, transform 0.25s ease;
       pointer-events: none;
@@ -1583,20 +1626,21 @@ export class DesktopControlsManager {
     this.toastEl.innerText = 'Desktop Operator Mode Initialized';
     this.containerEl.appendChild(this.toastEl);
 
-    // 3. Bottom Desktop Controls Toolbar (Centered subtle pill that reveals on hover)
+    // 3. Bottom Desktop Controls Toolbar
     this.toolbarEl = document.createElement('div');
     this.toolbarEl.id = 'orbit-zero-bottom-toolbar';
     this.toolbarEl.style.cssText = `
       position: absolute;
-      bottom: 8px; left: 50%;
+      bottom: 10px; left: 50%;
       transform: translateX(-50%);
-      background: rgba(8, 14, 26, 0.72);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1px solid rgba(56, 189, 248, 0.25);
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
-      border-radius: 12px;
-      padding: 8px 12px;
+      background: linear-gradient(180deg, rgba(8, 15, 30, 0.88), rgba(4, 9, 20, 0.92));
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(56, 189, 248, 0.32);
+      border-top: 1.5px solid rgba(56, 189, 248, 0.48);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.72), 0 0 18px rgba(56, 189, 248, 0.12);
+      border-radius: 14px;
+      padding: 8px 14px;
       display: flex;
       gap: 6px;
       align-items: center;
@@ -1607,19 +1651,19 @@ export class DesktopControlsManager {
     `;
     this.containerEl.appendChild(this.toolbarEl);
 
-    // 3b. Left Window Blade: Tactical Objective Card (Concept Image 2)
+    // 3b. Left Window Blade: Tactical Reconnaissance Card (collapsed below ARIA-7 dock)
     this.reconEl = document.createElement('div');
     this.reconEl.id = 'orbit-zero-recon-card';
     this.reconEl.style.cssText = `
       position: absolute;
-      bottom: 36px; left: 28px;
+      bottom: 24px; left: 24px;
       width: 320px;
-      max-width: 30vw;
-      background: rgba(8, 14, 26, 0.75);
+      max-width: 29vw;
+      background: linear-gradient(155deg, rgba(6, 13, 27, 0.88), rgba(11, 22, 42, 0.84));
       backdrop-filter: blur(14px);
       -webkit-backdrop-filter: blur(14px);
-      border: 1px solid rgba(56, 189, 248, 0.32);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65), inset 0 0 16px rgba(56, 189, 248, 0.05);
+      border: 1px solid rgba(56, 189, 248, 0.36);
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.65), inset 0 0 16px rgba(56, 189, 248, 0.06);
       border-radius: 8px;
       padding: 8px 12px;
       color: #cbd5e1;
@@ -1939,13 +1983,25 @@ export class DesktopControlsManager {
     if (!this.powerGaugeEl) return;
     const maxPower = state.maxPower || 55;
     const pct = Math.max(0, Math.min(100, (state.power / maxPower) * 100));
+    const fillGradient = pct <= 25
+      ? 'linear-gradient(90deg, #dc2626, #f87171)'
+      : pct <= 50
+        ? 'linear-gradient(90deg, #d97706, #fbbf24)'
+        : 'linear-gradient(90deg, #0284c7, #38bdf8)';
+    const accent = pct <= 25 ? '#f87171' : pct <= 50 ? '#fbbf24' : '#38bdf8';
+    this.powerGaugeEl.style.borderLeftColor = accent;
     this.powerGaugeEl.innerHTML = `
-      <div style="font-size: 11px; font-weight: 800; color: #38bdf8; font-family: monospace; margin-bottom: 2px;">${state.power} Wh</div>
-      <div style="font-size: 8px; color: #64748b; font-weight: 700; letter-spacing: 1px; margin-bottom: 6px;">POWER</div>
-      <div style="height: 130px; width: 8px; background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 4px; position: relative; overflow: hidden; box-shadow: inset 0 0 6px rgba(0,0,0,0.8);">
-        <div style="position: absolute; bottom: 0; width: 100%; height: ${pct}%; background: linear-gradient(to top, #0284c7, #38bdf8); box-shadow: 0 0 8px rgba(56, 189, 248, 0.7); transition: height 0.25s ease;"></div>
+      <div style="display: flex; justify-content: space-between; align-items: baseline; width: 100%; margin-bottom: 5px;">
+        <span style="font-size: 9.5px; color: #94a3b8; font-weight: 800; letter-spacing: 1px;">EPS BUS</span>
+        <span style="font-size: 12px; font-weight: 800; color: ${accent}; font-family: monospace;">${state.power}/${maxPower} Wh</span>
       </div>
-      <div style="font-size: 9px; color: #64748b; font-family: monospace; margin-top: 4px;">${maxPower} Wh</div>
+      <div style="height: 7px; width: 100%; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 999px; position: relative; overflow: hidden;">
+        <div style="position: absolute; left: 0; top: 0; bottom: 0; width: ${pct}%; background: ${fillGradient}; box-shadow: 0 0 10px ${accent}; transition: width 0.25s ease;"></div>
+      </div>
+      <div style="display: flex; justify-content: space-between; width: 100%; font-size: 9px; color: #64748b; font-family: monospace; margin-top: 5px;">
+        <span>MEM ${state.storageUsed}/${state.maxStorage}</span>
+        <span>${Math.round(pct)}%</span>
+      </div>
     `;
   }
 
@@ -1968,12 +2024,15 @@ export class DesktopControlsManager {
       line = intervention.detailedAdvice;
       isCritical = intervention.urgency === 'CRITICAL' || intervention.urgency === 'EMERGENCY';
     }
-    const borderColor = isCritical ? 'rgba(239, 68, 68, 0.85)' : 'rgba(167, 139, 250, 0.5)';
+    const borderColor = isCritical ? 'rgba(239, 68, 68, 0.85)' : 'rgba(167, 139, 250, 0.52)';
     const badgeColor = isCritical ? '#f87171' : '#c4b5fd';
     this.ariaHudEl.innerHTML = `
-      <div id="aria-subtitle-bar" style="background: rgba(6, 12, 24, 0.88); border: 1px solid ${borderColor}; border-radius: 6px; padding: 8px 14px; display: flex; flex-direction: column; gap: 3px;">
-        <div id="aria-subtitle-badge" style="font-size: 11px; font-weight: 800; color: ${badgeColor}; letter-spacing: 1.2px;">${escapeHtml(badge)}</div>
-        <div id="aria-subtitle-text" style="font-size: 13px; color: #e2e8f0; font-weight: 500; line-height: 1.45;">${escapeHtml(line)}</div>
+      <div id="aria-subtitle-bar" style="background: linear-gradient(145deg, rgba(6, 12, 26, 0.92), rgba(14, 21, 44, 0.88)); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid ${borderColor}; border-left: 3px solid ${badgeColor}; border-radius: 8px; padding: 9px 14px; display: flex; flex-direction: column; gap: 4px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65);">
+        <div id="aria-subtitle-badge" style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 800; color: ${badgeColor}; letter-spacing: 1.2px;">
+          <span class="oz-live-dot" style="width: 6px; height: 6px; border-radius: 50%; background: ${badgeColor}; box-shadow: 0 0 8px ${badgeColor}; display: inline-block;"></span>
+          ${escapeHtml(badge)}
+        </div>
+        <div id="aria-subtitle-text" style="font-size: 12.5px; color: #e2e8f0; font-weight: 500; line-height: 1.45;">${escapeHtml(line)}</div>
       </div>
     `;
   }
@@ -2145,7 +2204,7 @@ export class DesktopControlsManager {
       });
       this.bannerEl.querySelector('#btn-aar-copy')?.addEventListener('click', (e) => {
         const text = (this as any)._lastShareCard as string;
-        try { void navigator.clipboard?.writeText?.(text); } catch {}
+        try { void navigator.clipboard?.writeText?.(text); } catch { }
         const targetBtn = e.currentTarget as HTMLButtonElement | null;
         if (targetBtn) targetBtn.textContent = 'COPIED!';
         this.notifyAction(`Copied result card (${text.split(' | ').pop() ?? ''})`, true);

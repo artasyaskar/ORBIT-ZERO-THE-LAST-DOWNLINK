@@ -141,9 +141,12 @@ export function requestTrackerHtml(state: MissionState, custom?: MissionScenario
     const sent = onBoard.some((p) => p.transmitted);
     const status = sent ? 'SENT' : loaded ? 'LOADED' : covered.has(id) ? (meets ? 'ON BOARD' : 'WEAK') : 'NEEDED';
     const color = status === 'SENT' ? '#34d399' : status === 'LOADED' ? '#38bdf8' : status === 'ON BOARD' ? '#a3e635' : status === 'WEAK' ? '#f59e0b' : '#94a3b8';
-    return `<span style="display:inline-flex;gap:5px;align-items:center;border:1px solid ${color};border-radius:6px;padding:2px 7px;font-size:11px;color:#e2e8f0;">
-      <b style="color:${color};">${r.targetSectorId}</b>${escapeHtml(r.shortLabel.split('|')[1]?.trim() ?? r.id)}
-      <b style="font-family:monospace;color:#f8fafc;">${requestValue(r)}</b><span style="color:${color};font-weight:800;">${status}</span></span>`;
+    const bg = status === 'SENT' ? 'rgba(16,185,129,0.14)' : status === 'LOADED' ? 'rgba(56,189,248,0.14)' : status === 'WEAK' ? 'rgba(245,158,11,0.12)' : 'rgba(15,23,42,0.72)';
+    return `<span style="display:inline-flex;gap:6px;align-items:center;background:${bg};border:1px solid ${color};border-left:3px solid ${color};border-radius:7px;padding:3px 9px;font-size:11px;color:#e2e8f0;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06);">
+      <span style="font-weight:800;color:#0b1220;background:${color};border-radius:4px;padding:0 5px;font-size:10px;line-height:1.45;">${r.targetSectorId}</span>
+      <span style="font-weight:700;color:#f8fafc;">${escapeHtml(r.shortLabel.split('|')[1]?.trim() ?? r.id)}</span>
+      <b style="font-family:monospace;color:#f8fafc;">${requestValue(r)}</b>
+      <span style="color:${color};font-weight:800;font-size:10px;letter-spacing:.4px;">${status}</span></span>`;
   }).join(' ');
 }
 
@@ -151,17 +154,27 @@ export function nextStepBannerHtml(step: NextStep, state: MissionState, custom?:
   const color = TONE_COLOR[step.tone];
   const clock = state.passRemainingSec === null
     ? 'NO CLOCK'
-    : state.passStarted ? `CLOCK ${formatClock(state.passRemainingSec)}` : `CLOCK ${formatClock(state.passRemainingSec)} (waits for first scan)`;
+    : state.passStarted ? formatClock(state.passRemainingSec) : `${formatClock(state.passRemainingSec)} WAIT`;
+  const lowPower = state.power < 15;
+  const pill = (lbl: string, val: string, c: string) =>
+    `<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(15,23,42,0.85);border:1px solid rgba(148,163,184,0.22);border-radius:5px;padding:2px 7px;font:700 10px monospace;color:#cbd5e1;"><span style="color:#64748b;">${lbl}</span><b style="color:${c};">${val}</b></span>`;
   return `
     <div id="next-step-card" style="text-align:left;">
-      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
-        <span style="font-size:10px;font-weight:800;letter-spacing:1px;color:${color};">NEXT STEP</span>
-        <span style="font:700 11px monospace;color:#cbd5e1;">${clock} | BATTERY ${state.power}/${state.maxPower} Wh | MEMORY ${state.storageUsed}/${state.maxStorage} | SEND ${state.downlinkCommittedSec.toFixed(1)}/${state.downlinkWindowSec.toFixed(1)}s</span>
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;padding-bottom:6px;margin-bottom:6px;border-bottom:1px solid rgba(56,189,248,0.16);">
+        <span style="display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:800;letter-spacing:1.2px;color:${color};">
+          <span class="oz-live-dot" style="width:7px;height:7px;border-radius:50%;background:${color};box-shadow:0 0 8px ${color};display:inline-block;"></span>NEXT STEP
+        </span>
+        <div style="display:flex;gap:5px;flex-wrap:wrap;">
+          ${pill('CLOCK', clock, state.passStarted && (state.passRemainingSec ?? 99) <= 25 ? '#f87171' : '#fbbf24')}
+          ${pill('BATT', `${state.power}/${state.maxPower} Wh`, lowPower ? '#f87171' : '#38bdf8')}
+          ${pill('MEM', `${state.storageUsed}/${state.maxStorage}`, state.storageUsed >= state.maxStorage ? '#f59e0b' : '#cbd5e1')}
+          ${pill('LINK', `${state.downlinkCommittedSec.toFixed(1)}/${state.downlinkWindowSec.toFixed(1)}s`, state.downlinkCommittedSec > state.downlinkWindowSec + 0.01 ? '#f87171' : '#34d399')}
+        </div>
       </div>
-      <div id="next-step-title" style="font-size:16px;font-weight:800;color:#f8fafc;margin:3px 0;">${escapeHtml(step.title)}</div>
-      <div style="font-size:13px;color:#cbd5e1;line-height:1.45;">${escapeHtml(step.body)}</div>
-      <div style="font-size:12px;color:${color};font-weight:700;margin-top:4px;">${escapeHtml(step.desktop)}</div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;">${requestTrackerHtml(state, custom)}</div>
+      <div id="next-step-title" style="font-size:17px;font-weight:800;color:#f8fafc;letter-spacing:-0.2px;margin:2px 0;">${escapeHtml(step.title)}</div>
+      <div style="font-size:12.5px;color:#cbd5e1;line-height:1.45;">${escapeHtml(step.body)}</div>
+      <div style="font-size:11.5px;color:${color};font-weight:700;margin-top:4px;">▸ ${escapeHtml(step.desktop)}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">${requestTrackerHtml(state, custom)}</div>
     </div>`;
 }
 
@@ -180,13 +193,16 @@ export function actionBarHtml(state: MissionState, custom?: MissionScenarioConfi
       const color = p.confidence === 'CONFIRMED' ? '#34d399' : p.confidence === 'PROBABLE' ? '#f59e0b' : '#f87171';
       const where = p.transmitted ? 'SENT' : p.queued ? `BAY ${(p.queueIndex ?? 0) + 1}` : 'TRAY';
       const isSel = p.id === state.selectedPacketId;
-      return `<button data-action="select:${p.id}" title="${escapeHtml(p.headline)}" style="pointer-events:auto;cursor:pointer;text-align:left;font:700 11px/1.3 Inter,system-ui;padding:5px 8px;border-radius:7px;
-        background:${isSel ? 'rgba(56,189,248,.22)' : 'rgba(15,23,42,.88)'};border:1.5px solid ${isSel ? '#f8fafc' : color};color:#f8fafc;">
-        <div>CUBE ${i + 1}: SECTOR ${p.sectorId} · ${SENSOR_PLAIN_GUIDE[p.sensorMode].label.split(' ')[0]}${p.processed ? ' · COMPRESSED' : ''}</div>
-        <div style="color:${color};">${p.confidence}${p.satisfiesRequestId ? ` · answers ${p.satisfiesRequestId.replace('_', ' ')}` : ' · answers nothing'} · ${p.transmitSec.toFixed(1)}s · <span style="color:#cbd5e1;">${where}</span></div>
+      return `<button data-action="select:${p.id}" title="${escapeHtml(p.headline)}" style="pointer-events:auto;cursor:pointer;text-align:left;font:700 11px/1.3 Inter,system-ui;padding:5px 10px;border-radius:8px;
+        background:${isSel ? 'rgba(56,189,248,0.2)' : 'rgba(11,19,36,0.92)'};border:1.5px solid ${isSel ? '#f8fafc' : color};border-left:4px solid ${color};color:#f8fafc;box-shadow:${isSel ? '0 0 14px rgba(56,189,248,0.28)' : 'none'};">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
+          <span>CUBE ${i + 1} · SEC ${p.sectorId} · ${SENSOR_PLAIN_GUIDE[p.sensorMode].label.split(' ')[0]}${p.processed ? ' · COMP' : ''}</span>
+          <span style="font-size:10px;color:#0b1220;background:${color};border-radius:4px;padding:0 5px;font-weight:800;">${where}</span>
+        </div>
+        <div style="color:${color};font-size:10.5px;margin-top:1px;">${p.confidence}${p.satisfiesRequestId ? ` · ${p.satisfiesRequestId.replace('_', ' ')}` : ' · off-target'} · ${p.transmitSec.toFixed(1)}s</div>
       </button>`;
     }).join('')
-    : '<span style="color:#94a3b8;font-size:12px;">No cubes yet: scan a sector to create one.</span>';
+    : '<span style="color:#94a3b8;font-size:11.5px;letter-spacing:0.2px;">No cubes yet — pick a sector on the globe, then click SCAN or press Space.</span>';
 
   const sensorButtons = sensors.map((m) => {
     const cost = getScanCost(budget, m);
@@ -197,18 +213,19 @@ export function actionBarHtml(state: MissionState, custom?: MissionScenarioConfi
 
   const stalled = isPassStalled(state, custom);
   const scanCost = getScanCost(budget, state.activeSensorMode).powerCost;
+  const activeSensorHex = SENSOR_COLOR[state.activeSensorMode] ?? '#67e8f9';
   const actions = live
     ? [
       btn('queue', 'DOCK SELECTED CUBE [Q]', '#38bdf8', { disabled: !sel || sel.queued || sel.confidence === 'UNVERIFIED', id: 'tb-queue' }),
       btn('cycle', 'NEXT CUBE [→]', '#94a3b8'),
-      btn('transmit', 'CLOSE LINK [T]', '#34d399', { id: 'tb-transmit' }),
+      btn('transmit', 'CLOSE LINK [T]', '#34d399', { active: true, id: 'tb-transmit' }),
     ]
     : [
-      btn('scan', `SCAN SECTOR ${state.selectedSectorId} [Space] -${scanCost} Wh`, '#67e8f9', { disabled: !ops || state.power < scanCost, id: 'tb-scan' }),
+      btn('scan', `SCAN SECTOR ${state.selectedSectorId} [Space] -${scanCost} Wh`, activeSensorHex, { disabled: !ops || state.power < scanCost, active: ops && state.power >= scanCost && !sel, id: 'tb-scan' }),
       btn('process', `COMPRESS [P] -${procCost} Wh`, '#f59e0b', { disabled: !ops || !sel || sel.processed || sel.confidence === 'UNVERIFIED' || state.power < procCost, id: 'tb-process' }),
       sel?.queued
-        ? btn('unqueue', 'UNLOAD FROM BAY [U]', '#38bdf8', { disabled: !ops, id: 'tb-queue' })
-        : btn('queue', 'LOAD INTO BAY [Q]', '#38bdf8', { disabled: !ops || !sel, id: 'tb-queue' }),
+        ? btn('unqueue', 'UNLOAD BAY [U]', '#38bdf8', { disabled: !ops, id: 'tb-queue' })
+        : btn('queue', 'LOAD BAY [Q]', '#38bdf8', { disabled: !ops || !sel, id: 'tb-queue' }),
       btn('discard', 'DISCARD [X]', '#f87171', { disabled: !ops || !sel, id: 'tb-discard' }),
       stalled
         ? btn('abort', 'ABORT PASS', '#f87171', { active: true, id: 'tb-abort' })
@@ -216,11 +233,12 @@ export function actionBarHtml(state: MissionState, custom?: MissionScenarioConfi
     ];
 
   return `
-    <div style="display:flex;flex-direction:column;gap:6px;align-items:center;">
-      <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;">${cubeChips}</div>
-      ${live ? '' : `<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;align-items:center;"><span style="font-size:10px;color:#94a3b8;font-weight:800;letter-spacing:1px;">SENSOR [S]</span>${sensorButtons}</div>`}
-      <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;">
+    <div style="display:flex;flex-direction:column;gap:7px;align-items:center;">
+      <div style="display:flex;gap:7px;flex-wrap:wrap;justify-content:center;align-items:center;">${cubeChips}</div>
+      ${live ? '' : `<div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:center;align-items:center;background:rgba(2,6,23,0.55);border:1px solid rgba(56,189,248,0.18);border-radius:9px;padding:4px 8px;"><span style="font-size:10px;color:#94a3b8;font-weight:800;letter-spacing:1px;padding:0 4px;">SENSOR [S]</span>${sensorButtons}</div>`}
+      <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;align-items:center;">
         ${actions.join('')}
+        <span style="width:1px;height:22px;background:rgba(148,163,184,0.22);margin:0 2px;"></span>
         ${btn('hint', `ASK ARIA [A] -${SCORING.hintPenalty} pts`, '#a78bfa', { disabled: state.phase === 'DEBRIEF' || state.paused, id: 'tb-aria-hint' })}
         ${btn('pause', state.paused ? 'RESUME [Esc]' : 'PAUSE [Esc]', '#94a3b8')}
         ${btn('help', 'HELP [?]', '#94a3b8', { id: 'tb-shortcuts-btn' })}
@@ -228,20 +246,20 @@ export function actionBarHtml(state: MissionState, custom?: MissionScenarioConfi
     </div>`;
 }
 
-export function campaignHtml(
-  state: MissionState,
-  mastery: Partial<Record<MissionScenarioId, MasteryView>>,
-  profile?: MissionProfile | null,
-): string {
-  const card = (id: MissionScenarioId, accent: string) => {
-    const s = MISSION_SCENARIOS[id];
-    const m = mastery[id];
-    const active = state.scenarioId === id;
-    const requests = getScenarioRequests(id);
-    const weighted = isWeightedScenario(requests);
-    const { successScore } = getScenarioThresholds(id);
-    const sensors = (s.availableSensors ?? ['RADAR', 'OPTICAL']).map((x) => SENSOR_PLAIN_GUIDE[x].label.split(' ')[0]).join(' + ');
-    return `<div data-action="launch:${id}" style="cursor:pointer;pointer-events:auto;background:rgba(15,23,42,.85);border:1.5px solid ${active ? accent : 'rgba(148,163,184,.25)'};border-radius:10px;padding:14px;">
+  export function campaignHtml(
+    state: MissionState,
+    mastery: Partial<Record<MissionScenarioId, MasteryView>>,
+    profile?: MissionProfile | null,
+  ): string {
+    const card = (id: MissionScenarioId, accent: string) => {
+      const s = MISSION_SCENARIOS[id];
+      const m = mastery[id];
+      const active = state.scenarioId === id;
+      const requests = getScenarioRequests(id);
+      const weighted = isWeightedScenario(requests);
+      const { successScore } = getScenarioThresholds(id);
+      const sensors = (s.availableSensors ?? ['RADAR', 'OPTICAL']).map((x) => SENSOR_PLAIN_GUIDE[x].label.split(' ')[0]).join(' + ');
+      return `<div data-action="launch:${id}" style="cursor:pointer;pointer-events:auto;background:rgba(15,23,42,.85);border:1.5px solid ${active ? accent : 'rgba(148,163,184,.25)'};border-radius:10px;padding:14px;">
       <div style="font-size:10px;color:${accent};font-weight:800;letter-spacing:1px;">${escapeHtml(s.operationCode ?? id)}</div>
       <div style="font-size:15px;font-weight:800;color:#f8fafc;margin:3px 0 6px;">${escapeHtml(s.name)}</div>
       <div style="font-size:12px;color:#cbd5e1;line-height:1.45;min-height:52px;">${escapeHtml(s.storyLine ?? s.subtitle)}</div>
@@ -250,26 +268,26 @@ export function campaignHtml(
       <div style="font-size:16px;margin-top:6px;color:#fbbf24;letter-spacing:2px;">${starString(starsFor(m as MissionMastery | undefined, successScore))}</div>
       <div style="font-size:11px;margin-top:2px;color:${m?.attempts ? '#34d399' : '#64748b'};font-weight:800;">${m?.attempts ? `BEST ${m.bestScore} PTS · GRADE ${m.bestGrade}` : 'NOT PLAYED YET'}${active ? ' · ACTIVE' : ''}</div>
     </div>`;
-  };
-  const accents = ['#f59e0b', '#38bdf8', '#34d399'];
-  const todayUtc = new Date().toISOString().slice(0, 10);
-  const dailyCrisis = buildDailyPassCrisis(todayUtc);
-  const streak = profile?.daily?.streak ?? 0;
-  const bestStreak = Math.max(profile?.bestStreak ?? 0, streak);
-  const starsTotal = profile ? totalStarsEarned(profile) : 0;
-  const activeSkin: CockpitSkinId = profile?.preferences?.cockpitSkin ?? 'ORBITAL_CYAN';
-  const skinButtons = COCKPIT_SKIN_ORDER.map((skinId) => {
-    const spec = COCKPIT_SKINS[skinId];
-    const unlocked = !profile || isCockpitSkinUnlocked(profile, skinId);
-    const hexCss = `#${spec.primaryHex.toString(16).padStart(6, '0')}`;
-    const isActive = activeSkin === skinId;
-    return `<button data-action="skin:${skinId}" ${unlocked ? '' : 'disabled'} title="${escapeHtml(spec.unlockHint)}" style="
+    };
+    const accents = ['#f59e0b', '#38bdf8', '#34d399'];
+    const todayUtc = new Date().toISOString().slice(0, 10);
+    const dailyCrisis = buildDailyPassCrisis(todayUtc);
+    const streak = profile?.daily?.streak ?? 0;
+    const bestStreak = Math.max(profile?.bestStreak ?? 0, streak);
+    const starsTotal = profile ? totalStarsEarned(profile) : 0;
+    const activeSkin: CockpitSkinId = profile?.preferences?.cockpitSkin ?? 'ORBITAL_CYAN';
+    const skinButtons = COCKPIT_SKIN_ORDER.map((skinId) => {
+      const spec = COCKPIT_SKINS[skinId];
+      const unlocked = !profile || isCockpitSkinUnlocked(profile, skinId);
+      const hexCss = `#${spec.primaryHex.toString(16).padStart(6, '0')}`;
+      const isActive = activeSkin === skinId;
+      return `<button data-action="skin:${skinId}" ${unlocked ? '' : 'disabled'} title="${escapeHtml(spec.unlockHint)}" style="
       font:800 11px/1.2 Inter,system-ui,sans-serif; padding:5px 10px; border-radius:6px; pointer-events:auto;
       cursor:${unlocked ? 'pointer' : 'not-allowed'}; opacity:${unlocked ? 1 : 0.45};
       color:${isActive ? '#0b1220' : '#e2e8f0'}; background:${isActive ? hexCss : 'rgba(15,23,42,.85)'};
       border:1.5px solid ${hexCss};">${escapeHtml(spec.shortLabel)}${unlocked ? '' : ` (LOCK: ${spec.unlockHint})`}</button>`;
-  }).join(' ');
-  return `
+    }).join(' ');
+    return `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
       <div style="font-size:11px;color:#00f0ff;font-weight:800;letter-spacing:2px;">CAMPAIGN [SIMULATED SCENARIOS] · ${starsTotal}★</div>
       <button data-action="close-campaign" id="btn-close-campaign" style="background:none;border:none;color:#94a3b8;font-size:16px;cursor:pointer;pointer-events:auto;">✕</button>
@@ -294,13 +312,13 @@ export function campaignHtml(
       ${btn('academy', 'OP 00: ORBITAL ACADEMY (TRAINING, NO CLOCK)', '#a78bfa', { id: 'camp-card-academy' })}
       ${btn('close-campaign', 'BACK TO COCKPIT', '#38bdf8', { id: 'btn-close-campaign-bottom' })}
     </div>`;
-}
+  }
 
-export function helpHtml(state: MissionState, custom?: MissionScenarioConfig | null): string {
-  const scenario = scenarioOf(state, custom);
-  const proc = scenario.budget.onboardProcess;
-  const row = (k: string, v: string) => `<tr><td style="color:#38bdf8;padding:2px 10px 2px 0;font-weight:800;white-space:nowrap;">${k}</td><td>${v}</td></tr>`;
-  return `
+  export function helpHtml(state: MissionState, custom?: MissionScenarioConfig | null): string {
+    const scenario = scenarioOf(state, custom);
+    const proc = scenario.budget.onboardProcess;
+    const row = (k: string, v: string) => `<tr><td style="color:#38bdf8;padding:2px 10px 2px 0;font-weight:800;white-space:nowrap;">${k}</td><td>${v}</td></tr>`;
+    return `
     <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #334155;padding-bottom:10px;margin-bottom:12px;">
       <div style="font-size:18px;font-weight:800;color:#38bdf8;">HOW TO PLAY ORBIT ZERO</div>
       <button data-action="help" id="btn-close-help" style="background:none;border:1px solid #64748b;color:#cbd5e1;border-radius:4px;padding:4px 8px;cursor:pointer;pointer-events:auto;">Close [?]</button>
@@ -339,14 +357,14 @@ export function helpHtml(state: MissionState, custom?: MissionScenarioConfig | n
         <div style="margin-top:8px;color:#94a3b8;">In VR: point your hand laser and pinch to choose; pinch the plunger or aim the scanner beam at a sector and let go to scan; carry cubes to the stations; pinch the green lever to transmit.</div>
       </div>
     </div>`;
-}
+  }
 
-/** Points line for one debrief: achieved vs best possible, with hint cost. */
-export function debriefScoreLine(state: MissionState, custom?: MissionScenarioConfig | null): string {
-  const d = state.debrief;
-  if (!d) return '';
-  const requests = getScenarioRequests(state.scenarioId, custom);
-  const bonus = verificationBonus(requests, d.requestsVerifiedCount, d.droppedPacketIds.length);
-  const hintCost = (d.hintsUsed ?? 0) * (d.hintPenalty ?? SCORING.hintPenalty);
-  return `${d.totalScore} pts (best possible ${d.achievableScore})${bonus ? ` incl. +${bonus} bonus` : ''}${hintCost ? ` · hints -${hintCost}` : ''} · win line ${d.successScore ?? SCORING.defaultSuccessScore}`;
-}
+  /** Points line for one debrief: achieved vs best possible, with hint cost. */
+  export function debriefScoreLine(state: MissionState, custom?: MissionScenarioConfig | null): string {
+    const d = state.debrief;
+    if (!d) return '';
+    const requests = getScenarioRequests(state.scenarioId, custom);
+    const bonus = verificationBonus(requests, d.requestsVerifiedCount, d.droppedPacketIds.length);
+    const hintCost = (d.hintsUsed ?? 0) * (d.hintPenalty ?? SCORING.hintPenalty);
+    return `${d.totalScore} pts (best possible ${d.achievableScore})${bonus ? ` incl. +${bonus} bonus` : ''}${hintCost ? ` · hints -${hintCost}` : ''} · win line ${d.successScore ?? SCORING.defaultSuccessScore}`;
+  }

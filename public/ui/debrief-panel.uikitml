@@ -9,10 +9,10 @@
     padding-bottom: 14px;
     padding-left: 16px;
     padding-right: 16px;
-    background-color: #060e1de6;
+    background-color: #040a17f5;
     border-radius: 14px;
-    border-width: 1.5px;
-    border-color: #0284c7;
+    border-width: 2px;
+    border-color: #22d3ee;
   }
 
   .debrief-banner {

@@ -15,9 +15,9 @@
     padding-bottom: 16px;
     padding-left: 22px;
     padding-right: 22px;
-    background-color: #050c19f2;
+    background-color: #040a17f5;
     border-radius: 18px;
-    border-width: 2px;
+    border-width: 2.5px;
     border-color: #22d3ee;
   }
   .section { flex-direction: column; width: 100%; }

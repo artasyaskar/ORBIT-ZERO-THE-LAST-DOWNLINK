@@ -11,10 +11,10 @@
     padding-bottom: 14px;
     padding-left: 18px;
     padding-right: 18px;
-    background-color: #060e1df0;
+    background-color: #040a17f5;
     border-radius: 16px;
     border-width: 2px;
-    border-color: #0284c7;
+    border-color: #22d3ee;
   }
 
   .operation-title-bar {

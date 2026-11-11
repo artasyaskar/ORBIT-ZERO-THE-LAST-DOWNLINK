@@ -2006,24 +2006,23 @@ export class MissionControlSystem extends createSystem({
         epsHeartbeat.material.emissiveIntensity = 0.5 + 0.3 * Math.sin(this.elapsedTime * 3.14);
       }
 
-      // Starboard (Right) Window Flight Locus (Concept Images 1 & 2):
-      // Satellite cruises comfortably inside the right window without obscuring the central Earth globe
-      // Kept well behind the side HUD panels (they sit about 1 m out) so it never floats over text.
-      const satBaseX = 0.85;
-      const satBaseY = 1.45;
-      const satBaseZ = -1.9;
-      const bobTime = this.elapsedTime * (reducedMotion ? 0.3 : 0.65);
-      const satX = satBaseX + Math.sin(bobTime * 0.5) * 0.04;
-      const satY = satBaseY + Math.cos(bobTime * 0.8) * 0.025;
-      const satZ = satBaseZ + Math.cos(bobTime * 0.5) * 0.035;
+      // Continuous inclined Low-Earth Orbit (LEO) circular path around the central Tactical Earth Globe:
+      // Orbits round-and-round outside the globe rings while clearing desk trays (y >= 0.94m) and eye/HUD (z <= -0.14m).
+      const orbitGlobe = this.sceneObject('earth-globe');
+      const orbitCenter = orbitGlobe ? orbitGlobe.getWorldPosition(this.tempVec) : this.tempVec.set(0, 1.07, -0.48);
+      const globeScaleRatio = orbitGlobe ? Math.max(0.42, orbitGlobe.scale.x / 1.32) : 1;
+      const orbitR = 0.355 * globeScaleRatio;
+      const tilt = 0.42; // 24 deg LEO orbital inclination around Earth globe
+      const orbitAngle = this.elapsedTime * (reducedMotion ? 0.16 : 0.56);
+      const satX = orbitCenter.x + Math.cos(orbitAngle) * orbitR;
+      const satY = orbitCenter.y + Math.sin(orbitAngle) * orbitR * Math.sin(tilt) + 0.04 * globeScaleRatio;
+      const satZ = orbitCenter.z + Math.sin(orbitAngle) * orbitR * Math.cos(tilt);
       cubesat.position.set(satX, satY, satZ);
+      cubesat.scale.setScalar(0.38 * globeScaleRatio);
 
-      // Attitude: Tilted gracefully displaying gold Kapton foil, solar arrays, and communications antenna
-      cubesat.rotation.set(
-        0.18 + Math.sin(bobTime * 0.4) * 0.05,
-        -0.62 + Math.cos(bobTime * 0.3) * 0.06,
-        -0.12 + Math.sin(bobTime * 0.6) * 0.04,
-      );
+      // Nadir-tracking attitude: keeps optical bulkhead pointed toward Earth center during orbital sweep
+      // (Downlink phase overrides attitude with exact ADCS lookAt(karachiWorld) right below).
+      cubesat.lookAt(orbitCenter);
     }
 
     // Live Proximity Aiming Laser & Target Reticle Lock when scanner wand is held
@@ -2505,6 +2504,11 @@ export class MissionControlSystem extends createSystem({
     epsHeartbeat.name = 'PowerTelemetryHeartbeatLED';
     epsHeartbeat.position.set(-0.024, 0.045, -0.06);
     cubesat.add(epsHeartbeat);
+
+    // Prevent the orbiting 3U CubeSat from intercepting desktop clicks aimed at Earth sectors behind it.
+    cubesat.traverse((c) => {
+      c.raycast = () => {};
+    });
   }
 
   /**
@@ -6733,9 +6737,9 @@ export class MissionControlSystem extends createSystem({
       const diagPrefix =
         d.outcome !== 'SUCCESS' && d.failureExplanation
           ? (() => {
-              const g = retryGuidanceFor(d);
-              return g ? `${g.title}. ${clipText(g.body, 150)} ` : '';
-            })()
+            const g = retryGuidanceFor(d);
+            return g ? `${g.title}. ${clipText(g.body, 150)} ` : '';
+          })()
           : '';
       this.setText(
         this.debriefPanel,
