@@ -94,15 +94,22 @@ export async function playOrbitalAcademyHandsOnly(player) {
   };
 }
 
+async function advanceToNextMissionViaHud(player) {
+  await player.lookAt('GLOBE');
+  await player.pointAndPinch('hand-right', 'mission-hud:Btn_HudNext');
+  await player.settle(5);
+  // Advancing opens the next operation's Mission Card on the forward HUD.
+  await player.pointAndPinch('hand-right', 'mission-hud:Btn_StartPass');
+  await player.settle(5);
+}
+
 export async function playFirelineHandsOnly(player) {
   const page = player.page;
 
-  // If in DEBRIEF (e.g. from Academy), advance to Fireline via hands-only debrief button
+  // If in DEBRIEF (e.g. from Academy), advance to Fireline via hands-only forward Mission HUD button
   const current = await page.evaluate(() => window.__ORBIT_ZERO__.getState());
   if (current.phase === 'DEBRIEF') {
-    await player.lookAt('DEBRIEF_PANEL');
-    await player.pointAndPinch('hand-right', 'debrief-panel:Btn_NextMission');
-    await player.settle(5);
+    await advanceToNextMissionViaHud(player);
   }
 
   const firelineInit = await page.evaluate(() => window.__ORBIT_ZERO__.getState());
@@ -202,10 +209,8 @@ export async function playFirelineHandsOnly(player) {
 export async function playMonsoonShieldHandsOnly(player) {
   const page = player.page;
 
-  // Advance to Monsoon Shield in VR via debrief-panel:Btn_NextMission
-  await player.lookAt('DEBRIEF_PANEL');
-  await player.pointAndPinch('hand-right', 'debrief-panel:Btn_NextMission');
-  await player.settle(5);
+  // Advance to Monsoon Shield in VR via forward Mission HUD Next Operation -> Start Pass
+  await advanceToNextMissionViaHud(player);
 
   const state = await page.evaluate(() => window.__ORBIT_ZERO__.getState());
   assert.equal(state.scenarioId, 'STANDARD_INDUS_PASS', 'Must transition to STANDARD_INDUS_PASS');
@@ -292,10 +297,8 @@ export async function playMonsoonShieldHandsOnly(player) {
 export async function playAftershockHandsOnly(player) {
   const page = player.page;
 
-  // Advance to Aftershock in VR via debrief-panel:Btn_NextMission
-  await player.lookAt('DEBRIEF_PANEL');
-  await player.pointAndPinch('hand-right', 'debrief-panel:Btn_NextMission');
-  await player.settle(5);
+  // Advance to Aftershock in VR via forward Mission HUD Next Operation -> Start Pass
+  await advanceToNextMissionViaHud(player);
 
   const state = await page.evaluate(() => window.__ORBIT_ZERO__.getState());
   assert.equal(state.scenarioId, 'AFTERSHOCK_PASS', 'Must transition to AFTERSHOCK_PASS');
@@ -313,14 +316,14 @@ export async function playAftershockHandsOnly(player) {
     assert.equal(mode, targetMode, `Must have set sensor mode to ${targetMode}`);
   };
 
-  // 1. Sector B (Landslide Dam Scarp): SAR Radar (creates evidence-cube-1)
+  // 1. Sector B (Landslide Dam Scarp, 40 pts): SAR Radar (creates evidence-cube-1, -14 Wh)
   await ensureSensor('RADAR');
   await player.lookAt('GLOBE');
   await player.pointAndPinch('hand-right', 'sector-b');
   await player.pointAndPinch('hand-right', 'pad-fire-swath');
   await player.settle(5);
 
-  // In 6-STR Aftershock buffer, compress Cube 1 immediately to free storage (3 STR -> 1 STR)
+  // In 6-STR Aftershock buffer, compress Cube 1 to free storage (3 STR -> 1 STR, -6 Wh)
   await player.lookAt('CUBES_TRAY');
   await player.carryAndDropCube('hand-left', 'evidence-cube-1', 'PROCESS_CRADLE');
   await page.waitForTimeout(750);
@@ -329,43 +332,33 @@ export async function playAftershockHandsOnly(player) {
   await player.carryAndDropCube('hand-right', 'evidence-cube-1', 'DOWNLINK_SLOT_1');
   await player.settle(5);
 
-  // 2. Sector E (Chaman Fault Substation): Thermal IR (creates evidence-cube-2)
+  // 2. Sector E (Chaman Fault Substation, 30 pts): Thermal IR (creates evidence-cube-2, -11 Wh)
   await ensureSensor('THERMAL');
   await player.lookAt('GLOBE');
   await player.pointAndPinch('hand-right', 'sector-e');
   await player.pointAndPinch('hand-right', 'pad-fire-swath');
   await player.settle(5);
 
-  // Compress Cube 2 in Cradle (3 STR -> 1 STR) and stage to Bay Slot 3
+  // Compress Cube 2 in Cradle (3 STR -> 1 STR, -6 Wh) and stage to Bay Slot 2
+  // (42 Wh solar-storm battery prevents confirming all 3 targets; B + E = 70 pts >= 65 win line)
   await player.lookAt('CUBES_TRAY');
   await player.carryAndDropCube('hand-left', 'evidence-cube-2', 'PROCESS_CRADLE');
   await page.waitForTimeout(750);
   await player.settle(5);
   await player.lookAt('DOWNLINK_BAY');
-  await player.carryAndDropCube('hand-right', 'evidence-cube-2', 'DOWNLINK_SLOT_3');
-  await player.settle(5);
-
-  // 3. Sector C (Hospital Viaduct Alignment): Optical (creates evidence-cube-3)
-  await ensureSensor('OPTICAL');
-  await player.lookAt('GLOBE');
-  await player.pointAndPinch('hand-right', 'sector-c');
-  await player.pointAndPinch('hand-right', 'pad-fire-swath');
-  await player.settle(5);
-
-  // Dock Cube 3 (Sector C Optical raw, 40 MB) directly into Bay Slot 2
-  await player.lookAt('CUBES_TRAY');
-  await player.carryAndDropCube('hand-right', 'evidence-cube-3', 'DOWNLINK_SLOT_2');
+  await player.carryAndDropCube('hand-right', 'evidence-cube-2', 'DOWNLINK_SLOT_2');
   await player.settle(5);
 
   const preCommitAftershock = await page.evaluate(() => window.__ORBIT_ZERO__.getState());
-  assert.equal(preCommitAftershock.queuePacketIds.length, 3, 'All 3 cubes staged in Downlink Bay');
+  assert.equal(preCommitAftershock.queuePacketIds.length, 2, 'Optimal 2 priority cubes staged in Downlink Bay');
   assert.ok(preCommitAftershock.downlinkCommittedSec <= 9.0, 'Aftershock compressed queue must fit within 9.0s window');
-  assert.ok(
-    preCommitAftershock.downlinkCommittedSec === 7.6 || preCommitAftershock.downlinkCommittedSec === 7.8,
-    `Aftershock compressed queue must be 7.6s or 7.8s (got ${preCommitAftershock.downlinkCommittedSec})`,
+  assert.equal(
+    preCommitAftershock.downlinkCommittedSec,
+    3.6,
+    `B+E compressed queue must be 3.6s (got ${preCommitAftershock.downlinkCommittedSec})`,
   );
 
-  // 7. Commit Downlink
+  // 3. Commit Downlink
   await player.lookAt('DOWNLINK_BAY');
   await player.pointAndPinch('hand-right', 'pad-commit-downlink');
   await page.waitForFunction(() => window.__ORBIT_ZERO__.getState().phase === 'DEBRIEF', null, { timeout: 25000 });
@@ -373,7 +366,7 @@ export async function playAftershockHandsOnly(player) {
 
   const debrief = await page.evaluate(() => window.__ORBIT_ZERO__.getState());
   assert.equal(debrief.debrief.outcome, 'SUCCESS', 'Aftershock must complete with SUCCESS');
-  assert.ok(debrief.debrief.totalScore >= 83, `Aftershock triage must achieve >= 83 points (got ${debrief.debrief.totalScore})`);
+  assert.ok(debrief.debrief.totalScore >= 65, `Aftershock triage must meet 65+ win line (got ${debrief.debrief.totalScore})`);
 
   return {
     stage: 'OP_03_AFTERSHOCK',

@@ -283,8 +283,11 @@ try {
   // STAGE 6: Adversarial & Resiliency Stress Suite
   // -------------------------------------------------------------------------
   console.log('\n[Stage 6/8] Executing Adversarial & Resiliency Stress Suite...');
-  // Reload mission to clean state for stress tests
-  await player.pointAndPinch('hand-right', 'debrief-panel:Btn_RestartMission');
+  // Reload mission to clean state for stress tests via forward Mission HUD Retry + Start Pass
+  await player.lookAt('GLOBE');
+  await player.pointAndPinch('hand-right', 'mission-hud:Btn_HudRetry');
+  await player.settle(5);
+  await player.pointAndPinch('hand-right', 'mission-hud:Btn_StartPass');
   await player.settle(6);
 
   // Scan a cube for stress tests

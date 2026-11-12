@@ -174,16 +174,16 @@
       },
       "transform": {
         "position": [
-          0.43,
-          1.095,
-          -0.48
+          0.42,
+          1.17,
+          -0.66
         ],
         "rotationDeg": [
           0,
           -90,
           0
         ],
-        "scale": 0.62
+        "scale": 0.56
       },
       "components": {}
     },

@@ -2021,19 +2021,20 @@ export class MissionControlSystem extends createSystem({
         epsHeartbeat.material.emissiveIntensity = 0.5 + 0.3 * Math.sin(this.elapsedTime * 3.14);
       }
 
-      // Continuous inclined Low-Earth Orbit (LEO) elliptical path around the central Tactical Earth Globe:
-      // Larger hero silhouette (0.62 scale) clearing the globe rings, desk trays (y >= 0.93m), and user/HUD (z <= -0.18m).
+      // Continuous inclined coronal-halo Low-Earth Orbit (LEO) around the Tactical Earth Globe:
+      // Sweeps wide around both flanks & polar crown (d_eye >= 0.61m, y >= 0.96m, 0% globe occlusion).
       const orbitGlobe = this.sceneObject('earth-globe');
       const orbitCenter = orbitGlobe ? orbitGlobe.getWorldPosition(this.tempVec) : this.tempVec.set(0, 1.07, -0.48);
       const globeScaleRatio = orbitGlobe ? Math.max(0.42, orbitGlobe.scale.x / 1.32) : 1;
-      const orbitRx = 0.43 * globeScaleRatio;
-      const orbitRz = 0.30 * globeScaleRatio;
+      const orbitRx = 0.42 * globeScaleRatio;
+      const orbitRy = 0.21 * globeScaleRatio;
+      const orbitRz = 0.16 * globeScaleRatio;
       const orbitAngle = this.elapsedTime * (reducedMotion ? 0.16 : 0.56);
       const satX = orbitCenter.x + Math.cos(orbitAngle) * orbitRx;
-      const satY = orbitCenter.y + Math.sin(orbitAngle) * 0.14 * globeScaleRatio + 0.025 * globeScaleRatio;
-      const satZ = orbitCenter.z + Math.sin(orbitAngle) * orbitRz;
+      const satY = orbitCenter.y + 0.10 * globeScaleRatio + Math.sin(orbitAngle) * orbitRy;
+      const satZ = orbitCenter.z - 0.18 * globeScaleRatio + Math.sin(orbitAngle) * orbitRz;
       cubesat.position.set(satX, satY, satZ);
-      cubesat.scale.setScalar(0.62 * globeScaleRatio);
+      cubesat.scale.setScalar(0.56 * globeScaleRatio);
 
       // Nadir-tracking attitude with a gentle orbital bank so both gold/cobalt wings & dish read cleanly
       // (Downlink phase overrides attitude with exact ADCS lookAt(karachiWorld) right below).
@@ -3885,7 +3886,7 @@ export class MissionControlSystem extends createSystem({
     } else {
       this.setPanelShown(this.briefingPanel, show && !isDebrief);
       this.setPanelShown(this.telemetryPanel, show && !isDebrief);
-      this.setPanelShown(this.debriefPanel, isDebrief);
+      this.setPanelShown(this.debriefPanel, show && isDebrief);
     }
     // The forward Mission HUD exists only in a live immersive session; on flat screens the DOM HUD
     // shows the same content (shared models in src/ui/hudText.ts).
