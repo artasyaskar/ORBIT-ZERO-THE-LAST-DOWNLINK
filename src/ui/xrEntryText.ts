@@ -113,6 +113,8 @@ export function launchProblem(error: unknown): XrEntryProblem {
       return { message: 'This browser cannot start VR for this game.', hint: 'Update the browser, or play on this screen.', detail };
     case 'InvalidStateError':
       return { message: 'Another VR session is still open.', hint: 'Close it, then tap TRY AGAIN.', detail };
+    case 'AbortError':
+      return { message: 'VR did not start.', hint: 'Wake the headset or squeeze a controller trigger, then tap TRY AGAIN.', detail };
     default:
       return { message: 'VR did not start.', hint: 'Tap TRY AGAIN. If it fails again, reload the page.', detail };
   }

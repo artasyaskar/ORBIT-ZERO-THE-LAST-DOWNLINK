@@ -14,12 +14,10 @@ import projectOptions from 'virtual:iwsdk-project';
 import type { MissionScenarioId } from './mission/types';
 import { MissionControlSystem } from './systems/missionControlSystem';
 import { unlockOrbitalAudioGesture } from './systems/orbitalAudio';
+import { loadMissionProfile } from './systems/missionProfile';
 import { PerfMonitorSystem } from './systems/perfMonitor';
-import { LandingController } from './landing/landingController';
-import { defaultCampaignCard } from './landing/landingUI';
 import { getXrEntryOverlay } from './ui/xrEntryOverlay';
 import { detectImmersiveVr, isStandaloneHeadsetBrowser } from './ui/xrEntryText';
-import './landing/landing.css';
 
 export interface OrbitZeroLaunchConfig {
   launchXR?: boolean;
@@ -109,11 +107,11 @@ function startHeadsetLobby(scenarioId: MissionScenarioId | null, tutorial: boole
   const overlay = getXrEntryOverlay();
   overlay.showLoading('Loading 3D cockpit & orbital globe...');
   const support = detectImmersiveVr(navigator.xr, window.isSecureContext);
-  const card = defaultCampaignCard();
+  const tutorialComplete = loadMissionProfile().tutorialComplete;
   initOrbitZeroGame({
     launchXR: false,
-    initialScenarioId: scenarioId ?? card.scenarioId,
-    startTutorial: scenarioId ? tutorial : card.startTutorial,
+    initialScenarioId: scenarioId ?? (tutorialComplete ? 'FIRELINE_PASS' : 'ORBITAL_ACADEMY'),
+    startTutorial: scenarioId ? tutorial : !tutorialComplete,
     onProgress: (stage) => overlay.setLoadingStage(stage),
   })
     .then(async (world) => {
@@ -182,21 +180,29 @@ function bootstrap(): void {
     return;
   }
 
-  // Standard user entry: Cinematic Landing Experience
-  const landing = new LandingController(document.body, async (selection) => {
-    try {
-      await initOrbitZeroGame({
-        launchXR: selection.launchXR,
-        initialScenarioId: selection.scenarioId,
-        startTutorial: selection.startTutorial,
+  // Standard user entry: Cinematic Landing Experience (lazy-loaded so Quest headset boots skip landing assets)
+  void import('./landing/landing.css')
+    .then(() => import('./landing/landingController'))
+    .then(({ LandingController }) => {
+      const landing = new LandingController(document.body, async (selection) => {
+        try {
+          await initOrbitZeroGame({
+            launchXR: selection.launchXR,
+            initialScenarioId: selection.scenarioId,
+            startTutorial: selection.startTutorial,
+          });
+        } catch (err) {
+          console.error('[ORBIT ZERO] Game launch failed:', err);
+          showLaunchNotice('Mission launch failed. Reload the page to return to the menu.');
+        }
       });
-    } catch (err) {
-      console.error('[ORBIT ZERO] Game launch failed:', err);
-      showLaunchNotice('Mission launch failed. Reload the page to return to the menu.');
-    }
-  });
 
-  (window as any).__ORBIT_LANDING_CONTROLLER__ = landing;
+      (window as any).__ORBIT_LANDING_CONTROLLER__ = landing;
+    })
+    .catch((err) => {
+      console.error('[ORBIT ZERO] Landing controller load failed:', err);
+      showLaunchNotice('Landing screen failed to load. Reload the page or append ?headset to enter cockpit.');
+    });
 }
 
 if (typeof document !== 'undefined') {

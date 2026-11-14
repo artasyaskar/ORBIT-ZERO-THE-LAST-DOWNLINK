@@ -160,6 +160,7 @@ export class VoiceCommander {
   private held = false;
   private cooldownTimestamps = new Map<VoiceDialogueId, number>();
   private speechTimeoutId: number | null = null;
+  private speechWatchdogId: number | null = null;
   private radioTransientTimeoutId: number | null = null;
   private advanceQueueTimeoutId: number | null = null;
   private subtitleFadeTimeoutId: number | null = null;
@@ -224,6 +225,13 @@ export class VoiceCommander {
       if (interrupted) this.queue.unshift(interrupted);
       this.activeLine = null;
       return;
+    }
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.resume?.();
+      } catch {
+        // Ignore browser speechSynthesis resume guards
+      }
     }
     if (!this.isSpeaking) this.advanceQueue();
   }
@@ -458,6 +466,12 @@ export class VoiceCommander {
       }
 
       try {
+        const synth = window.speechSynthesis;
+        if (synth.paused) {
+          try {
+            synth.resume?.();
+          } catch {}
+        }
         const utterance = new SpeechSynthesisUtterance(line.spoken);
         utterance.rate = line.rate ?? 1.08;
         utterance.pitch = line.pitch ?? 0.95;
@@ -468,8 +482,9 @@ export class VoiceCommander {
 
         let hasFinished = false;
         const finishOnce = () => {
-          if (hasFinished) return;
+          if (hasFinished || this.activeLine !== line) return;
           hasFinished = true;
+          this.clearSpeechWatchdog();
           this.onSpeechFinished();
         };
 
@@ -480,7 +495,28 @@ export class VoiceCommander {
         const fallbackMs = Math.max(2000, line.spoken.length * 85);
         this.speechTimeoutId = setTimeout(finishOnce, fallbackMs) as unknown as number;
 
-        window.speechSynthesis.speak(utterance);
+        synth.speak(utterance);
+
+        // Quest/mobile Chromium watchdog: recover if speech queue silently fails to start
+        this.clearSpeechWatchdog();
+        this.speechWatchdogId = setTimeout(() => {
+          this.speechWatchdogId = null;
+          if (hasFinished || !this.isSpeaking || this.activeLine !== line) return;
+          try {
+            if (synth.paused) {
+              synth.resume?.();
+            }
+            if (!synth.speaking && !synth.pending) {
+              if (this.speechTimeoutId !== null) {
+                clearTimeout(this.speechTimeoutId);
+              }
+              const remainingMs = Math.max(1500, line.spoken.length * 75 - 350);
+              this.speechTimeoutId = setTimeout(finishOnce, remainingMs) as unknown as number;
+            }
+          } catch {
+            // Keep main safety timeout intact
+          }
+        }, 350) as unknown as number;
       } catch {
         this.fallbackTimer(line);
       }
@@ -500,7 +536,15 @@ export class VoiceCommander {
     }, fallbackMs) as unknown as number;
   }
 
+  private clearSpeechWatchdog(): void {
+    if (this.speechWatchdogId !== null) {
+      clearTimeout(this.speechWatchdogId);
+      this.speechWatchdogId = null;
+    }
+  }
+
   private onSpeechFinished(): void {
+    this.clearSpeechWatchdog();
     if (this.speechTimeoutId !== null) {
       clearTimeout(this.speechTimeoutId);
       this.speechTimeoutId = null;
@@ -538,6 +582,7 @@ export class VoiceCommander {
   }
 
   private stopCurrentSpeech(): void {
+    this.clearSpeechWatchdog();
     if (this.radioTransientTimeoutId !== null) {
       clearTimeout(this.radioTransientTimeoutId);
       this.radioTransientTimeoutId = null;

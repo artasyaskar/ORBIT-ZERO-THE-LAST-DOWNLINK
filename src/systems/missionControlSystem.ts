@@ -3122,13 +3122,22 @@ export class MissionControlSystem extends createSystem({
     if (!session || this.boundXRSession === session) return;
     this.boundXRSession = session;
 
-    const onSelectStart = (event: XRInputSourceEvent) => this.nativeHands.setSelect(event.inputSource, true);
+    const onSelectStart = (event: XRInputSourceEvent) => {
+      this.audio?.unlockFromGesture();
+      this.nativeHands.setSelect(event.inputSource, true);
+    };
     const onSelectEnd = (event: XRInputSourceEvent) => this.nativeHands.setSelect(event.inputSource, false);
+    const onSqueezeStart = () => {
+      this.audio?.unlockFromGesture();
+    };
     const onInputSourcesChange = (event: XRInputSourcesChangeEvent) => {
       for (const source of event.removed) {
         if (source.hand && (source.handedness === 'left' || source.handedness === 'right')) {
           this.handleXRHandTrackingLost(source.handedness);
         }
+      }
+      if (event.removed.length > 0 || event.added.length > 0) {
+        this.laserHover.clear();
       }
     };
     const onEnd = () => {
@@ -3145,16 +3154,23 @@ export class MissionControlSystem extends createSystem({
     // Quest system menu (visible-blurred) or headset taken off (hidden): hand input stops, so hold the pass
     // clock, the live window, voice and sound instead of letting them run out unseen. The player resumes
     // from the HUD. This is an event, not a per-frame check: a hidden session delivers no XR frames.
-    const onVisibilityChange = () => this.setInterrupted(session.visibilityState !== 'visible', true);
+    const onVisibilityChange = () => {
+      if (session.visibilityState === 'visible') {
+        this.audio?.unlockFromGesture();
+      }
+      this.setInterrupted(session.visibilityState !== 'visible', true);
+    };
 
     session.addEventListener('selectstart', onSelectStart);
     session.addEventListener('selectend', onSelectEnd);
+    session.addEventListener('squeezestart', onSqueezeStart);
     session.addEventListener('inputsourceschange', onInputSourcesChange);
     session.addEventListener('end', onEnd);
     session.addEventListener('visibilitychange', onVisibilityChange);
     this.cleanupFuncs.push(() => {
       session.removeEventListener('selectstart', onSelectStart);
       session.removeEventListener('selectend', onSelectEnd);
+      session.removeEventListener('squeezestart', onSqueezeStart);
       session.removeEventListener('inputsourceschange', onInputSourcesChange);
       session.removeEventListener('end', onEnd);
       session.removeEventListener('visibilitychange', onVisibilityChange);
@@ -4738,8 +4754,48 @@ export class MissionControlSystem extends createSystem({
     return out;
   }
 
+  private pulseXRHaptics(intensity: number, durationMs: number): void {
+    const session = (this.world.renderer?.xr as any)?.getSession?.() as XRSession | undefined;
+    if (!session?.inputSources) return;
+    const clamped = Math.max(0, Math.min(1, intensity));
+    const ms = Math.max(10, Math.min(250, durationMs));
+    try {
+      for (const source of session.inputSources) {
+        const actuator = (
+          source.gamepad as { hapticActuators?: Array<{ pulse?: (v: number, d: number) => Promise<boolean> | void }> } | undefined
+        )?.hapticActuators?.[0];
+        if (typeof actuator?.pulse === 'function') {
+          void Promise.resolve(actuator.pulse(clamped, ms)).catch(() => {});
+        }
+      }
+    } catch {
+      // Hand tracking or virtual controllers may not expose WebXR hapticActuators
+    }
+  }
+
   private playCue(cue: OrbitalSoundCue): void {
     this.audio.playCue(cue);
+    const hapticProfile: Partial<Record<OrbitalSoundCue, [number, number]>> = {
+      SELECT_SECTOR: [0.18, 22],
+      TOGGLE_SENSOR: [0.22, 24],
+      SCAN_OPTICAL: [0.55, 65],
+      SCAN_RADAR: [0.58, 70],
+      SCAN_UNVERIFIED: [0.38, 95],
+      WAND_LOCK: [0.30, 30],
+      CUBE_GRAB: [0.26, 25],
+      CUBE_DOCK: [0.42, 45],
+      QUEUE_SLOT: [0.42, 45],
+      PROCESS_SUCCESS: [0.60, 80],
+      DOWNLINK_COMMIT: [0.72, 110],
+      PACKET_RECEIVED: [0.50, 55],
+      HANDSHAKE_CONFIRM: [0.52, 60],
+      OPTIMAL_VICTORY: [0.85, 140],
+      ERROR_REJECT: [0.45, 75],
+    };
+    const haptic = hapticProfile[cue];
+    if (haptic) {
+      this.pulseXRHaptics(haptic[0], haptic[1]);
+    }
     this.cueLog.push({ cue, at: Math.round(performance.now()) });
     if (this.cueLog.length > 40) this.cueLog.shift();
     const captions: Partial<Record<OrbitalSoundCue, string>> = {
