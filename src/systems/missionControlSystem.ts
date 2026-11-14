@@ -351,9 +351,12 @@ export class MissionControlSystem extends createSystem({
     { panelId: 'debrief-panel', buttonId: 'Btn_ReplayDecision' },
     { panelId: 'mission-hud', buttonId: 'Btn_StartPass' },
     { panelId: 'mission-hud', buttonId: 'Btn_StartTraining' },
+    { panelId: 'mission-hud', buttonId: 'Btn_CardNextOp' },
+    { panelId: 'mission-hud', buttonId: 'Btn_CardDaily' },
     { panelId: 'mission-hud', buttonId: 'Btn_HudHint' },
     { panelId: 'mission-hud', buttonId: 'Btn_HudTransmit' },
     { panelId: 'mission-hud', buttonId: 'Btn_HudRetry' },
+    { panelId: 'mission-hud', buttonId: 'Btn_HudDaily' },
     { panelId: 'mission-hud', buttonId: 'Btn_HudNext' },
     { panelId: 'telemetry-hud', buttonId: 'Btn_RelaxedClock' },
   ];
@@ -382,6 +385,7 @@ export class MissionControlSystem extends createSystem({
   private elapsedTime = 0;
   private cradlePulseTimer = 0;
   private scanBeamPulseTimer = 0;
+  private downlinkPacketFlashTimer = 0;
   private scanBeamSectorId: SectorId = 'B';
   private scanBeamMode: SensorMode = 'OPTICAL';
   private scanBeamUnverified = false;
@@ -1976,12 +1980,14 @@ export class MissionControlSystem extends createSystem({
             this.tempVecC,
           );
           const len = alignSpan(swathCone, pSatLocal, pSectorLocal);
-          swathCone.scale.set(1, len, 1);
 
           if (this.scanBeamPulseTimer > 0) {
             this.scanBeamPulseTimer = Math.max(0, this.scanBeamPulseTimer - delta);
             const progress = 1.0 - this.scanBeamPulseTimer / 0.85;
-            const opacity = Math.sin(progress * Math.PI) * 0.75;
+            const envelope = Math.sin(progress * Math.PI);
+            const widthPulse = 0.65 + 0.55 * envelope;
+            swathCone.scale.set(widthPulse, len, widthPulse);
+            const opacity = envelope * 0.78;
             const beamHex = this.scanBeamUnverified
               ? 0xef4444
               : this.scanBeamMode === 'OPTICAL'
@@ -2210,6 +2216,7 @@ export class MissionControlSystem extends createSystem({
         this.downlinkUiSyncAccumulator >= 0.15
       ) {
         if (txCount > this.lastTransmittedCount) {
+          this.downlinkPacketFlashTimer = 0.36;
           this.playCue('PACKET_RECEIVED');
           this.announceGroundReceipts(nextState);
         }
@@ -2312,17 +2319,24 @@ export class MissionControlSystem extends createSystem({
               const laserCore = this.childByName(downlinkLaserGroup, 'DownlinkLaserCore');
               const laserSheath = this.childByName(downlinkLaserGroup, 'DownlinkLaserSheath');
 
+              if (this.downlinkPacketFlashTimer > 0) {
+                this.downlinkPacketFlashTimer = Math.max(0, this.downlinkPacketFlashTimer - delta);
+              }
+              const flashRatio = reducedMotion ? 0 : this.downlinkPacketFlashTimer / 0.36;
+              const coreWidth = 1.0 + 0.85 * flashRatio;
+              const sheathWidth = 1.0 + 0.65 * flashRatio;
+
               if (laserCore instanceof Mesh && laserCore.material instanceof MeshBasicMaterial) {
                 laserCore.visible = true;
                 const len = alignSpan(laserCore, pSatLocal, pKarachiLocal);
-                laserCore.scale.set(1, len, 1);
-                laserCore.material.opacity = reducedMotion ? 0.8 : 0.85 + 0.15 * Math.sin(this.elapsedTime * 32);
+                laserCore.scale.set(coreWidth, len, coreWidth);
+                laserCore.material.opacity = reducedMotion ? 0.8 : Math.min(1.0, 0.85 + 0.15 * Math.sin(this.elapsedTime * 32) + 0.15 * flashRatio);
               }
               if (laserSheath instanceof Mesh && laserSheath.material instanceof MeshBasicMaterial) {
                 laserSheath.visible = true;
                 const len = alignSpan(laserSheath, pSatLocal, pKarachiLocal);
-                laserSheath.scale.set(1, len, 1);
-                laserSheath.material.opacity = reducedMotion ? 0.45 : 0.42 + 0.22 * Math.sin(this.elapsedTime * 18);
+                laserSheath.scale.set(sheathWidth, len, sheathWidth);
+                laserSheath.material.opacity = reducedMotion ? 0.45 : Math.min(0.95, 0.42 + 0.22 * Math.sin(this.elapsedTime * 18) + 0.3 * flashRatio);
               }
 
               // ADCS Attitude Slew: Point CubeSat optical downlink aperture toward Karachi Ground Station
@@ -2334,7 +2348,8 @@ export class MissionControlSystem extends createSystem({
               if (shockwave instanceof Mesh && shockwave.material instanceof MeshBasicMaterial) {
                 shockwave.visible = true;
                 const swT = (this.elapsedTime * 3.2) % 1.0;
-                shockwave.scale.set(1.0 + swT * 1.8, 1.0 + swT * 1.8, 1.0);
+                const swScale = 1.0 + swT * 1.8 + 0.45 * flashRatio;
+                shockwave.scale.set(swScale, swScale, 1.0);
                 shockwave.material.opacity = (1.0 - swT) * 0.85;
               }
 
@@ -3861,6 +3876,16 @@ export class MissionControlSystem extends createSystem({
       this.xrCardOpen = false;
       this.launchScenario('ORBITAL_ACADEMY');
     });
+    bindClick(this.missionHud, 'Btn_CardNextOp', () => {
+      this.audio.unlockFromGesture();
+      this.cycleCampaignOperation();
+      this.xrCardOpen = true;
+      this.syncAll();
+    });
+    bindClick(this.missionHud, 'Btn_CardDaily', () => {
+      this.audio.unlockFromGesture();
+      this.startDailyPass();
+    });
     bindClick(this.missionHud, 'Btn_HudHint', () => {
       if (this.tutorial.isActive()) {
         this.playCue('SCENARIO_CYCLE');
@@ -3871,6 +3896,10 @@ export class MissionControlSystem extends createSystem({
     });
     bindClick(this.missionHud, 'Btn_HudTransmit', () => this.handleCommitDownlinkButton());
     bindClick(this.missionHud, 'Btn_HudRetry', () => this.handleRestartMission());
+    bindClick(this.missionHud, 'Btn_HudDaily', () => {
+      this.audio.unlockFromGesture();
+      this.startDailyPass();
+    });
     bindClick(this.missionHud, 'Btn_HudNext', () => this.nextMission());
     bindClick(this.debriefPanel, 'Btn_DailyPass', () => this.startDailyPass());
     bindClick(this.debriefPanel, 'Btn_ReplayDecision', () => this.cycleReplay());
@@ -3972,6 +4001,7 @@ export class MissionControlSystem extends createSystem({
       this.setText(hud, 'CardStory', card.what);
       this.setText(hud, 'CardHow', card.how);
       this.setText(hud, 'CardRules', card.win);
+      this.setText(hud, 'Lbl_CardDaily', this.dailyDate ? 'ACTIVE DAILY OP' : 'DAILY CRISIS');
       return;
     }
 
@@ -3988,7 +4018,7 @@ export class MissionControlSystem extends createSystem({
         if (result.requests[i]) this.setText(hud, `ResultReq${i + 1}`, result.requests[i]);
       }
       this.setText(hud, 'ResultTip', clipText(result.tip, 220));
-      this.setText(hud, 'Lbl_HudNext', state.scenarioId === 'ORBITAL_ACADEMY' ? 'START OP 01' : 'NEXT OPERATION');
+      this.setText(hud, 'Lbl_HudNext', state.scenarioId === 'ORBITAL_ACADEMY' ? 'START OP 01' : 'NEXT OP');
       return;
     }
 
@@ -4708,6 +4738,7 @@ export class MissionControlSystem extends createSystem({
     this.lastDownlinkTickSecond = -1;
     this.downlinkUiSyncAccumulator = 0;
     this.scanBeamPulseTimer = 0;
+    this.downlinkPacketFlashTimer = 0;
     this.cradlePulseTimer = 0;
     const globe = this.sceneObject('earth-globe');
     if (globe) {
