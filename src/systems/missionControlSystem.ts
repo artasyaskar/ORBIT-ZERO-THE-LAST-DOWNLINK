@@ -341,8 +341,20 @@ export class MissionControlSystem extends createSystem({
     { panelId: 'telemetry-hud', buttonId: 'Btn_QueueCube' },
     { panelId: 'telemetry-hud', buttonId: 'Btn_DiscardCube' },
     { panelId: 'telemetry-hud', buttonId: 'Btn_CycleCube' },
+    { panelId: 'telemetry-hud', buttonId: 'Btn_TelemetryReorder' },
     { panelId: 'telemetry-hud', buttonId: 'Btn_Settings' },
+    { panelId: 'telemetry-hud', buttonId: 'Btn_Guidance' },
     { panelId: 'telemetry-hud', buttonId: 'Btn_DominantHand' },
+    { panelId: 'telemetry-hud', buttonId: 'Btn_OneHanded' },
+    { panelId: 'telemetry-hud', buttonId: 'Btn_LargeText' },
+    { panelId: 'telemetry-hud', buttonId: 'Btn_HighContrast' },
+    { panelId: 'telemetry-hud', buttonId: 'Btn_ReducedMotion' },
+    { panelId: 'telemetry-hud', buttonId: 'Btn_Captions' },
+    { panelId: 'telemetry-hud', buttonId: 'Btn_AudioLevel' },
+    { panelId: 'telemetry-hud', buttonId: 'Btn_GazeAssist' },
+    { panelId: 'telemetry-hud', buttonId: 'Btn_RelaxedClock' },
+    { panelId: 'telemetry-hud', buttonId: 'Btn_CockpitSkin' },
+    { panelId: 'telemetry-hud', buttonId: 'Btn_CalibrateTelemetry' },
     { panelId: 'debrief-panel', buttonId: 'Btn_CommitDownlink' },
     { panelId: 'debrief-panel', buttonId: 'Btn_RestartMission' },
     { panelId: 'debrief-panel', buttonId: 'Btn_NextMission' },
@@ -358,7 +370,6 @@ export class MissionControlSystem extends createSystem({
     { panelId: 'mission-hud', buttonId: 'Btn_HudRetry' },
     { panelId: 'mission-hud', buttonId: 'Btn_HudDaily' },
     { panelId: 'mission-hud', buttonId: 'Btn_HudNext' },
-    { panelId: 'telemetry-hud', buttonId: 'Btn_RelaxedClock' },
   ];
   private readonly panelInReachScratch = new Map<string, boolean>();
   private bothPinchHeldSec = 0;
@@ -531,6 +542,8 @@ export class MissionControlSystem extends createSystem({
   // WebXR Hand Joint & XRSession Input Pipeline (IWER 2.7.0 + Physical Meta Quest 3 / 3S)
   private currentInputSource: 'xr-hand' | 'desktop' = 'desktop';
   private boundXRSession: XRSession | null = null;
+  private boundReferenceSpace: XRReferenceSpace | null = null;
+  private readonly controllerButtonPressed = new Map<string, boolean>();
   private readonly nativeHands = new NativeXRHands();
   private readonly cubeInteractions = new CubeInteractions();
   private xrHandEventLog: XRHandTelemetryEvent[] = [];
@@ -1486,7 +1499,10 @@ export class MissionControlSystem extends createSystem({
       this.syncAll(); // headset and flat page show different panels and panel content
     }
     this.updateXRHandInteractions(delta);
-    if (presenting) this.recoverStuckHandRays();
+    if (presenting) {
+      this.pollXRControllerGamepad(delta);
+      this.recoverStuckHandRays();
+    }
     this.updateMissionHudPose(Math.min(Math.max(0, delta), 0.1));
     this.frameSnapshot = this.engine.getState();
     this.syncMediaHold(this.frameSnapshot.paused);
@@ -2260,7 +2276,12 @@ export class MissionControlSystem extends createSystem({
       ) {
         if (currentPhase === 'DOWNLINK') {
           uplinkBeam.visible = true;
-          uplinkBeam.material.opacity = reducedMotion ? 0.5 : 0.42 + 0.22 * Math.sin(this.elapsedTime * 18);
+          const beamFlash = reducedMotion ? 0 : this.downlinkPacketFlashTimer / 0.36;
+          const beamWidth = 1.0 + 0.75 * beamFlash;
+          uplinkBeam.scale.set(beamWidth, 1, beamWidth);
+          uplinkBeam.material.opacity = reducedMotion
+            ? 0.5
+            : Math.min(0.95, 0.42 + 0.22 * Math.sin(this.elapsedTime * 18) + 0.28 * beamFlash);
 
           const pA = this.beamStart;
           const pB = this.beamEnd;
@@ -2772,6 +2793,21 @@ export class MissionControlSystem extends createSystem({
    * the height; the RECENTER pad and the briefing button refit all three axes on demand.
    */
   private updateSeatFit(): void {
+    const space = this.world.renderer.xr.getReferenceSpace();
+    if (space && this.boundReferenceSpace !== space && typeof (space as any).addEventListener === 'function') {
+      this.boundReferenceSpace = space;
+      const onRefSpaceReset = () => {
+        this.seatFitPending = true;
+        this.seatHeightOffSinceMs = 0;
+        this.laserHover.clear();
+      };
+      space.addEventListener('reset', onRefSpaceReset);
+      this.cleanupFuncs.push(() => {
+        try {
+          space.removeEventListener('reset', onRefSpaceReset);
+        } catch {}
+      });
+    }
     if (this.seatFitPending) {
       const head = this.readHeadLocal();
       if (!head) return;
@@ -2949,9 +2985,22 @@ export class MissionControlSystem extends createSystem({
       Btn_ProcessCube: [-0.12, -0.12, 0.02],
       Btn_QueueCube: [0.0, -0.12, 0.02],
       Btn_DiscardCube: [0.12, -0.12, 0.02],
-      Btn_CycleCube: [-0.10, -0.20, 0.02],
-      Btn_Pause: [0.0, -0.20, 0.02],
-      Btn_Settings: [0.10, -0.20, 0.02],
+      Btn_CycleCube: [-0.10, -0.18, 0.02],
+      Btn_TelemetryReorder: [0.10, -0.18, 0.02],
+      Btn_Pause: [-0.10, -0.22, 0.02],
+      Btn_Settings: [0.10, -0.22, 0.02],
+      Btn_Guidance: [-0.10, -0.25, 0.02],
+      Btn_DominantHand: [0.10, -0.25, 0.02],
+      Btn_OneHanded: [-0.10, -0.27, 0.02],
+      Btn_LargeText: [0.10, -0.27, 0.02],
+      Btn_HighContrast: [-0.10, -0.29, 0.02],
+      Btn_ReducedMotion: [0.10, -0.29, 0.02],
+      Btn_Captions: [-0.10, -0.31, 0.02],
+      Btn_AudioLevel: [0.10, -0.31, 0.02],
+      Btn_GazeAssist: [-0.10, -0.33, 0.02],
+      Btn_RelaxedClock: [0.10, -0.33, 0.02],
+      Btn_CockpitSkin: [-0.10, -0.35, 0.02],
+      Btn_CalibrateTelemetry: [0.10, -0.35, 0.02],
       Btn_ReorderQueue: [-0.12, -0.16, 0.02],
       Btn_CommitDownlink: [0.0, -0.16, 0.02],
       Btn_RestartMission: [-0.10, -0.22, 0.02],
@@ -2960,10 +3009,13 @@ export class MissionControlSystem extends createSystem({
       Btn_ReplayDecision: [0.10, -0.26, 0.02],
       Btn_StartTraining: [-0.12, -0.14, 0.02],
       Btn_StartPass: [0.12, -0.14, 0.02],
+      Btn_CardNextOp: [-0.12, -0.19, 0.02],
+      Btn_CardDaily: [0.12, -0.19, 0.02],
       Btn_HudHint: [-0.12, -0.09, 0.02],
       Btn_HudTransmit: [0.12, -0.09, 0.02],
-      Btn_HudRetry: [-0.12, -0.12, 0.02],
-      Btn_HudNext: [0.12, -0.12, 0.02],
+      Btn_HudRetry: [-0.15, -0.12, 0.02],
+      Btn_HudDaily: [0.0, -0.12, 0.02],
+      Btn_HudNext: [0.15, -0.12, 0.02],
     };
     const panelCenter = panel.getWorldPosition(new Vector3());
     const off = fallbackOffsets[buttonId] ?? [0, 0, 0.02];
@@ -3153,6 +3205,7 @@ export class MissionControlSystem extends createSystem({
       }
       if (event.removed.length > 0 || event.added.length > 0) {
         this.laserHover.clear();
+        this.controllerButtonPressed.clear();
       }
     };
     const onEnd = () => {
@@ -3160,6 +3213,8 @@ export class MissionControlSystem extends createSystem({
       this.forceReleaseAllGrabs();
       this.nativeHands.reset();
       this.boundXRSession = null;
+      this.boundReferenceSpace = null;
+      this.controllerButtonPressed.clear();
       this.laserHover.clear(); // hand rays end with the session and may not send pointerleave
       // Leaving VR mid-pass (Quest menu > Exit, or the session ended) holds the clock; resume from the page or in VR.
       this.setInterrupted(true, true);
@@ -3637,6 +3692,51 @@ export class MissionControlSystem extends createSystem({
     }
   }
 
+  private pollXRControllerGamepad(delta: number): void {
+    if (!this.world.renderer?.xr?.isPresenting || this.isLiveXRHandActive()) return;
+    const session = (this.world.renderer.xr as any)?.getSession?.() as XRSession | undefined;
+    if (!session?.inputSources) return;
+    const state = this.engine.getState();
+    const canAct = state.phase === 'OPERATIONS' && !state.paused && this.missionHudMode() === 'play';
+    const dt = Math.min(Math.max(0, delta), 0.1);
+    const deadzone = 0.22;
+
+    try {
+      for (const source of session.inputSources) {
+        if (source.hand) continue;
+        const gp = source.gamepad;
+        if (!gp) continue;
+
+        const ax = gp.axes?.[2] ?? 0;
+        const ay = gp.axes?.[3] ?? 0;
+        if ((Math.abs(ax) > deadzone || Math.abs(ay) > deadzone) && !this.isAnyObjectGrabbed()) {
+          const yaw = Math.abs(ax) > deadzone ? -ax * dt * 2.0 : 0;
+          const pitch = Math.abs(ay) > deadzone ? -ay * dt * 1.4 : 0;
+          this.rotateGlobe(yaw, pitch);
+        }
+
+        const side = source.handedness === 'left' || source.handedness === 'right' ? source.handedness : 'none';
+        for (const btnIndex of [4, 5] as const) {
+          const key = `${side}:${btnIndex}`;
+          const pressed = Boolean(gp.buttons?.[btnIndex]?.pressed);
+          const wasPressed = this.controllerButtonPressed.get(key) ?? false;
+          this.controllerButtonPressed.set(key, pressed);
+          if (pressed && !wasPressed && canAct) {
+            this.audio?.unlockFromGesture();
+            if (btnIndex === 4) {
+              if (side === 'left') this.handleCycleSector();
+              else this.handleToggleSensor();
+            } else {
+              this.cycleEvidence();
+            }
+          }
+        }
+      }
+    } catch {
+      // Ignore partial WebXR gamepad implementations
+    }
+  }
+
   private isScannerHeldBy(side: 'left' | 'right'): boolean {
     const scanner = (this.scannerEntity ??= [...this.queries.controls.entities].find((e) => e.getValue(ConsoleControlNode, 'action') === 'SCAN'));
     if (!scanner?.hasComponent(Grabbed)) return false;
@@ -3839,10 +3939,16 @@ export class MissionControlSystem extends createSystem({
       }
       this.cycleEvidence();
     });
+    bindClick(this.telemetryPanel, 'Btn_TelemetryReorder', () => {
+      this.handleReorderQueue();
+    });
     bindClick(this.telemetryPanel, 'Btn_Pause', () => this.togglePause());
     bindClick(this.telemetryPanel, 'Btn_Settings', () => {
       this.settingsOpen = !this.settingsOpen;
       this.telemetryPanel?.getElementById('AccessibilitySettings')?.setProperties({ display: this.settingsOpen ? 'flex' : 'none' });
+    });
+    bindClick(this.telemetryPanel, 'Btn_CalibrateTelemetry', () => {
+      this.calibrateSeatedView();
     });
     const preferenceIds = { guidance: 'Guidance', dominantHand: 'DominantHand', oneHanded: 'OneHanded', gazeAssist: 'GazeAssist', largeText: 'LargeText', highContrast: 'HighContrast', reducedMotion: 'ReducedMotion', captions: 'Captions', audioLevel: 'AudioLevel', relaxedClock: 'RelaxedClock', cockpitSkin: 'CockpitSkin' } as const;
     for (const key of Object.keys(preferenceIds) as (keyof typeof preferenceIds)[]) {
@@ -4009,7 +4115,12 @@ export class MissionControlSystem extends createSystem({
       const result = resultModel(state, custom);
       if (!result) return;
       const color = result.tone === 'success' ? '#34d399' : result.tone === 'warn' ? '#f59e0b' : '#f87171';
-      this.setText(hud, 'ResultKicker', `AFTER-ACTION REVIEW [SIMULATED] | ${formatRunCode(state, custom, this.dailyDate)}`);
+      const medalTag = this.earnedMedals.length ? ` | ${this.earnedMedals.slice(0, 2).join(' + ')}` : '';
+      this.setText(
+        hud,
+        'ResultKicker',
+        `AFTER-ACTION REVIEW [SIMULATED] | ${formatRunCode(state, custom, this.dailyDate)}${medalTag}`,
+      );
       this.setText(hud, 'ResultTitle', result.title);
       this.setTextColor(hud, 'ResultTitle', color);
       this.setText(hud, 'ResultScore', result.score);
@@ -6869,6 +6980,11 @@ export class MissionControlSystem extends createSystem({
       this.telemetryPanel,
       'Lbl_DiscardCube',
       this.isDiscardArmed() ? 'PINCH AGAIN TO DISCARD' : 'DISCARD SELECTED CUBE',
+    );
+    this.setText(
+      this.telemetryPanel,
+      'Lbl_TelemetryReorder',
+      state.queuePacketIds.length >= 2 ? 'REORDER BAY SLOTS' : 'REORDER BAY',
     );
   }
 

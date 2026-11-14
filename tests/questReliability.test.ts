@@ -147,4 +147,21 @@ describe('Quest Browser & WebXR Reliability Hardening', () => {
     expect(xml).toContain('id="Btn_CardDaily"');
     expect(xml).toContain('id="Btn_HudDaily"');
   });
+
+  it('registers 100% of mission-hud and telemetry-hud buttons in PANEL_TOUCH_BUTTONS for finger-poke parity', () => {
+    const mcs = readFileSync(resolve(process.cwd(), 'src/systems/missionControlSystem.ts'), 'utf8');
+    for (const panelFile of ['mission-hud.uikitml', 'telemetry-hud.uikitml']) {
+      const xml = readFileSync(resolve(process.cwd(), 'public/ui', panelFile), 'utf8');
+      const ids = [...xml.matchAll(/<Button\s+id="(Btn_[^"]+)"/g)].map((m) => m[1]);
+      expect(ids.length).toBeGreaterThan(0);
+      for (const id of ids) {
+        expect(mcs, `${panelFile} button ${id} must be in PANEL_TOUCH_BUTTONS`).toContain(`buttonId: '${id}'`);
+      }
+    }
+    const telemetryXml = readFileSync(resolve(process.cwd(), 'public/ui/telemetry-hud.uikitml'), 'utf8');
+    expect(telemetryXml).toContain('id="Btn_TelemetryReorder"');
+    expect(telemetryXml).toContain('id="Btn_CalibrateTelemetry"');
+    expect(mcs).toContain("space.addEventListener('reset', onRefSpaceReset)");
+    expect(mcs).toContain('pollXRControllerGamepad(');
+  });
 });

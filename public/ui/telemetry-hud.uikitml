@@ -185,9 +185,14 @@
   <Button id="Btn_DiscardCube" class="action-btn">
     <ButtonLabel id="Lbl_DiscardCube" style="color: #f87171; font-size: 14px; font-weight: 700;">DISCARD SELECTED CUBE (FREE STORAGE)</ButtonLabel>
   </Button>
-  <Button id="Btn_CycleCube" class="action-btn">
-    <ButtonLabel style="color: #e2e8f0; font-size: 14px; font-weight: 700;">SELECT NEXT EVIDENCE CUBE</ButtonLabel>
-  </Button>
+  <div style="flex-direction: row; gap: 6px; width: 100%;">
+    <Button id="Btn_CycleCube" class="action-btn" style="width: 48%;">
+      <ButtonLabel id="Lbl_CycleCube" style="color: #e2e8f0; font-size: 14px; font-weight: 700;">NEXT CUBE</ButtonLabel>
+    </Button>
+    <Button id="Btn_TelemetryReorder" class="action-btn" style="width: 48%;">
+      <ButtonLabel id="Lbl_TelemetryReorder" style="color: #7dd3fc; font-size: 14px; font-weight: 700;">REORDER BAY</ButtonLabel>
+    </Button>
+  </div>
   <div id="AudioCaption" class="inspector-science" style="height: 36px; overflow: hidden;">GROUND CONTROL: one pass, three requests, one final downlink.</div>
   <div style="flex-direction: row; gap: 6px; width: 100%;">
     <Button id="Btn_Pause" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_Pause" style="color: #e2e8f0; font-size: 14px;">PAUSE PASS</ButtonLabel></Button>
@@ -215,7 +220,8 @@
       <Button id="Btn_RelaxedClock" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_RelaxedClock" style="color: #fbbf24; font-size: 13px;">PASS CLOCK: ON</ButtonLabel></Button>
     </div>
     <div style="flex-direction: row; gap: 6px; width: 100%;">
-      <Button id="Btn_CockpitSkin" class="action-btn" style="width: 100%;"><ButtonLabel id="Lbl_CockpitSkin" style="color: #38bdf8; font-size: 13px;">TRIM SKIN: CYAN</ButtonLabel></Button>
+      <Button id="Btn_CockpitSkin" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_CockpitSkin" style="color: #38bdf8; font-size: 13px;">TRIM SKIN: CYAN</ButtonLabel></Button>
+      <Button id="Btn_CalibrateTelemetry" class="action-btn" style="width: 48%;"><ButtonLabel id="Lbl_CalibrateTelemetry" style="color: #6ee7b7; font-size: 13px;">RECENTER SEAT</ButtonLabel></Button>
     </div>
   </div>
 </Panel>
