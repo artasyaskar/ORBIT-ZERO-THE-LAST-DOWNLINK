@@ -28,6 +28,7 @@ import {
   BackSide,
   BoxGeometry,
   BufferGeometry,
+  CanvasTexture,
   Color,
   CylinderGeometry,
   DirectionalLight,
@@ -153,20 +154,7 @@ export class LandingScene {
     const loader = new TextureLoader();
     const skyGeo = new SphereGeometry(85, 36, 24);
 
-    const skyTex = loader.load(
-      `${ASSET_BASE}assets/textures/milky_way_skybox_4096.jpg`,
-      (tex) => {
-        tex.colorSpace = SRGBColorSpace;
-      },
-      undefined,
-      () => {
-        // Fallback: deep space without skybox
-      }
-    );
-    this.texturesToDispose.push(skyTex);
-
     const skyMat = new MeshBasicMaterial({
-      map: skyTex,
       side: BackSide,
       color: 0x223555, // Clean deep celestial indigo-space tint (filters out magenta noise)
       transparent: true,
@@ -175,7 +163,23 @@ export class LandingScene {
 
     this.skyboxMesh = new Mesh(skyGeo, skyMat);
     this.skyboxMesh.name = 'LandingMilkyWaySkybox';
+    this.skyboxMesh.visible = false;
     this.scene.add(this.skyboxMesh);
+
+    const skyTex = loader.load(
+      `${ASSET_BASE}assets/textures/milky_way_skybox_4096.jpg`,
+      (tex) => {
+        tex.colorSpace = SRGBColorSpace;
+        skyMat.map = tex;
+        skyMat.needsUpdate = true;
+        this.skyboxMesh.visible = true;
+      },
+      undefined,
+      () => {
+        // Fallback: deep space without skybox
+      }
+    );
+    this.texturesToDispose.push(skyTex);
   }
 
   private buildStarfields(): void {
@@ -261,87 +265,137 @@ export class LandingScene {
     this.scene.add(this.starfieldNear);
   }
 
+  private createInstantEarthPlaceholderTexture(): CanvasTexture | null {
+    if (typeof document === 'undefined') return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    // Deep sapphire ocean gradient so Frame 0 immediately displays rich planetary color
+    const ocean = ctx.createLinearGradient(0, 0, 0, 256);
+    ocean.addColorStop(0.0, '#cbd5e1');
+    ocean.addColorStop(0.11, '#0c3a6e');
+    ocean.addColorStop(0.5, '#082952');
+    ocean.addColorStop(0.89, '#0e4382');
+    ocean.addColorStop(1.0, '#cbd5e1');
+    ctx.fillStyle = ocean;
+    ctx.fillRect(0, 0, 512, 256);
+
+    // Subtle glowing turquoise coastal shelves
+    ctx.fillStyle = 'rgba(34, 211, 238, 0.14)';
+    const drawBlob = (x: number, y: number, rx: number, ry: number, rot = 0) => {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rot);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    };
+    drawBlob(350, 92, 68, 42, -0.2);
+    drawBlob(275, 130, 38, 44, 0.25);
+    drawBlob(148, 108, 44, 48, -0.35);
+
+    // Major continental landforms (Eurasia / South Asia, Africa, Americas, Australia)
+    ctx.fillStyle = '#2d6a4f';
+    drawBlob(348, 84, 58, 30, -0.15); // Eurasia
+    drawBlob(362, 104, 18, 22, 0.1);  // Indian subcontinent
+    drawBlob(278, 124, 26, 36, 0.15); // Africa
+    drawBlob(142, 92, 30, 28, -0.3);  // North America
+    drawBlob(174, 152, 20, 32, 0.2);  // South America
+    drawBlob(426, 162, 22, 14, -0.1); // Australia
+
+    // Arid Sahara / Arabian / Thar ochre belts + Himalayan ridge highlight
+    ctx.fillStyle = '#b5835a';
+    drawBlob(286, 102, 28, 12, 0.05);
+    drawBlob(332, 96, 22, 11, -0.1);
+    drawBlob(426, 162, 12, 8, -0.1);
+
+    ctx.fillStyle = 'rgba(226, 232, 240, 0.65)';
+    drawBlob(358, 92, 16, 5, -0.12); // Himalayas / Tibetan snow ridge
+
+    // Subtle warm city light clusters
+    ctx.fillStyle = 'rgba(253, 230, 138, 0.45)';
+    for (const [lx, ly] of [[358, 99], [352, 106], [285, 84], [156, 86], [392, 88]]) {
+      ctx.beginPath();
+      ctx.arc(lx, ly, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const tex = new CanvasTexture(canvas);
+    tex.colorSpace = SRGBColorSpace;
+    this.texturesToDispose.push(tex);
+    return tex;
+  }
+
   private buildEarth(): void {
     const loader = new TextureLoader();
 
     // 1. Earth Solid Surface Sphere (Radius 1.80)
     const earthGeo = new SphereGeometry(1.80, 54, 40);
+    const placeholderTex = this.createInstantEarthPlaceholderTexture();
 
-    // Day Surface Texture: 4K NASA Blue Marble
-    const dayMap = loader.load(
-      `${ASSET_BASE}assets/textures/earth_atmos_4096.jpg`,
-      (tex) => {
-        tex.colorSpace = SRGBColorSpace;
-      },
-      undefined,
-      () => {
-        // Fallback to 2048 if 4096 is not reachable
-        const day2k = loader.load(`${ASSET_BASE}assets/textures/earth_atmos_2048.jpg`, (t) => {
-          t.colorSpace = SRGBColorSpace;
-        });
-        earthMat.map = day2k;
-        earthMat.needsUpdate = true;
-      }
-    );
-    this.texturesToDispose.push(dayMap);
-
-    // Surface Normal Map (4K topographical relief)
-    const normalMap = loader.load(
-      `${ASSET_BASE}assets/textures/earth_normal_4096.jpg`,
-      undefined,
-      undefined,
-      () => {
-        const norm2k = loader.load(`${ASSET_BASE}assets/textures/earth_normal_2048.jpg`);
-        earthMat.normalMap = norm2k;
-        earthMat.needsUpdate = true;
-      }
-    );
-    this.texturesToDispose.push(normalMap);
-
-    // Specular Ocean Reflectivity Map (4K ocean gloss)
-    const specularMap = loader.load(
-      `${ASSET_BASE}assets/textures/earth_specular_4096.jpg`,
-      undefined,
-      undefined,
-      () => {
-        const spec2k = loader.load(`${ASSET_BASE}assets/textures/earth_specular_2048.jpg`);
-        earthMat.roughnessMap = spec2k;
-        earthMat.needsUpdate = true;
-      }
-    );
-    this.texturesToDispose.push(specularMap);
-
-    // Night Lights Map (City clusters glowing on unlit hemisphere)
-    const lightsMap = loader.load(`${ASSET_BASE}assets/textures/earth_lights_2048.png`, (tex) => {
-      tex.colorSpace = SRGBColorSpace;
-    });
-    this.texturesToDispose.push(lightsMap);
-
+    // Create material with synchronous placeholder map so Three.js never binds an unloaded 1x1 black pixel
     const earthMat = new MeshStandardMaterial({
-      map: dayMap,
-      normalMap,
+      map: placeholderTex ?? undefined,
+      color: new Color(0xffffff),
       normalScale: new Vector2(0.85, 0.85),
-      roughnessMap: specularMap,
       roughness: 0.45,
       metalness: 0.05,
-      emissiveMap: lightsMap,
-      emissive: new Color(0xffd580),
-      emissiveIntensity: 0.65,
+      emissive: new Color(0x0c2d54),
+      emissiveIntensity: 0.38,
     });
 
     this.earthMesh = new Mesh(earthGeo, earthMat);
     this.earthMesh.name = 'LandingEarthMesh';
     this.earthGroup.add(this.earthMesh);
 
+    // Load 2K textures matching src/assets.ts so browser cache is 100% shared with core game
+    const dayMap = loader.load(
+      `${ASSET_BASE}assets/textures/earth_atmos_2048.jpg`,
+      (tex) => {
+        tex.colorSpace = SRGBColorSpace;
+        earthMat.map = tex;
+        earthMat.needsUpdate = true;
+      },
+    );
+    this.texturesToDispose.push(dayMap);
+
+    const normalMap = loader.load(
+      `${ASSET_BASE}assets/textures/earth_normal_2048.jpg`,
+      (tex) => {
+        earthMat.normalMap = tex;
+        earthMat.needsUpdate = true;
+      },
+    );
+    this.texturesToDispose.push(normalMap);
+
+    const specularMap = loader.load(
+      `${ASSET_BASE}assets/textures/earth_specular_2048.jpg`,
+      (tex) => {
+        earthMat.roughnessMap = tex;
+        earthMat.needsUpdate = true;
+      },
+    );
+    this.texturesToDispose.push(specularMap);
+
+    const lightsMap = loader.load(
+      `${ASSET_BASE}assets/textures/earth_lights_2048.png`,
+      (tex) => {
+        tex.colorSpace = SRGBColorSpace;
+        earthMat.emissiveMap = tex;
+        earthMat.emissive.setHex(0xffd580);
+        earthMat.emissiveIntensity = 0.65;
+        earthMat.needsUpdate = true;
+      },
+    );
+    this.texturesToDispose.push(lightsMap);
+
     // 2. Swirling Atmospheric Cloud Layer Sphere (Radius 1.822)
     const cloudGeo = new SphereGeometry(1.822, 40, 32);
-    const cloudMap = loader.load(`${ASSET_BASE}assets/textures/earth_clouds_1024.png`, (tex) => {
-      tex.colorSpace = SRGBColorSpace;
-    });
-    this.texturesToDispose.push(cloudMap);
-
     const cloudMat = new MeshStandardMaterial({
-      map: cloudMap,
       transparent: true,
       opacity: 0.58,
       depthWrite: false,
@@ -351,7 +405,19 @@ export class LandingScene {
 
     this.cloudMesh = new Mesh(cloudGeo, cloudMat);
     this.cloudMesh.name = 'LandingEarthClouds';
+    this.cloudMesh.visible = false;
     this.earthGroup.add(this.cloudMesh);
+
+    const cloudMap = loader.load(
+      `${ASSET_BASE}assets/textures/earth_clouds_1024.png`,
+      (tex) => {
+        tex.colorSpace = SRGBColorSpace;
+        cloudMat.map = tex;
+        cloudMat.needsUpdate = true;
+        this.cloudMesh.visible = true;
+      },
+    );
+    this.texturesToDispose.push(cloudMap);
 
     // 3. True Rayleigh Atmospheric Limb Fresnel Glow Shader (Zero hard cartoon rings)
     const atmoGeo = new SphereGeometry(1.84, 48, 36);
@@ -629,7 +695,7 @@ export class LandingScene {
     const startZ = this.camera.position.z;
     const targetZ = 3.6;
     const startTime = performance.now();
-    const duration = 900;
+    const duration = 450;
 
     return new Promise((resolve) => {
       const step = (now: number) => {

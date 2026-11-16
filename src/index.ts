@@ -27,6 +27,64 @@ export interface OrbitZeroLaunchConfig {
 }
 
 /**
+ * Lightweight desktop boot overlay shown while World.create() loads 3D scene textures & panels
+ * so desktop players never stare at a blank black screen between Landing and Mission Control.
+ */
+function showDesktopBootLoader(initialStage: string): { setStage: (s: string) => void; remove: () => void } {
+  if (typeof document === 'undefined') {
+    return { setStage: () => {}, remove: () => {} };
+  }
+  const existing = document.getElementById('oz-desktop-boot-loader');
+  if (existing) existing.remove();
+
+  const styleId = 'oz-desktop-boot-style';
+  if (!document.getElementById(styleId)) {
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = `
+      @keyframes ozBootSpin { to { transform: rotate(360deg); } }
+      @keyframes ozBootPulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+    `;
+    document.head.appendChild(style);
+  }
+
+  const root = document.createElement('div');
+  root.id = 'oz-desktop-boot-loader';
+  root.style.cssText = [
+    'position:fixed', 'inset:0', 'z-index:99998', 'display:flex', 'flex-direction:column',
+    'align-items:center', 'justify-content:center', 'gap:14px',
+    'background:radial-gradient(circle at 50% 42%, rgba(14,42,78,0.65), #040a17 72%)',
+    'color:#f8fafc', 'font-family:Inter,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif',
+    'pointer-events:auto', 'transition:opacity 0.22s ease',
+  ].join(';');
+  root.innerHTML = `
+    <div style="position:relative;width:64px;height:64px;display:flex;align-items:center;justify-content:center;">
+      <div style="position:absolute;inset:0;border-radius:50%;border:2px solid rgba(56,189,248,0.18);border-top-color:#38bdf8;border-right-color:#22d3ee;animation:ozBootSpin 1.1s linear infinite;"></div>
+      <div style="position:absolute;inset:10px;border-radius:50%;border:1.5px solid rgba(251,191,36,0.22);border-bottom-color:#fbbf24;animation:ozBootSpin 1.8s linear infinite reverse;"></div>
+      <div style="width:10px;height:10px;border-radius:50%;background:#38bdf8;box-shadow:0 0 14px #38bdf8;animation:ozBootPulse 1.4s ease-in-out infinite;"></div>
+    </div>
+    <div style="font-size:11px;font-weight:800;letter-spacing:2.4px;color:#38bdf8;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;">ORBIT ZERO // TELEMETRY INITIALIZATION</div>
+    <div id="oz-desktop-boot-stage" style="font-size:14px;font-weight:600;color:#cbd5e1;"></div>
+  `;
+  const stageEl = root.querySelector('#oz-desktop-boot-stage') as HTMLDivElement;
+  stageEl.textContent = initialStage;
+  document.body.appendChild(root);
+
+  let removed = false;
+  return {
+    setStage: (s: string) => {
+      if (!removed) stageEl.textContent = s;
+    },
+    remove: () => {
+      if (removed) return;
+      removed = true;
+      root.style.opacity = '0';
+      setTimeout(() => root.remove(), 220);
+    },
+  };
+}
+
+/**
  * Initializes the core ORBIT ZERO WebXR / Desktop game world.
  * Isolates the game lifecycle from the landing experience.
  */
@@ -59,44 +117,52 @@ export async function initOrbitZeroGame(
     unlockOrbitalAudioGesture();
     overlay.showLoading('Loading 3D cockpit & orbital globe...');
   }
+  const desktopBoot = !overlay && !config.onProgress
+    ? showDesktopBootLoader('Loading 3D cockpit & orbital globe...')
+    : null;
   config.onProgress?.('Loading 3D cockpit & orbital globe...');
 
-  let world: World;
   try {
-    world = await World.create(container, projectOptions);
-  } catch (err) {
-    if (overlay) overlay.showLoadFailed(err);
-    throw err;
+    let world: World;
+    try {
+      world = await World.create(container, projectOptions);
+    } catch (err) {
+      if (overlay) overlay.showLoadFailed(err);
+      throw err;
+    }
+
+    const stageText = 'Initializing mission console & telemetry...';
+    if (overlay) overlay.setLoadingStage(stageText);
+    desktopBoot?.setStage(stageText);
+    config.onProgress?.(stageText);
+
+    // Ensure hands-first pinch grabbing signal is enabled on IWSDK GrabSystem
+    const grabSystem = world.getSystem(GrabSystem);
+    if (grabSystem?.config?.useHandPinchForGrab) {
+      grabSystem.config.useHandPinchForGrab.value = true;
+    }
+
+    // Frame-time monitor + adaptive quality (refresh-rate fallback, lower resolution after a slow session).
+    // Register before MissionControlSystem so window.__ORBIT_PERF__.setDiagnosticsProvider is available in init().
+    // `?perf=1` adds the readout and the 60 s summary.
+    world.registerSystem(PerfMonitorSystem);
+    world.registerSystem(MissionControlSystem);
+
+    if (overlay) {
+      // requestSession() needs a live user gesture. World.create() above loads every critical asset first,
+      // which can outlast Chromium's ~5 s activation window on a cold Quest cache. Ask only while the gesture
+      // is live; otherwise (or if the request fails) the overlay offers a fresh tap with a plain message.
+      overlay.attach(world, { promptOnReturn: true });
+      const activation = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation;
+      const gestureLive = activation ? activation.isActive : true;
+      if (gestureLive) overlay.enter();
+      else overlay.showReady();
+    }
+
+    return world;
+  } finally {
+    desktopBoot?.remove();
   }
-
-  const stageText = 'Loading mission console & hand tracking...';
-  if (overlay) overlay.setLoadingStage(stageText);
-  config.onProgress?.(stageText);
-
-  // Ensure hands-first pinch grabbing signal is enabled on IWSDK GrabSystem
-  const grabSystem = world.getSystem(GrabSystem);
-  if (grabSystem?.config?.useHandPinchForGrab) {
-    grabSystem.config.useHandPinchForGrab.value = true;
-  }
-
-  // Frame-time monitor + adaptive quality (refresh-rate fallback, lower resolution after a slow session).
-  // Register before MissionControlSystem so window.__ORBIT_PERF__.setDiagnosticsProvider is available in init().
-  // `?perf=1` adds the readout and the 60 s summary.
-  world.registerSystem(PerfMonitorSystem);
-  world.registerSystem(MissionControlSystem);
-
-  if (overlay) {
-    // requestSession() needs a live user gesture. World.create() above loads every critical asset first,
-    // which can outlast Chromium's ~5 s activation window on a cold Quest cache. Ask only while the gesture
-    // is live; otherwise (or if the request fails) the overlay offers a fresh tap with a plain message.
-    overlay.attach(world, { promptOnReturn: true });
-    const activation = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation;
-    const gestureLive = activation ? activation.isActive : true;
-    if (gestureLive) overlay.enter();
-    else overlay.showReady();
-  }
-
-  return world;
 }
 
 /**

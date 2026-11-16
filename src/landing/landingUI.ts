@@ -563,6 +563,9 @@ export class LandingUI {
   }
 
   public transitionToSelection(): void {
+    if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
     this.heroScreenEl.classList.remove('oz-screen-active');
     this.heroScreenEl.classList.add('oz-screen-hidden');
     this.heroScreenEl.setAttribute('aria-hidden', 'true');
@@ -578,6 +581,9 @@ export class LandingUI {
   }
 
   public transitionToHero(): void {
+    if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
     this.selectionScreenEl.classList.remove('oz-screen-active');
     this.selectionScreenEl.classList.add('oz-screen-hidden');
     this.selectionScreenEl.setAttribute('aria-hidden', 'true');

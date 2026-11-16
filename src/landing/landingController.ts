@@ -46,10 +46,7 @@ export class LandingController {
       onBackToOrbit: () => this.handleBackToOrbit(),
     });
 
-    // Auto-sound strategy: Attempt immediate play on page load
-    this.audio.unlockAudio().catch(() => {});
-
-    // Ensure audio starts immediately on the VERY FIRST touch/click/keypress anywhere on screen
+    // Unlock audio cleanly on the very first user gesture (avoids Chromium AudioContext autoplay warnings).
     this.onFirstInteractionBound = () => {
       if (this.audio) {
         this.audio.unlockAudio().catch(() => {});
@@ -72,6 +69,16 @@ export class LandingController {
     if (this.audio) {
       await this.audio.unlockAudio();
       this.audio.playUiChime(960);
+    }
+    const base: string = (import.meta as any).env?.BASE_URL ?? './';
+    for (const rel of [
+      'scenes/main.iwsdk.scene.json',
+      'ui/briefing-panel.uikitml',
+      'ui/telemetry-hud.uikitml',
+      'ui/debrief-panel.uikitml',
+      'ui/mission-hud.uikitml',
+    ]) {
+      fetch(`${base}${rel}`).catch(() => {});
     }
   }
 

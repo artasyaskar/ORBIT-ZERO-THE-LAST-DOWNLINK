@@ -22,6 +22,7 @@ assert.ok(existsSync(join(dist, 'index.html')), 'dist/ is missing: run the produ
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
+  '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
   '.jpg': 'image/jpeg', '.png': 'image/png', '.glb': 'model/gltf-binary', '.mp4': 'video/mp4',
   '.md': 'text/markdown', '.uikitml': 'text/plain', '.wasm': 'application/wasm',
 };

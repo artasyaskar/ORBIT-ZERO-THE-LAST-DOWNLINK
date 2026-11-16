@@ -51,8 +51,8 @@ function chip(text: string, color: string, filled = false): string {
 function btn(action: string, label: string, color: string, opts: { disabled?: boolean; active?: boolean; title?: string; id?: string } = {}): string {
   const { disabled = false, active = false, title = '', id } = opts;
   return `<button ${id ? `id="${id}"` : ''} data-action="${action}" ${disabled ? 'disabled' : ''} title="${escapeHtml(title)}" style="
-    font: 800 12px/1.2 Inter, system-ui, sans-serif; letter-spacing:.4px; cursor:${disabled ? 'not-allowed' : 'pointer'};
-    padding:8px 12px; border-radius:7px; pointer-events:auto; white-space:nowrap;
+    font: 800 11px/1.15 Inter, system-ui, sans-serif; letter-spacing:.35px; cursor:${disabled ? 'not-allowed' : 'pointer'};
+    padding:5px 9px; border-radius:6px; pointer-events:auto; white-space:nowrap;
     color:${disabled ? '#475569' : active ? '#0b1220' : '#f8fafc'};
     background:${disabled ? 'rgba(15,23,42,.6)' : active ? color : 'rgba(15,23,42,.88)'};
     border:1.5px solid ${disabled ? '#334155' : color}; opacity:${disabled ? 0.65 : 1};">${label}</button>`;
@@ -142,11 +142,11 @@ export function requestTrackerHtml(state: MissionState, custom?: MissionScenario
     const status = sent ? 'SENT' : loaded ? 'LOADED' : covered.has(id) ? (meets ? 'ON BOARD' : 'WEAK') : 'NEEDED';
     const color = status === 'SENT' ? '#34d399' : status === 'LOADED' ? '#38bdf8' : status === 'ON BOARD' ? '#a3e635' : status === 'WEAK' ? '#f59e0b' : '#94a3b8';
     const bg = status === 'SENT' ? 'rgba(16,185,129,0.14)' : status === 'LOADED' ? 'rgba(56,189,248,0.14)' : status === 'WEAK' ? 'rgba(245,158,11,0.12)' : 'rgba(15,23,42,0.72)';
-    return `<span style="display:inline-flex;gap:6px;align-items:center;background:${bg};border:1px solid ${color};border-left:3px solid ${color};border-radius:7px;padding:3px 9px;font-size:11px;color:#e2e8f0;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06);">
-      <span style="font-weight:800;color:#0b1220;background:${color};border-radius:4px;padding:0 5px;font-size:10px;line-height:1.45;">${r.targetSectorId}</span>
+    return `<span style="display:inline-flex;gap:4px;align-items:center;background:${bg};border:1px solid ${color};border-left:2.5px solid ${color};border-radius:5px;padding:2px 7px;font-size:10px;color:#e2e8f0;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06);">
+      <span style="font-weight:800;color:#0b1220;background:${color};border-radius:3px;padding:0 4px;font-size:9.5px;line-height:1.4;">${r.targetSectorId}</span>
       <span style="font-weight:700;color:#f8fafc;">${escapeHtml(r.shortLabel.split('|')[1]?.trim() ?? r.id)}</span>
       <b style="font-family:monospace;color:#f8fafc;">${requestValue(r)}</b>
-      <span style="color:${color};font-weight:800;font-size:10px;letter-spacing:.4px;">${status}</span></span>`;
+      <span style="color:${color};font-weight:800;font-size:9.5px;letter-spacing:.35px;">${status}</span></span>`;
   }).join(' ');
 }
 
@@ -157,24 +157,23 @@ export function nextStepBannerHtml(step: NextStep, state: MissionState, custom?:
     : state.passStarted ? formatClock(state.passRemainingSec) : `${formatClock(state.passRemainingSec)} WAIT`;
   const lowPower = state.power < 15;
   const pill = (lbl: string, val: string, c: string) =>
-    `<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(15,23,42,0.85);border:1px solid rgba(148,163,184,0.22);border-radius:5px;padding:2px 7px;font:700 10px monospace;color:#cbd5e1;"><span style="color:#64748b;">${lbl}</span><b style="color:${c};">${val}</b></span>`;
+    `<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(15,23,42,0.85);border:1px solid rgba(148,163,184,0.22);border-radius:4px;padding:1px 6px;font:700 9.5px monospace;color:#cbd5e1;"><span style="color:#64748b;">${lbl}</span><b style="color:${c};">${val}</b></span>`;
   return `
     <div id="next-step-card" style="text-align:left;">
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;padding-bottom:6px;margin-bottom:6px;border-bottom:1px solid rgba(56,189,248,0.16);">
-        <span style="display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:800;letter-spacing:1.2px;color:${color};">
-          <span class="oz-live-dot" style="width:7px;height:7px;border-radius:50%;background:${color};box-shadow:0 0 8px ${color};display:inline-block;"></span>NEXT STEP
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;padding-bottom:4px;margin-bottom:4px;border-bottom:1px solid rgba(56,189,248,0.16);">
+        <span style="display:inline-flex;align-items:center;gap:5px;font-size:9.5px;font-weight:800;letter-spacing:1.1px;color:${color};">
+          <span class="oz-live-dot" style="width:6px;height:6px;border-radius:50%;background:${color};box-shadow:0 0 8px ${color};display:inline-block;"></span>NEXT STEP
         </span>
-        <div style="display:flex;gap:5px;flex-wrap:wrap;">
+        <div style="display:flex;gap:4px;flex-wrap:wrap;">
           ${pill('CLOCK', clock, state.passStarted && (state.passRemainingSec ?? 99) <= 25 ? '#f87171' : '#fbbf24')}
           ${pill('BATT', `${state.power}/${state.maxPower} Wh`, lowPower ? '#f87171' : '#38bdf8')}
           ${pill('MEM', `${state.storageUsed}/${state.maxStorage}`, state.storageUsed >= state.maxStorage ? '#f59e0b' : '#cbd5e1')}
           ${pill('LINK', `${state.downlinkCommittedSec.toFixed(1)}/${state.downlinkWindowSec.toFixed(1)}s`, state.downlinkCommittedSec > state.downlinkWindowSec + 0.01 ? '#f87171' : '#34d399')}
         </div>
       </div>
-      <div id="next-step-title" style="font-size:17px;font-weight:800;color:#f8fafc;letter-spacing:-0.2px;margin:2px 0;">${escapeHtml(step.title)}</div>
-      <div style="font-size:12.5px;color:#cbd5e1;line-height:1.45;">${escapeHtml(step.body)}</div>
-      <div style="font-size:11.5px;color:${color};font-weight:700;margin-top:4px;">▸ ${escapeHtml(step.desktop)}</div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">${requestTrackerHtml(state, custom)}</div>
+      <div id="next-step-title" style="font-size:14px;font-weight:800;color:#f8fafc;letter-spacing:-0.15px;margin:1px 0;">${escapeHtml(step.title)}</div>
+      <div style="font-size:11.5px;color:#cbd5e1;line-height:1.32;">${escapeHtml(step.body)} <span style="color:${color};font-weight:700;margin-left:4px;">▸ ${escapeHtml(step.desktop)}</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:5px;">${requestTrackerHtml(state, custom)}</div>
     </div>`;
 }
 
@@ -193,16 +192,14 @@ export function actionBarHtml(state: MissionState, custom?: MissionScenarioConfi
       const color = p.confidence === 'CONFIRMED' ? '#34d399' : p.confidence === 'PROBABLE' ? '#f59e0b' : '#f87171';
       const where = p.transmitted ? 'SENT' : p.queued ? `BAY ${(p.queueIndex ?? 0) + 1}` : 'TRAY';
       const isSel = p.id === state.selectedPacketId;
-      return `<button data-action="select:${p.id}" title="${escapeHtml(p.headline)}" style="pointer-events:auto;cursor:pointer;text-align:left;font:700 11px/1.3 Inter,system-ui;padding:5px 10px;border-radius:8px;
-        background:${isSel ? 'rgba(56,189,248,0.2)' : 'rgba(11,19,36,0.92)'};border:1.5px solid ${isSel ? '#f8fafc' : color};border-left:4px solid ${color};color:#f8fafc;box-shadow:${isSel ? '0 0 14px rgba(56,189,248,0.28)' : 'none'};">
-        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
-          <span>CUBE ${i + 1} · SEC ${p.sectorId} · ${SENSOR_PLAIN_GUIDE[p.sensorMode].label.split(' ')[0]}${p.processed ? ' · COMP' : ''}</span>
-          <span style="font-size:10px;color:#0b1220;background:${color};border-radius:4px;padding:0 5px;font-weight:800;">${where}</span>
-        </div>
-        <div style="color:${color};font-size:10.5px;margin-top:1px;">${p.confidence}${p.satisfiesRequestId ? ` · ${p.satisfiesRequestId.replace('_', ' ')}` : ' · off-target'} · ${p.transmitSec.toFixed(1)}s</div>
+      return `<button data-action="select:${p.id}" title="${escapeHtml(p.headline)}" style="pointer-events:auto;cursor:pointer;text-align:left;font:700 10.5px/1.2 Inter,system-ui;padding:3px 8px;border-radius:6px;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;
+        background:${isSel ? 'rgba(56,189,248,0.22)' : 'rgba(11,19,36,0.9)'};border:1.5px solid ${isSel ? '#f8fafc' : color};border-left:3.5px solid ${color};color:#f8fafc;box-shadow:${isSel ? '0 0 12px rgba(56,189,248,0.28)' : 'none'};">
+        <span>CUBE ${i + 1} · SEC ${p.sectorId} · ${SENSOR_PLAIN_GUIDE[p.sensorMode].label.split(' ')[0]}${p.processed ? ' · COMP' : ''}</span>
+        <span style="color:${color};font-size:10px;font-weight:800;">${p.confidence} · ${p.transmitSec.toFixed(1)}s</span>
+        <span style="font-size:9.5px;color:#0b1220;background:${color};border-radius:3px;padding:0 4px;font-weight:800;">${where}</span>
       </button>`;
     }).join('')
-    : '<span style="color:#94a3b8;font-size:11.5px;letter-spacing:0.2px;">No cubes yet — pick a sector on the globe, then click SCAN or press Space.</span>';
+    : '<span style="color:#94a3b8;font-size:11px;letter-spacing:0.2px;">No cubes yet — pick a sector on the globe, then click SCAN or press Space.</span>';
 
   const sensorButtons = sensors.map((m) => {
     const cost = getScanCost(budget, m);
@@ -233,12 +230,12 @@ export function actionBarHtml(state: MissionState, custom?: MissionScenarioConfi
     ];
 
   return `
-    <div style="display:flex;flex-direction:column;gap:7px;align-items:center;">
-      <div style="display:flex;gap:7px;flex-wrap:wrap;justify-content:center;align-items:center;">${cubeChips}</div>
-      ${live ? '' : `<div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:center;align-items:center;background:rgba(2,6,23,0.55);border:1px solid rgba(56,189,248,0.18);border-radius:9px;padding:4px 8px;"><span style="font-size:10px;color:#94a3b8;font-weight:800;letter-spacing:1px;padding:0 4px;">SENSOR [S]</span>${sensorButtons}</div>`}
-      <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;align-items:center;">
+    <div style="display:flex;flex-direction:column;gap:4px;align-items:center;">
+      <div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:center;align-items:center;">${cubeChips}</div>
+      ${live ? '' : `<div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center;align-items:center;background:rgba(2,6,23,0.5);border:1px solid rgba(56,189,248,0.18);border-radius:7px;padding:2px 6px;"><span style="font-size:9.5px;color:#94a3b8;font-weight:800;letter-spacing:0.9px;padding:0 3px;">SENSOR [S]</span>${sensorButtons}</div>`}
+      <div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:center;align-items:center;">
         ${actions.join('')}
-        <span style="width:1px;height:22px;background:rgba(148,163,184,0.22);margin:0 2px;"></span>
+        <span style="width:1px;height:18px;background:rgba(148,163,184,0.22);margin:0 1px;"></span>
         ${btn('hint', `ASK ARIA [A] -${SCORING.hintPenalty} pts`, '#a78bfa', { disabled: state.phase === 'DEBRIEF' || state.paused, id: 'tb-aria-hint' })}
         ${btn('pause', state.paused ? 'RESUME [Esc]' : 'PAUSE [Esc]', '#94a3b8')}
         ${btn('help', 'HELP [?]', '#94a3b8', { id: 'tb-shortcuts-btn' })}

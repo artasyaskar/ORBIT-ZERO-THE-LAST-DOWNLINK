@@ -1302,10 +1302,19 @@ export class DesktopControlsManager {
     }, 4000);
   }
 
+  private syncToastPosition(): void {
+    if (!this.toastEl) return;
+    const bannerBottom = this.bannerEl && this.bannerEl.style.display !== 'none' && this.bannerEl.offsetHeight > 0
+      ? this.bannerEl.offsetTop + this.bannerEl.offsetHeight + 6
+      : 128;
+    this.toastEl.style.top = `${bannerBottom}px`;
+  }
+
   private notifyAction(message: string, ok = true): void {
     this.lastActionMessage = message;
     this.lastActionOk = ok;
     if (this.toastEl) {
+      this.syncToastPosition();
       this.toastEl.innerText = message;
       this.toastEl.style.backgroundColor = ok ? 'rgba(6, 78, 59, 0.95)' : 'rgba(159, 18, 57, 0.95)';
       this.toastEl.style.borderColor = ok ? '#34d399' : '#f43f5e';
@@ -1317,7 +1326,7 @@ export class DesktopControlsManager {
           this.toastEl.style.opacity = '0';
           this.toastEl.style.transform = 'translate(-50%, 12px)';
         }
-      }, 4200);
+      }, 2400);
     }
   }
 
@@ -1371,6 +1380,21 @@ export class DesktopControlsManager {
         #orbit-zero-desktop-overlay button,
         #orbit-zero-campaign-btn { transition: none !important; }
         #orbit-zero-desktop-overlay .oz-live-dot { animation: none !important; }
+      }
+      @media (max-width: 960px), (max-height: 760px) {
+        #orbit-zero-hud-banner { padding: 6px 12px !important; }
+        #orbit-zero-bottom-toolbar { padding: 5px 8px !important; max-width: 94vw !important; }
+        #orbit-zero-bottom-toolbar button { font-size: 10px !important; padding: 4px 7px !important; }
+        #orbit-zero-aria-hud { width: 220px !important; max-width: 24vw !important; bottom: 10px !important; left: 10px !important; }
+      }
+      @media (max-width: 720px) {
+        #orbit-zero-brand-badge,
+        #orbit-zero-aria-hud,
+        #orbit-zero-hud-power { display: none !important; }
+        #orbit-zero-campaign-btn { top: 8px !important; left: 8px !important; padding: 5px 10px !important; font-size: 10px !important; }
+        #orbit-zero-hud-timer { top: 8px !important; right: 8px !important; min-width: 140px !important; font-size: 13px !important; padding: 5px 10px !important; }
+        #orbit-zero-hud-banner { top: 46px !important; min-width: 0 !important; width: 94vw !important; max-width: 94vw !important; }
+        #orbit-zero-bottom-toolbar { bottom: 6px !important; width: 96vw !important; }
       }
     `;
     this.containerEl.appendChild(hudStyle);
@@ -1451,14 +1475,14 @@ export class DesktopControlsManager {
     `;
     this.containerEl.appendChild(this.powerGaugeEl);
 
-    // 0c. Lower-Left Window Comms Card (ARIA-7 live guidance, docked cleanly above Recon badge)
+    // 0c. Lower-Left Window Comms Card (ARIA-7 live guidance tucked cleanly out of lower desk envelope)
     this.ariaHudEl = document.createElement('div');
     this.ariaHudEl.id = 'orbit-zero-aria-hud';
     this.ariaHudEl.style.cssText = `
       position: absolute;
-      bottom: 84px; left: 24px;
-      width: 320px;
-      max-width: 29vw;
+      bottom: 14px; left: 16px;
+      width: 260px;
+      max-width: 24vw;
       display: flex;
       flex-direction: column;
       pointer-events: none;
@@ -1579,18 +1603,18 @@ export class DesktopControlsManager {
     this.bannerEl.id = 'orbit-zero-hud-banner';
     this.bannerEl.style.cssText = `
       position: absolute;
-      top: 14px; left: 50%;
+      top: 10px; left: 50%;
       transform: translateX(-50%);
-      background: linear-gradient(160deg, rgba(6, 13, 27, 0.92), rgba(11, 22, 42, 0.88));
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border: 1px solid rgba(56, 189, 248, 0.38);
+      background: linear-gradient(160deg, rgba(6, 13, 27, 0.78), rgba(11, 22, 42, 0.72));
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(56, 189, 248, 0.36);
       border-top: 2px solid rgba(56, 189, 248, 0.65);
-      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.72), 0 0 22px rgba(56, 189, 248, 0.14);
-      border-radius: 12px;
-      padding: 11px 18px;
-      min-width: 480px;
-      max-width: 680px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.65), 0 0 18px rgba(56, 189, 248, 0.12);
+      border-radius: 10px;
+      padding: 7px 14px;
+      min-width: min(380px, 90vw);
+      max-width: min(560px, 92vw);
       color: #f8fafc;
       pointer-events: auto;
       text-align: center;
@@ -1600,26 +1624,26 @@ export class DesktopControlsManager {
     `;
     this.containerEl.appendChild(this.bannerEl);
 
-    // 2. Action Toast Notification Pill (Positioned cleanly below top banner)
+    // 2. Action Toast Notification Pill (Positioned cleanly below compact top banner)
     this.toastEl = document.createElement('div');
     this.toastEl.id = 'orbit-zero-hud-action';
     this.toastEl.style.cssText = `
       position: absolute;
-      top: 184px; left: 50%;
+      top: 128px; left: 50%;
       transform: translate(-50%, -10px);
-      background: rgba(6, 13, 27, 0.92);
+      background: rgba(6, 13, 27, 0.88);
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
       border: 1px solid rgba(56, 189, 248, 0.45);
       color: #38bdf8;
-      padding: 6px 16px;
+      padding: 4px 12px;
       border-radius: 9999px;
-      font-size: 11px;
+      font-size: 10.5px;
       font-weight: 700;
-      letter-spacing: 0.5px;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.65), 0 0 12px rgba(56, 189, 248, 0.2);
+      letter-spacing: 0.4px;
+      box-shadow: 0 4px 18px rgba(0, 0, 0, 0.6), 0 0 10px rgba(56, 189, 248, 0.18);
       opacity: 0;
-      transition: opacity 0.25s ease, transform 0.25s ease;
+      transition: opacity 0.22s ease, transform 0.22s ease;
       pointer-events: none;
       z-index: 10000;
     `;
@@ -1631,16 +1655,16 @@ export class DesktopControlsManager {
     this.toolbarEl.id = 'orbit-zero-bottom-toolbar';
     this.toolbarEl.style.cssText = `
       position: absolute;
-      bottom: 10px; left: 50%;
+      bottom: 8px; left: 50%;
       transform: translateX(-50%);
-      background: linear-gradient(180deg, rgba(8, 15, 30, 0.88), rgba(4, 9, 20, 0.92));
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border: 1px solid rgba(56, 189, 248, 0.32);
-      border-top: 1.5px solid rgba(56, 189, 248, 0.48);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.72), 0 0 18px rgba(56, 189, 248, 0.12);
-      border-radius: 14px;
-      padding: 8px 14px;
+      background: linear-gradient(180deg, rgba(8, 15, 30, 0.78), rgba(4, 9, 20, 0.84));
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      border-top: 1.5px solid rgba(56, 189, 248, 0.46);
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.68), 0 0 16px rgba(56, 189, 248, 0.1);
+      border-radius: 11px;
+      padding: 6px 10px;
       display: flex;
       gap: 6px;
       align-items: center;
@@ -1938,6 +1962,7 @@ export class DesktopControlsManager {
 
     // 1. Render Top Banner (Only visible in Downlink / Debrief)
     this.renderTopBanner(state);
+    this.syncToastPosition();
 
     // 1b. Render Tactical Reconnaissance Card (Live Sector Feasibility)
     this.renderReconCard(state);
@@ -2027,12 +2052,12 @@ export class DesktopControlsManager {
     const borderColor = isCritical ? 'rgba(239, 68, 68, 0.85)' : 'rgba(167, 139, 250, 0.52)';
     const badgeColor = isCritical ? '#f87171' : '#c4b5fd';
     this.ariaHudEl.innerHTML = `
-      <div id="aria-subtitle-bar" style="background: linear-gradient(145deg, rgba(6, 12, 26, 0.92), rgba(14, 21, 44, 0.88)); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid ${borderColor}; border-left: 3px solid ${badgeColor}; border-radius: 8px; padding: 9px 14px; display: flex; flex-direction: column; gap: 4px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65);">
-        <div id="aria-subtitle-badge" style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 800; color: ${badgeColor}; letter-spacing: 1.2px;">
-          <span class="oz-live-dot" style="width: 6px; height: 6px; border-radius: 50%; background: ${badgeColor}; box-shadow: 0 0 8px ${badgeColor}; display: inline-block;"></span>
+      <div id="aria-subtitle-bar" style="background: linear-gradient(145deg, rgba(6, 12, 26, 0.84), rgba(14, 21, 44, 0.8)); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid ${borderColor}; border-left: 3px solid ${badgeColor}; border-radius: 7px; padding: 6px 10px; display: flex; flex-direction: column; gap: 2px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);">
+        <div id="aria-subtitle-badge" style="display: flex; align-items: center; gap: 5px; font-size: 9.5px; font-weight: 800; color: ${badgeColor}; letter-spacing: 1px;">
+          <span class="oz-live-dot" style="width: 5px; height: 5px; border-radius: 50%; background: ${badgeColor}; box-shadow: 0 0 8px ${badgeColor}; display: inline-block;"></span>
           ${escapeHtml(badge)}
         </div>
-        <div id="aria-subtitle-text" style="font-size: 12.5px; color: #e2e8f0; font-weight: 500; line-height: 1.45;">${escapeHtml(line)}</div>
+        <div id="aria-subtitle-text" style="font-size: 11px; color: #e2e8f0; font-weight: 500; line-height: 1.35;">${escapeHtml(line)}</div>
       </div>
     `;
   }
@@ -2067,14 +2092,16 @@ export class DesktopControlsManager {
     }
     const cx = (worldPos.x * 0.5 + 0.5) * window.innerWidth;
     const cy = (-(worldPos.y * 0.5) + 0.5) * window.innerHeight;
+    const calloutLeft = Math.min(Math.max(16, Math.round(cx + 48)), Math.max(16, window.innerWidth - 230));
+    const calloutTop = Math.min(Math.max(96, Math.round(cy - 28)), Math.max(96, window.innerHeight - 130));
     this.sectorCalloutEl.style.display = 'flex';
-    this.sectorCalloutEl.style.left = `${Math.round(cx + 36)}px`;
-    this.sectorCalloutEl.style.top = `${Math.round(cy - 24)}px`;
+    this.sectorCalloutEl.style.left = `${calloutLeft}px`;
+    this.sectorCalloutEl.style.top = `${calloutTop}px`;
     this.sectorCalloutEl.innerHTML = `
-      <div style="background: rgba(6, 12, 24, 0.86); border: 1px solid rgba(56, 189, 248, 0.55); border-radius: 5px; padding: 6px 12px;">
-        <div style="font-size: 12px; font-weight: 800; color: #38bdf8; letter-spacing: 1px;">SECTOR ${secId} · ${escapeHtml(secCfg.name.toUpperCase())}</div>
-        <div style="font-size: 12px; color: #e2e8f0; margin-top: 2px;">Weather: <b>${describeWeather(secCfg.cloudCover)}</b></div>
-        <div style="font-size: 11px; color: ${req ? '#34d399' : '#94a3b8'}; font-weight: 700;">${req ? `${escapeHtml(req.shortLabel.split('|')[1]?.trim() ?? req.id)} · ${requestValue(req)} pts` : 'No ground request here'}</div>
+      <div style="background: rgba(6, 12, 24, 0.82); border: 1px solid rgba(56, 189, 248, 0.5); border-radius: 5px; padding: 4px 9px;">
+        <div style="font-size: 10.5px; font-weight: 800; color: #38bdf8; letter-spacing: 0.8px;">SECTOR ${secId} · ${escapeHtml(secCfg.name.toUpperCase())}</div>
+        <div style="font-size: 10.5px; color: #e2e8f0; margin-top: 1px;">Weather: <b>${describeWeather(secCfg.cloudCover)}</b></div>
+        <div style="font-size: 10px; color: ${req ? '#34d399' : '#94a3b8'}; font-weight: 700;">${req ? `${escapeHtml(req.shortLabel.split('|')[1]?.trim() ?? req.id)} · ${requestValue(req)} pts` : 'No ground request here'}</div>
       </div>
     `;
   }
@@ -2119,8 +2146,8 @@ export class DesktopControlsManager {
     const custom = this.host.engine.getActiveCustomScenario();
 
     this.bannerEl.style.borderColor = 'rgba(56, 189, 248, 0.35)';
-    this.bannerEl.style.maxWidth = '720px';
-    this.bannerEl.style.minWidth = '520px';
+    this.bannerEl.style.maxWidth = 'min(560px, 92vw)';
+    this.bannerEl.style.minWidth = 'min(380px, 90vw)';
     this.bannerEl.style.maxHeight = '';
     this.bannerEl.style.overflowY = '';
 
